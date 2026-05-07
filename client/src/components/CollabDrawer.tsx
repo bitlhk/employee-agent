@@ -105,6 +105,9 @@ function normalizeUiConfig(agent: BusinessAgent): AgentUiConfig {
 }
 
 function renderAgentIcon(agent: BusinessAgent, size = 16) {
+  if (LEGACY_AGENT_CATEGORY[agent.id]) {
+    return agentIcon(agent.id, size);
+  }
   const icon = agent.icon?.trim();
   if (icon && icon.length <= 4 && !icon.startsWith("/")) {
     return <span style={{ fontSize: size + 2, lineHeight: 1 }}>{icon}</span>;
