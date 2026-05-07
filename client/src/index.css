@@ -4393,19 +4393,28 @@ html:has(:root[data-theme-mode="light"]) body {
   }
 }
 
-/* Main chat input focus: keep a neutral focus state.
-   ChatInput sets border/shadow inline, so this final override must be important.
-   The inner textarea intentionally keeps outline/ring disabled. */
-.lingxia-input-wrap:focus-within {
-  border-color: var(--oc-border-strong) !important;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.14),
-    0 1px 4px rgba(0,0,0,0.08) !important;
+/* Main chat input focus: highlight the composer container, not the textarea. */
+.lingxia-input-wrap.main-chat-composer:focus-within {
+  border-color: color-mix(in oklab, var(--oc-accent) 34%, var(--oc-border-strong)) !important;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.16),
+    0 0 0 3px rgba(255,92,92,0.07),
+    0 2px 14px rgba(0,0,0,0.12) !important;
 }
 
-:root[data-theme-mode="light"] .lingxia-input-wrap:focus-within {
-  border-color: rgba(0, 0, 0, 0.16) !important;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08),
-    0 1px 4px rgba(0, 0, 0, 0.04) !important;
+:root[data-theme-mode="light"] .lingxia-input-wrap.main-chat-composer:focus-within {
+  border-color: color-mix(in oklab, var(--oc-accent) 26%, rgba(0, 0, 0, 0.18)) !important;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.9),
+    0 0 0 3px rgba(255,92,92,0.08),
+    0 2px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+.lingxia-input-wrap.main-chat-composer textarea:focus,
+.lingxia-input-wrap.main-chat-composer textarea:focus-visible {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 /* ============================================================
