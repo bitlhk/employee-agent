@@ -157,15 +157,12 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error("read file failed"));
-    reader.onload = () => {
-      const value = String(reader.result || "");
-      resolve(value.includes(",") ? value.split(",").pop() || "" : value);
-    };
-    reader.readAsDataURL(file);
+async function fetchSkillPackageBinary<T>(url: string, file: File, params: Record<string, string>): Promise<T> {
+  const qs = new URLSearchParams(params);
+  return fetchJson<T>(`${url}?${qs.toString()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: await file.arrayBuffer(),
   });
 }
 
@@ -563,17 +560,19 @@ export function SkillsPage({ adoptId }: {
   };
 
   const onUploadFile = async (file: File) => {
+    if (!adoptId) {
+      toast.error("请先进入具体灵虾实例后再上传技能");
+      return;
+    }
     if (!/\.(zip|skill)$/i.test(file.name)) {
       toast.error("请上传 .zip 或 .skill 技能包");
       return;
     }
     setUploading(true);
     try {
-      const contentBase64 = await readFileAsBase64(file);
-      const inspect = await fetchJson<SkillPackageInspectResponse>("/api/claw/skill-package/inspect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adoptId, filename: file.name, contentBase64 }),
+      const inspect = await fetchSkillPackageBinary<SkillPackageInspectResponse>("/api/claw/skill-package/inspect", file, {
+        adoptId,
+        filename: file.name,
       });
       const defaultName = inspect.skill.displayName || inspect.skill.skillId || file.name.replace(/\.(zip|skill)$/i, "");
       const displayName = prompt("技能名称", defaultName)?.trim();
@@ -583,10 +582,11 @@ export function SkillsPage({ adoptId }: {
         return;
       }
       const description = prompt("技能说明", inspect.skill.description || "")?.trim() || inspect.skill.description || "";
-      await fetchJson("/api/claw/skill-package/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adoptId, filename: file.name, contentBase64, displayName, description }),
+      await fetchSkillPackageBinary("/api/claw/skill-package/upload", file, {
+        adoptId,
+        filename: file.name,
+        displayName,
+        description,
       });
       if (inspect.skill.warnings?.length) {
         toast.warning(`技能已上传，静态扫描提示 ${inspect.skill.warnings.length} 项，请在详情中确认。`);

@@ -26,6 +26,46 @@ function registryErrorStatus(kind?: string): number {
   return 500;
 }
 
+function decodeParam(value: unknown): string {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch {
+    return String(value || "");
+  }
+}
+
+async function readSkillPackagePayload(req: express.Request): Promise<{
+  adoptId: string;
+  filename: string;
+  fileBuf: Buffer;
+  displayName: string;
+  description: string;
+}> {
+  const body = (req.body || {}) as any;
+  const adoptId = String(body.adoptId || req.query.adoptId || "").trim();
+  const filename = decodeParam(body.filename || req.query.filename || req.header("x-skill-filename") || "").trim();
+  const displayName = String(body.displayName || req.query.displayName || "").trim();
+  const description = String(body.description || req.query.description || "").trim();
+  const contentBase64 = String(body.contentBase64 || "").trim();
+  if (contentBase64) {
+    return { adoptId, filename, fileBuf: Buffer.from(contentBase64, "base64"), displayName, description };
+  }
+
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as any);
+    total += buf.length;
+    if (total > MAX_SKILL_PACKAGE_BYTES) {
+      const err = new Error("file too large (max 30MB)") as Error & { statusCode?: number };
+      err.statusCode = 413;
+      throw err;
+    }
+    chunks.push(buf);
+  }
+  return { adoptId, filename, fileBuf: Buffer.concat(chunks), displayName, description };
+}
+
 export function registerSkillRoutes(app: express.Express) {
   app.get("/api/claw/skills/registry", async (req, res) => {
     try {
@@ -174,10 +214,7 @@ export function registerSkillRoutes(app: express.Express) {
 
   app.post("/api/claw/skill-package/inspect", async (req, res) => {
     try {
-      const body = (req.body || {}) as any;
-      const adoptId = String(body.adoptId || "").trim();
-      const filename = String(body.filename || "").trim();
-      const contentBase64 = String(body.contentBase64 || "").trim();
+      const { adoptId, filename, fileBuf } = await readSkillPackagePayload(req);
 
       if (!adoptId) {
         res.status(400).json({ error: "adoptId required" });
@@ -189,13 +226,11 @@ export function registerSkillRoutes(app: express.Express) {
         res.status(400).json({ error: "only .zip or .skill allowed" });
         return;
       }
-      if (!contentBase64) {
-        res.status(400).json({ error: "contentBase64 required" });
+      if (fileBuf.length <= 0) {
+        res.status(400).json({ error: "file content required" });
         return;
       }
-
-      const fileBuf = Buffer.from(contentBase64, "base64");
-      if (fileBuf.length <= 0 || fileBuf.length > MAX_SKILL_PACKAGE_BYTES) {
+      if (fileBuf.length > MAX_SKILL_PACKAGE_BYTES) {
         res.status(400).json({ error: "file too large (max 30MB)" });
         return;
       }
@@ -214,18 +249,13 @@ export function registerSkillRoutes(app: express.Express) {
       });
     } catch (e: any) {
       console.error("[skill-package inspect] failed", e);
-      res.status(400).json({ error: String(e?.message || "inspect skill package failed") });
+      res.status(Number(e?.statusCode || 400)).json({ error: String(e?.message || "inspect skill package failed") });
     }
   });
 
   app.post("/api/claw/skill-package/upload", async (req, res) => {
     try {
-      const body = (req.body || {}) as any;
-      const adoptId = String(body.adoptId || "").trim();
-      const filename = String(body.filename || "").trim();
-      const contentBase64 = String(body.contentBase64 || "").trim();
-      const requestedName = String(body.displayName || "").trim();
-      const requestedDescription = String(body.description || "").trim();
+      const { adoptId, filename, fileBuf, displayName: requestedName, description: requestedDescription } = await readSkillPackagePayload(req);
 
       if (!adoptId) {
         res.status(400).json({ error: "adoptId required" });
@@ -237,13 +267,11 @@ export function registerSkillRoutes(app: express.Express) {
         res.status(400).json({ error: "only .zip or .skill allowed" });
         return;
       }
-      if (!contentBase64) {
-        res.status(400).json({ error: "contentBase64 required" });
+      if (fileBuf.length <= 0) {
+        res.status(400).json({ error: "file content required" });
         return;
       }
-
-      const fileBuf = Buffer.from(contentBase64, "base64");
-      if (fileBuf.length <= 0 || fileBuf.length > MAX_SKILL_PACKAGE_BYTES) {
+      if (fileBuf.length > MAX_SKILL_PACKAGE_BYTES) {
         res.status(400).json({ error: "file too large (max 30MB)" });
         return;
       }
@@ -317,7 +345,7 @@ export function registerSkillRoutes(app: express.Express) {
       });
     } catch (e: any) {
       console.error("[skill-package upload] failed", e);
-      res.status(500).json({ error: String(e?.message || "skill package upload failed") });
+      res.status(Number(e?.statusCode || 500)).json({ error: String(e?.message || "skill package upload failed") });
     }
   });
 
