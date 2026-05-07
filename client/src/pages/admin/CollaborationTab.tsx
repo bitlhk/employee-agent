@@ -152,7 +152,9 @@ export function CollaborationTab() {
 
   const utils = trpc.useUtils();
   const { data, isLoading, refetch, isFetching } = trpc.collabSpaces.list.useQuery();
-  const { data: memberData, isLoading: membersLoading, refetch: refetchMembers } = trpc.collabMembers.list.useQuery(undefined, { enabled: section === "members" });
+  const shouldLoadMembers = section === "members" || typeof selectedId === "number";
+  const { data: memberData, isLoading: membersLoading, isFetching: membersFetching, refetch: refetchMembers } = trpc.collabMembers.list.useQuery(undefined, { enabled: shouldLoadMembers });
+  const membersBusy = membersLoading || membersFetching;
   const spaces = Array.isArray(data) ? data : [];
   const members = Array.isArray(memberData) ? memberData : [];
 
@@ -160,6 +162,12 @@ export function CollaborationTab() {
     if (typeof selectedId !== "number") return null;
     return spaces.find((space) => space.id === selectedId) || null;
   }, [selectedId, spaces]);
+
+  useEffect(() => {
+    if (typeof selectedId === "number") {
+      void refetchMembers();
+    }
+  }, [selectedId, refetchMembers]);
 
   const selectedSpaceMembers = useMemo(() => {
     if (!selectedSpace) return [];
@@ -369,8 +377,8 @@ export function CollaborationTab() {
     : [];
 
   return (
-    <div className="space-y-6">
-      <Card className="border-border/50 bg-white/80 text-gray-900">
+    <div className="admin-collaboration-tab space-y-6">
+      <Card className="admin-collaboration-card">
         <CardHeader className="flex flex-row items-start justify-between gap-4">
           <div>
             <CardTitle>{T.pageTitle}</CardTitle>
@@ -383,7 +391,7 @@ export function CollaborationTab() {
         </CardHeader>
       </Card>
 
-      <div className="flex flex-wrap gap-2 rounded-xl border border-gray-200 bg-white/80 p-2">
+      <div className="admin-collaboration-switcher flex flex-wrap gap-2 rounded-xl border p-2">
         <Button variant={section === "spaces" ? "default" : "ghost"} onClick={() => setSection("spaces")} className="gap-2">
           <Building2 className="h-4 w-4" />
           {T.spacesTab}
@@ -396,7 +404,7 @@ export function CollaborationTab() {
 
       {section === "spaces" ? (
         <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Card className="border-border/50 bg-white/80 text-gray-900">
+          <Card className="admin-collaboration-card">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -427,12 +435,9 @@ export function CollaborationTab() {
                       key={space.id}
                       type="button"
                       onClick={() => setSelectedId(space.id)}
-                      className={`w-full rounded-xl border p-3 text-left transition ${
-                        active
-                          ? "border-primary bg-primary/5 shadow-sm"
-                          : "border-border/60 hover:border-primary/40 hover:bg-muted/40"
-                      }`}
+                      className="admin-collaboration-space-button w-full rounded-xl border p-3 text-left transition"
                       aria-current={active ? "true" : undefined}
+                      data-active={active ? "true" : "false"}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -452,7 +457,7 @@ export function CollaborationTab() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/50 bg-white/80 text-gray-900">
+          <Card className="admin-collaboration-card">
             <CardHeader>
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -490,9 +495,14 @@ export function CollaborationTab() {
                       <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-4">
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <div className="text-sm font-medium text-gray-900">{T.spaceMembers}</div>
-                          <Badge variant="outline">{selectedSpaceMembers.length}</Badge>
+                          <Badge variant="outline">{membersBusy ? "..." : selectedSpaceMembers.length}</Badge>
                         </div>
-                        {selectedSpaceMembers.length === 0 ? (
+                        {membersBusy ? (
+                          <div className="flex items-center text-sm text-muted-foreground">
+                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                            {T.loading}
+                          </div>
+                        ) : selectedSpaceMembers.length === 0 ? (
                           <div className="text-sm text-gray-500">{T.emptySpaceMembers}</div>
                         ) : (
                           <div className="grid gap-2 sm:grid-cols-2">
@@ -562,7 +572,7 @@ export function CollaborationTab() {
           </Card>
         </div>
       ) : (
-        <Card className="border-border/50 bg-white/80 text-gray-900">
+        <Card className="admin-collaboration-card">
           <CardHeader>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -600,7 +610,7 @@ export function CollaborationTab() {
               </div>
             )}
 
-            {membersLoading ? (
+            {membersBusy ? (
               <div className="flex items-center justify-center py-12 text-muted-foreground"><RefreshCw className="mr-2 h-4 w-4 animate-spin" />{T.loading}</div>
             ) : (
               <div className="overflow-hidden rounded-xl border">

@@ -17,7 +17,8 @@ import path from "path";
 import { eq } from "drizzle-orm";
 import { resolveRequesterUserId } from "./helpers";
 
-const COOP_UPLOAD_DIR = "/root/linggan-platform/data/coop-uploads";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
+const COOP_UPLOAD_DIR = `${APP_ROOT}/data/coop-uploads`;
 const MAX_BYTES = 20 * 1024 * 1024; // 20MB
 
 // 文件名安全化：只保留字母/数字/中文/常见标点，截断 200 字符

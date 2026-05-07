@@ -8,8 +8,8 @@
  * - get_user_channels: 查询可用渠道
  */
 import { readFileSync } from "fs";
+import { INTERNAL_BASE_URL as BASE } from "./helpers";
 
-const BASE = "http://127.0.0.1:5180";
 const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
 const ADOPT_ID = process.env.LINGXIA_ADOPT_ID || "";
 

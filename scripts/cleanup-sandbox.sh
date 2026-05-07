@@ -2,8 +2,12 @@
 # 清理超过12小时的 trial sandbox 容器（保留 main 容器）
 # 由 cron 每小时执行
 
-LOG="/root/linggan-platform/logs/sandbox-cleanup.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_ROOT="${APP_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+LOG="${SANDBOX_CLEANUP_LOG:-${APP_ROOT}/logs/sandbox-cleanup.log}"
 THRESHOLD_HOURS=12
+
+mkdir -p "$(dirname "$LOG")"
 
 count=0
 for cid in $(docker ps -q --filter "name=openclaw-sbx-agent-trial_"); do

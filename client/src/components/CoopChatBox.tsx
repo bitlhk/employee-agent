@@ -15,15 +15,13 @@ import { useEffect, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Loader2, Send, Sparkles, ExternalLink, Square } from "lucide-react";
-import { matchCollabAgent, buildCollabSuggestionMd, type CollabAgent } from "@/lib/collabAgents";
+import { Loader2, Send, Sparkles, Square } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { CoopSubmitModal, type SubmitAttachment } from "@/components/CoopSubmitModal";
 
 type ChatMsg = {
   role: "user" | "assistant";
   text: string;
-  collabSuggestion?: CollabAgent | null; // 推荐卡片
 };
 
 interface CoopChatBoxProps {
@@ -61,19 +59,6 @@ export function CoopChatBox({ sessionId, requestId, subtask, coopTitle, onSubmit
     if (streaming || !myAdoptId) return;
     const text = input.trim();
     if (!text) return;
-
-    // 推荐卡片检测（复用 collabAgents.ts，跟主聊天同源规则）
-    const collab = matchCollabAgent(text);
-    if (collab) {
-      const cardMd = buildCollabSuggestionMd(collab);
-      setMsgs((prev) => [
-        ...prev,
-        { role: "user", text },
-        { role: "assistant", text: cardMd, collabSuggestion: collab },
-      ]);
-      setInput("");
-      return;
-    }
 
     setMsgs((prev) => [
       ...prev,
@@ -172,7 +157,7 @@ export function CoopChatBox({ sessionId, requestId, subtask, coopTitle, onSubmit
 
   // 收集本会话所有 assistant text（提交 Modal 用来生成草稿）
   const assistantTexts = msgs
-    .filter((m) => m.role === "assistant" && !m.collabSuggestion)
+    .filter((m) => m.role === "assistant")
     .map((m) => m.text);
 
   // 解析本会话所有 __files: marker → 提交 Modal 的附件 checkbox 列表
@@ -259,26 +244,6 @@ export function CoopChatBox({ sessionId, requestId, subtask, coopTitle, onSubmit
                 style={{ overflowWrap: "anywhere" }}
               >
                 {m.text || (streaming && i === msgs.length - 1 ? <span className="opacity-60">▌</span> : null)}
-                {/* 推荐卡片：跳到 CollabDrawer 对应 task panel */}
-                {m.collabSuggestion ? (
-                  <Button
-                    size="sm"
-                    className="mt-2 h-7 text-xs"
-                    onClick={() => {
-                      try {
-                        sessionStorage.setItem("collab_prefill", JSON.stringify({
-                          agentId: m.collabSuggestion!.id,
-                          prompt: input || subtask,
-                        }));
-                      } catch {}
-                      // 跳到主聊天页 + 自动打开 CollabDrawer + 切到 task panel（CollabDrawer.tsx:1177 已支持读取）
-                      window.open("/?openCollabDrawer=1", "_blank");
-                      toast.info(`已在新标签页打开「${m.collabSuggestion!.name}」，完成后回这里提交结果`);
-                    }}
-                  >
-                    {m.collabSuggestion.emoji} 打开 {m.collabSuggestion.name} <ExternalLink className="w-3 h-3 ml-1" />
-                  </Button>
-                ) : null}
               </div>
             </div>
           ))

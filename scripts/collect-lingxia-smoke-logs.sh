@@ -3,9 +3,11 @@ set -euo pipefail
 
 ACTION="${1:-}"
 RUN_ID="${2:-}"
-ROOT="${LINGGAN_ROOT:-/root/linggan-platform}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${LINGGAN_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 STATE_DIR="${SMOKE_STATE_DIR:-/tmp/lingxia-smoke}"
 LOG_DIR="${SMOKE_LOG_DIR:-/tmp/lingxia-smoke-logs}"
+PM2_LOG_ROOT="${PM2_LOG_ROOT:-${HOME}/.pm2/logs}"
 
 if [[ -z "$ACTION" || -z "$RUN_ID" ]]; then
   echo "Usage: $0 start|finish SMOKE-RUN-ID" >&2
@@ -20,7 +22,7 @@ OUT_FILE="$LOG_DIR/$RUN_ID.log"
 critical_pattern='CRON-LEGACY|CRON-RUNS-LEGACY|using legacy notify fallback|Unsupported channel|CRON-ORPHAN|CRON-DELIVERY|CRON-WATCHER|CHAT-DEDUP|VERSION-DOWNGRADE|SKILL-REGISTRY|SKILL-RECONCILE|SKILL-MARKET|thinking|<think|recover.*failed|send failed|auth_failed|channel_unreachable|sync_failed|ERROR|Error'
 
 current_log_files() {
-  find /root/.pm2/logs -maxdepth 1 -type f \
+  find "$PM2_LOG_ROOT" -maxdepth 1 -type f \
     \( -name 'linggan-claw*.log' -o -name 'hi-agent*.log' -o -name 'agent-kernel*.log' \) \
     ! -name '*__*.log' \
     2>/dev/null | sort

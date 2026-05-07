@@ -10,8 +10,7 @@
  */
 import path from "path";
 import { existsSync, statSync, readFileSync } from "fs";
-
-const HERMES_HOME_BASE = process.env.HERMES_HOME_BASE || "/root/.hermes/profiles";
+import { hermesProfileDir } from "./helpers";
 
 const HERMES_USER_FILE_LIMIT = 256 * 1024;   // USER.md — agent's knowledge of the user
 const HERMES_MEMORY_FILE_LIMIT = 256 * 1024; // MEMORY.md — agent's own working memory
@@ -32,7 +31,7 @@ export const HERMES_CORE_FILES: HermesCoreFile[] = [
 export function adoptIdToProfilePath(adoptId: string): string | null {
   const m = String(adoptId || "").match(/^lgh-([a-z0-9][a-z0-9_-]{0,63})$/);
   if (!m) return null;
-  return path.join(HERMES_HOME_BASE, m[1]);
+  return hermesProfileDir(m[1]);
 }
 
 export type HermesPathResolved = { ok: true; path: string; max: number } | { ok: false; reason: string };

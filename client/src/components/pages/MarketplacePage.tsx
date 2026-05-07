@@ -3,6 +3,7 @@ import {
   BarChart3,
   BriefcaseBusiness,
   Check,
+  Compass,
   Database,
   Download,
   FileText,
@@ -18,7 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-type CategoryKey = "all" | "writing" | "finance" | "dev" | "general" | "data";
+type OriginKey = "opensource" | "squad";
 
 const CATEGORY_MAP: Record<string, { label: string; Icon: ComponentType<{ size?: number; className?: string }> }> = {
   all: { label: "全部", Icon: Layers },
@@ -30,6 +31,11 @@ const CATEGORY_MAP: Record<string, { label: string; Icon: ComponentType<{ size?:
   data: { label: "数据分析", Icon: Database },
 };
 
+const ORIGIN_META: Record<OriginKey, { label: string; Icon: ComponentType<{ size?: number; className?: string }> }> = {
+  opensource: { label: "开源社区", Icon: Compass },
+  squad: { label: "中队原创", Icon: Sparkles },
+};
+
 interface MarketSkill {
   id: number;
   skillId: string;
@@ -39,6 +45,7 @@ interface MarketSkill {
   installCount: number;
   version: string;
   category: string;
+  origin: OriginKey;
   license: string;
 }
 
@@ -51,7 +58,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState<number | null>(null);
   const [q, setQ] = useState("");
-  const [activeCat, setActiveCat] = useState<CategoryKey | string>("all");
+  const [activeOrigin, setActiveOrigin] = useState<OriginKey>("opensource");
   const [installedMarket, setInstalledMarket] = useState<Record<string, { skillId: string; version?: string }>>({});
   const [selectedSkill, setSelectedSkill] = useState<MarketSkill | null>(null);
 
@@ -71,6 +78,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
             installCount: s.downloadCount || 0,
             version: s.version || "1.0.0",
             category: s.category || "general",
+            origin: s.origin === "squad" ? "squad" : "opensource",
             license: s.license || "MIT",
           })),
         );
@@ -95,7 +103,10 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
           if (skill?.enabled === false || state === "disabled" || state === "source_missing") continue;
           const marketId = String(skill?.source?.marketplaceId || "").trim();
           if (!marketId) continue;
-          next[marketId] = { skillId: String(skill?.id || skill?.source?.skillId || ""), version: String(skill?.source?.version || "") };
+          const installedSkillId = String(skill?.id || skill?.source?.skillId || "");
+          const installedVersion = String(skill?.source?.version || "");
+          next[marketId] = { skillId: installedSkillId, version: installedVersion };
+          if (installedSkillId) next[`skill:${installedSkillId}`] = { skillId: installedSkillId, version: installedVersion };
         }
         setInstalledMarket(next);
       })
@@ -103,7 +114,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
   }, [adoptId]);
 
   const installState = (item: MarketSkill) => {
-    const installed = installedMarket[String(item.id)];
+    const installed = installedMarket[String(item.id)] || installedMarket[`skill:${item.skillId}`];
     const installedVersion = installed?.version || "";
     const canUpdate = !!installed && !!installedVersion && installedVersion !== item.version;
     return { installed, installedVersion, canUpdate };
@@ -122,7 +133,11 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
       if (d?.error) throw new Error(d.error?.message || "安装失败");
       toast.success(`已安装：${item.title}`);
       const installedSkillId = String(d?.result?.data?.json?.skillId || d?.result?.data?.skillId || item.skillId);
-      setInstalledMarket((prev) => ({ ...prev, [String(item.id)]: { skillId: installedSkillId, version: item.version } }));
+      setInstalledMarket((prev) => ({
+        ...prev,
+        [String(item.id)]: { skillId: installedSkillId, version: item.version },
+        [`skill:${installedSkillId}`]: { skillId: installedSkillId, version: item.version },
+      }));
       setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, installCount: (x.installCount || 0) + 1 } : x)));
     } catch (e: any) {
       toast.error(`安装失败${e?.message ? `：${e.message}` : ""}`);
@@ -135,7 +150,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
     if (!adoptId || installing) return;
     const installed = installedMarket[String(item.id)];
     if (!installed?.skillId) return;
-    if (!confirm(`确认卸载 ${item.title}？市场源不会删除，可重新安装。`)) return;
+    if (!confirm(`确认卸载 ${item.title}？广场源不会删除，可重新安装。`)) return;
     setInstalling(item.id);
     try {
       const r = await fetch("/api/claw/skills/uninstall", {
@@ -149,6 +164,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
       setInstalledMarket((prev) => {
         const next = { ...prev };
         delete next[String(item.id)];
+        delete next[`skill:${item.skillId}`];
         return next;
       });
     } catch (e: any) {
@@ -158,14 +174,13 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
     }
   };
 
-  const categories = ["all", ...new Set(items.map((x) => x.category))];
   const filtered = items.filter((x) => {
-    const matchCat = activeCat === "all" || x.category === activeCat;
+    const matchOrigin = x.origin === activeOrigin;
     const matchQ = !q.trim() || `${x.title} ${x.description} ${x.skillId}`.toLowerCase().includes(q.toLowerCase());
-    return matchCat && matchQ;
+    return matchOrigin && matchQ;
   });
-  const catCounts = items.reduce<Record<string, number>>((acc, x) => {
-    acc[x.category] = (acc[x.category] || 0) + 1;
+  const originCounts = items.reduce<Record<string, number>>((acc, x) => {
+    acc[x.origin] = (acc[x.origin] || 0) + 1;
     return acc;
   }, {});
 
@@ -174,9 +189,9 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
       <div className="skills-market-hero settings-card">
         <div className="skills-market-hero__icon"><Store size={18} /></div>
         <div className="min-w-0">
-          <div className="skills-market-hero__title">技能市场</div>
+          <div className="skills-market-hero__title">技能广场</div>
           <div className="skills-market-hero__desc">
-            从市场安装的技能会进入“我的技能”，并通过 SkillRegistry 同步到当前灵虾运行时。
+            从技能广场安装的技能会进入“我的技能”，并同步到当前灵虾运行时。
           </div>
         </div>
       </div>
@@ -186,14 +201,14 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
           <Search size={14} className="skills-search-icon" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索技能..." />
         </div>
-        <div className="skills-market-categories" aria-label="技能市场分类">
-          {categories.map((cat) => {
-            const meta = categoryMeta(cat);
+        <div className="skills-market-categories" aria-label="技能广场来源">
+          {(Object.keys(ORIGIN_META) as OriginKey[]).map((origin) => {
+            const meta = ORIGIN_META[origin];
             const Icon = meta.Icon;
-            const active = activeCat === cat;
-            const count = cat === "all" ? items.length : catCounts[cat] || 0;
+            const active = activeOrigin === origin;
+            const count = originCounts[origin] || 0;
             return (
-              <button key={cat} className={`skills-tab ${active ? "active" : ""}`} onClick={() => setActiveCat(cat)}>
+              <button key={origin} className={`skills-tab ${active ? "active" : ""}`} onClick={() => setActiveOrigin(origin)}>
                 <Icon size={13} />
                 {meta.label}
                 <span className="skills-market-count">{count}</span>
@@ -206,14 +221,14 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
       {loading && (
         <div className="settings-card skills-market-empty">
           <Loader2 size={20} className="animate-spin" />
-          <div>正在加载技能市场...</div>
+          <div>正在加载技能广场...</div>
         </div>
       )}
 
       {!loading && filtered.length === 0 && (
         <div className="settings-card skills-market-empty">
           <Store size={22} />
-          <div>{items.length === 0 ? "技能市场暂无技能" : "没有匹配的技能"}</div>
+          <div>{items.length === 0 ? "技能广场暂无技能" : "没有匹配的技能"}</div>
         </div>
       )}
 
@@ -221,6 +236,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
         <div className="skills-market-grid">
           {filtered.map((item) => {
             const meta = categoryMeta(item.category);
+            const originMeta = ORIGIN_META[item.origin] || ORIGIN_META.opensource;
             const Icon = meta.Icon;
             const { installed, canUpdate } = installState(item);
             const installLabel = canUpdate ? "更新" : installed ? "已安装" : "安装";
@@ -246,7 +262,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                     </div>
                     <div className="skills-market-card__meta">{item.author} · v{item.version}</div>
                   </div>
-                  <span className="skills-chip skills-chip--neutral">{meta.label}</span>
+                  <span className="skills-chip skills-chip--neutral">{originMeta.label}</span>
                 </div>
 
                 <div className="skills-market-card__desc">{item.description}</div>
@@ -283,6 +299,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
           <div className="skills-market-detail__panel settings-card">
             {(() => {
               const meta = categoryMeta(selectedSkill.category);
+              const originMeta = ORIGIN_META[selectedSkill.origin] || ORIGIN_META.opensource;
               const Icon = meta.Icon;
               const { installed, installedVersion, canUpdate } = installState(selectedSkill);
               const installLabel = canUpdate ? "更新" : installed ? "已安装" : "安装";
@@ -300,6 +317,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                   </div>
 
                   <div className="skills-market-detail__chips">
+                    <span className="skills-chip skills-chip--neutral">{originMeta.label}</span>
                     <span className="skills-chip skills-chip--neutral">{meta.label}</span>
                     <span className="skills-chip skills-chip--neutral">{selectedSkill.license}</span>
                     {installed ? (
@@ -317,7 +335,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
 
                   <div className="skills-market-detail__facts">
                     <div><span>安装次数</span><strong>{selectedSkill.installCount}</strong></div>
-                    <div><span>市场 ID</span><strong>{selectedSkill.skillId}</strong></div>
+                    <div><span>技能 ID</span><strong>{selectedSkill.skillId}</strong></div>
                     <div><span>审核</span><strong><ShieldCheck size={12} />静态扫描通过</strong></div>
                   </div>
 

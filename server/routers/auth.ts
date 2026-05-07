@@ -23,6 +23,13 @@ import {
 import { generateVerificationCode, sendVerificationCodeEmail, sendPasswordResetEmail } from "../_core/email";
 import { TEST_MODE, checkAndRecordIpAccess } from "./helpers";
 
+const isEmailVerificationRequired = () => process.env.EMAIL_VERIFICATION_REQUIRED !== "false";
+const assertVerificationCode = (value: unknown) => {
+  const code = String(value || "").trim();
+  if (!/^\d{6}$/.test(code)) throw new Error("验证码为6位数字");
+  return code;
+};
+
 export const authRouter = router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -58,7 +65,7 @@ export const authRouter = router({
         partnerType: z.enum(["financial_institution", "isv_partner"]).optional(),
         email: z.string().email("请输入有效的邮箱地址").toLowerCase().trim(),
         password: z.string().min(6, "密码至少需要6个字符").max(100, "密码过长"),
-        verificationCode: z.string().min(6, "验证码为6位数字").max(6, "验证码为6位数字"),
+        verificationCode: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         // 测试模式：跳过所有验证和数据库操作，直接返回成功
@@ -91,10 +98,13 @@ export const authRouter = router({
           throw new Error(ipCheck.message || "访问受限");
         }
 
-        // 1. 验证邮箱验证码
-        const isValid = await verifyEmailCode(input.email, input.verificationCode);
-        if (!isValid) {
-          throw new Error("验证码错误或已过期，请重新获取");
+        // 1. 验证邮箱验证码（独立部署可通过 EMAIL_VERIFICATION_REQUIRED=false 关闭）
+        if (isEmailVerificationRequired()) {
+          const code = assertVerificationCode(input.verificationCode);
+          const isValid = await verifyEmailCode(input.email, code);
+          if (!isValid) {
+            throw new Error("验证码错误或已过期，请重新获取");
+          }
         }
 
         // 2. 检查邮箱是否在黑名单（免费邮箱禁止注册）
@@ -369,13 +379,16 @@ export const registrationRouter = router({
         name: z.string().min(1, "姓名不能为空").max(100, "姓名过长").trim(),
         company: z.string().min(1, "公司不能为空").max(200, "公司名过长").trim(),
         email: z.string().email("请输入有效的邮箱地址").toLowerCase().trim(),
-        verificationCode: z.string().min(6, "验证码不能为空").max(6, "验证码格式错误"),
+        verificationCode: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
         // 验证验证码
-        const isValid = await verifyEmailCode(input.email, input.verificationCode);
-        if (!isValid) {
-          throw new Error("验证码错误或已过期，请重新获取");
+        if (isEmailVerificationRequired()) {
+          const code = assertVerificationCode(input.verificationCode);
+          const isValid = await verifyEmailCode(input.email, code);
+          if (!isValid) {
+            throw new Error("验证码错误或已过期，请重新获取");
+          }
         }
 
         // 检查邮箱是否已注册

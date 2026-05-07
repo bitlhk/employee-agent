@@ -1,5 +1,6 @@
 import { execFileSync } from "child_process";
 import { existsSync, readFileSync, statSync, openSync, readSync, closeSync } from "fs";
+import { APP_ROOT, normalizeOpenClawHome } from "../helpers";
 import type {
   OpenClawArtifactLookup,
   OpenClawRuntimeId,
@@ -12,7 +13,6 @@ import type {
 const DEFAULT_MAX_TRAJ_FULL_READ = 10 * 1024 * 1024;
 const DEFAULT_TAIL_READ_SIZE = 5 * 1024 * 1024;
 const DEFAULT_ARTIFACT_WINDOW_MS = 15 * 60 * 1000;
-const DEFAULT_APP_ROOT = process.env.APP_ROOT || "/root/linggan-platform";
 
 export interface OpenClawRuntimeAdapterOptions {
   remoteHome?: string;
@@ -26,7 +26,7 @@ export class OpenClawRuntimeAdapter {
   readonly trajectoryTailReadBytes: number;
 
   constructor(options: OpenClawRuntimeAdapterOptions = {}) {
-    this.remoteHome = options.remoteHome || process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+    this.remoteHome = normalizeOpenClawHome(options.remoteHome);
     this.maxTrajectoryFullReadBytes = options.maxTrajectoryFullReadBytes || DEFAULT_MAX_TRAJ_FULL_READ;
     this.trajectoryTailReadBytes = options.trajectoryTailReadBytes || DEFAULT_TAIL_READ_SIZE;
   }
@@ -49,7 +49,7 @@ export class OpenClawRuntimeAdapter {
   }
 
   sessionRegistryPath(): string {
-    return `${DEFAULT_APP_ROOT}/data/claw-session-registry.json`;
+    return `${APP_ROOT}/data/claw-session-registry.json`;
   }
 
   lookupSessionRegistry(adoptId: string, runtimeAgentId: string, currentEpoch: number): string | null {
@@ -68,7 +68,7 @@ export class OpenClawRuntimeAdapter {
   }
 
   agentDir(runtimeAgentId: OpenClawRuntimeId): string {
-    return `${this.remoteHome}/.openclaw/agents/${runtimeAgentId}`;
+    return `${this.remoteHome}/agents/${runtimeAgentId}`;
   }
 
   sessionsDir(runtimeAgentId: OpenClawRuntimeId): string {

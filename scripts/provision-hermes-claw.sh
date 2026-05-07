@@ -5,7 +5,7 @@
 # Example: provision-hermes-claw.sh lihongkun 2
 #
 # Effect:
-#   1) Creates a new Hermes profile at /root/.hermes/profiles/<profile_name>
+#   1) Creates a new Hermes profile at $HERMES_HOME_ROOT/profiles/<profile_name>
 #   2) Allocates next free port starting at 8644
 #   3) Writes per-profile hermes-http.env with that port
 #   4) Enables systemd hermes-http@<profile_name> service
@@ -14,7 +14,7 @@
 #
 # Rollback (if step N fails):
 #   systemctl disable --now hermes-http@<profile_name>
-#   rm -rf /root/.hermes/profiles/<profile_name>
+#   rm -rf $HERMES_HOME_ROOT/profiles/<profile_name>
 #   DELETE FROM claw_adoptions WHERE adoptId='lgh-<profile_name>'
 
 set -euo pipefail
@@ -39,14 +39,22 @@ if ! [[ "$USER_ID" =~ ^[0-9]+$ ]]; then
 fi
 
 ADOPT_ID="lgh-${PROFILE}"
-HERMES_ROOT="/root/hermes-agent"
-HERMES_HOME_ROOT="/root/.hermes"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_ROOT="${APP_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+
+if [[ -f "${APP_ROOT}/.env" ]]; then
+  set -a
+  source "${APP_ROOT}/.env"
+  set +a
+fi
+
+HERMES_ROOT="${HERMES_ROOT:-${HOME}/hermes-agent}"
+HERMES_HOME_ROOT="${HERMES_HOME_ROOT:-${HOME}/.hermes}"
 PROFILE_DIR="${HERMES_HOME_ROOT}/profiles/${PROFILE}"
 
-source /root/linggan-platform/.env 2>/dev/null || true
 DB_URL="${DATABASE_URL:-}"
 if [[ -z "$DB_URL" ]]; then
-  echo "ERROR: DATABASE_URL not found in /root/linggan-platform/.env"
+  echo "ERROR: DATABASE_URL not found in ${APP_ROOT}/.env"
   exit 1
 fi
 
@@ -99,10 +107,15 @@ fi
 # 1.5) Apply canonical template (glm-5.1 + docker terminal sandbox)
 # 2026-04-20: replaces the old `hermes profile create --clone` path, which
 # inherited the stale default config (DeepSeek-only, no docker sandbox).
-# Template: /root/linggan-platform/configs/hermes-profile-template.yaml
+# Template: ${APP_ROOT}/configs/hermes-profile-template.yaml
 echo "=== 1.5) apply canonical template ==="
-cp /root/linggan-platform/configs/hermes-profile-template.yaml "$PROFILE_DIR/config.yaml"
-grep "^HUAWEI_MAAS_API_KEY=" /root/.hermes/profiles/lihongkun/.env >> "$PROFILE_DIR/.env"
+cp "${APP_ROOT}/configs/hermes-profile-template.yaml" "$PROFILE_DIR/config.yaml"
+HERMES_API_ENV_SOURCE="${HERMES_API_ENV_SOURCE:-${HERMES_HOME_ROOT}/profiles/lihongkun/.env}"
+if [[ -f "$HERMES_API_ENV_SOURCE" ]]; then
+  grep "^HUAWEI_MAAS_API_KEY=" "$HERMES_API_ENV_SOURCE" >> "$PROFILE_DIR/.env" || true
+else
+  echo "WARN: HERMES_API_ENV_SOURCE not found, skip HUAWEI_MAAS_API_KEY copy: $HERMES_API_ENV_SOURCE"
+fi
 echo "  wrote $PROFILE_DIR/config.yaml (glm-5.1 + docker sandbox)"
 echo "  appended HUAWEI_MAAS_API_KEY to $PROFILE_DIR/.env"
 
@@ -113,7 +126,7 @@ cat "$PROFILE_DIR/hermes-http.env"
 
 # Ensure DEEPSEEK_API_KEY + HERMES_HTTP_KEY inherit from root .env
 # (we deliberately don't re-copy the whole .env to keep secrets in one place;
-# EnvironmentFile= in the systemd unit loads root /root/.hermes/.env first.)
+# EnvironmentFile= in the systemd unit loads ${HERMES_HOME_ROOT}/.env first.)
 
 # 3) Enable + start systemd service
 echo "=== 3) systemctl enable --now hermes-http@$PROFILE ==="

@@ -5,13 +5,15 @@ type MentionUser = {
   userName: string;
   groupName: string | null;
   orgName: string | null;
+  departmentName: string | null;
+  teamName: string | null;
   adoptId: string | null;
 };
 
 type ChatInputProps = {
   value: string;
   onChange: (v: string) => void;
-  onSend: () => void;
+  onSend: (attachments?: File[]) => void | boolean | Promise<void | boolean>;
   onStop?: () => void;
   onNewChat?: () => void;
   disabled?: boolean;
@@ -38,6 +40,7 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [submittingAttachments, setSubmittingAttachments] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
 
   // ── 语音录制状态 ──
@@ -73,6 +76,8 @@ export function ChatInput({
         userName: u.userName || "(未命名)",
         groupName: u.groupName,
         orgName: u.orgName,
+        departmentName: u.departmentName,
+        teamName: u.teamName,
         adoptId: u.adoptId,
       }));
       setUsers(list);
@@ -86,9 +91,21 @@ export function ChatInput({
     ? users.filter((u) => {
         if (!mentionQuery) return true;
         const q = mentionQuery.toLowerCase();
-        return (u.userName || "").toLowerCase().includes(q) || (u.groupName || "").toLowerCase().includes(q) || (u.orgName || "").toLowerCase().includes(q);
+        return (
+          (u.userName || "").toLowerCase().includes(q) ||
+          (u.groupName || "").toLowerCase().includes(q) ||
+          (u.orgName || "").toLowerCase().includes(q) ||
+          (u.departmentName || "").toLowerCase().includes(q) ||
+          (u.teamName || "").toLowerCase().includes(q)
+        );
       }).slice(0, 20)
     : [];
+
+  const formatMentionOrg = (u: MentionUser) => {
+    const parts = [u.orgName, u.departmentName, u.teamName].filter(Boolean);
+    if (parts.length > 0) return parts.join(" · ");
+    return u.groupName ? `— · ${u.groupName}` : "—";
+  };
 
   // 检测输入中的 @ 触发
   const detectMention = useCallback((text: string, cursor: number) => {
@@ -131,6 +148,26 @@ export function ChatInput({
     setTimeout(() => textareaRef.current?.focus(), 0);
   }, [value, mentionAtPos, onChange, onUserMention]);
 
+  const submitMessage = useCallback(async () => {
+    if (streaming) {
+      onStop?.();
+      return;
+    }
+    if (disabled || submittingAttachments) return;
+    if (!value.trim() && attachments.length === 0) return;
+
+    const selectedAttachments = [...attachments];
+    setSubmittingAttachments(true);
+    try {
+      const result = await onSend(selectedAttachments);
+      if (result !== false) {
+        setAttachments([]);
+      }
+    } finally {
+      setSubmittingAttachments(false);
+    }
+  }, [attachments, disabled, onSend, onStop, streaming, submittingAttachments, value]);
+
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (mentionOpen && filteredUsers.length > 0) {
       if (e.key === "ArrowDown") {
@@ -156,8 +193,7 @@ export function ChatInput({
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (streaming) onStop?.();
-      else onSend();
+      void submitMessage();
     }
   };
 
@@ -330,7 +366,7 @@ export function ChatInput({
                   {u.userName}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--oc-text-secondary)", opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {u.orgName || "—"}{u.groupName ? ` · ${u.groupName}` : ""}
+                  {formatMentionOrg(u)}
                 </div>
               </div>
               {u.adoptId ? (
@@ -370,7 +406,7 @@ export function ChatInput({
           border: recording
             ? "1px solid var(--oc-accent)"
             : inputFocused
-              ? "1px solid color-mix(in oklab, var(--oc-accent) 72%, var(--oc-border))"
+              ? "1px solid var(--oc-border-strong)"
               : "1px solid var(--oc-border)",
           outline: "none",
           outlineOffset: 0,
@@ -378,7 +414,7 @@ export function ChatInput({
           boxShadow: recording
             ? "0 0 0 2px rgba(255,92,92,0.2), 0 2px 16px rgba(0,0,0,0.14)"
             : inputFocused
-              ? "0 0 0 3px rgba(255,92,92,0.16), 0 2px 14px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)"
+              ? "0 2px 14px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)"
               : "0 2px 16px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08)",
           overflow: "hidden",
           transition: "border-color 0.2s, box-shadow 0.2s, outline-color 0.2s",
@@ -444,7 +480,12 @@ export function ChatInput({
             <input ref={fileInputRef} type="file" multiple
               accept="image/*,.pdf,.txt,.md,.csv,.json,.docx,.xlsx"
               onChange={handleFileSelect} style={{ display: "none" }} />
-            <button onClick={() => fileInputRef.current?.click()} title="上传文件" className="lingxia-toolbar-icon">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="上传文件"
+              className="lingxia-toolbar-icon"
+              disabled={streaming || submittingAttachments}
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
               </svg>
@@ -479,17 +520,23 @@ export function ChatInput({
               </svg>
             </button>
             <button
-              onClick={streaming ? (() => onStop?.()) : onSend}
-              disabled={streaming ? false : (disabled || !value.trim())}
-              title={streaming ? "停止生成" : "发送"}
+              onClick={() => void submitMessage()}
+              disabled={streaming ? false : (disabled || submittingAttachments || (!value.trim() && attachments.length === 0))}
+              title={streaming ? "停止生成" : submittingAttachments ? "上传中" : "发送"}
               className="lingxia-send-btn"
               style={{
-                background: (streaming || value.trim()) ? "var(--oc-accent)" : "rgba(128,128,128,0.2)",
+                background: (streaming || value.trim() || attachments.length > 0) ? "var(--oc-accent)" : "rgba(128,128,128,0.2)",
               }}
             >
               {streaming ? (
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
                   <rect x="6" y="6" width="12" height="12" rx="2"/>
+                </svg>
+              ) : submittingAttachments ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M12 3v10"/>
+                  <path d="M8 7l4-4 4 4"/>
+                  <path d="M5 17h14"/>
                 </svg>
               ) : (
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">

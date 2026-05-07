@@ -42,59 +42,78 @@ export function UsageStatsTab() {
   if (!data) return <div className="text-sm text-gray-500 text-center py-8">加载失败</div>;
 
   const maxDaily = Math.max(...data.daily.map(d => d.count), 1);
+  const hasDailyData = data.daily.some((d) => d.count > 0);
+  const chartHeightPx = 72;
+  const summaryCards = [
+    { label: "子虾总数", value: data.summary.totalClaws, icon: Users, tone: "red", hint: "已配置实例" },
+    { label: "总对话数", value: data.summary.totalChats, icon: MessageSquare, tone: "blue", hint: "累计会话调用" },
+    { label: "今日活跃", value: data.summary.activeToday, icon: TrendingUp, tone: "green", hint: "今日有交互" },
+  ];
 
   return (
-    <div className="space-y-6">
+    <div className="admin-usage-tab space-y-6">
       {/* 概览卡片 */}
       <div className="grid grid-cols-3 gap-4">
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
-            <Users className="w-3.5 h-3.5" /> 子虾总数
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{data.summary.totalClaws}</div>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
-            <MessageSquare className="w-3.5 h-3.5" /> 总对话数
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{data.summary.totalChats}</div>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
-            <TrendingUp className="w-3.5 h-3.5" /> 今日活跃
-          </div>
-          <div className="text-2xl font-bold text-gray-900">{data.summary.activeToday}</div>
-        </div>
+        {summaryCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <div key={card.label} className={`admin-metric-card admin-metric-card--${card.tone} rounded-xl border border-gray-200 bg-white p-4`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-medium text-gray-500">{card.label}</div>
+                  <div className="mt-2 text-2xl font-semibold text-gray-900">{card.value}</div>
+                  <div className="mt-1 text-[11px] text-gray-400">{card.hint}</div>
+                </div>
+                <div className="admin-metric-icon">
+                  <Icon className="h-4 w-4" />
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* 每日趋势 */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="admin-panel-card rounded-xl border border-gray-200 bg-white p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
-            <BarChart3 className="w-4 h-4" /> 每日对话趋势（最近14天）
+            <span className="admin-section-icon"><BarChart3 className="w-4 h-4" /></span>
+            每日对话趋势（最近14天）
           </h3>
-          <button onClick={fetchStats} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
+          <button onClick={fetchStats} className="admin-ghost-action text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
             <RefreshCw className="w-3 h-3" /> 刷新
           </button>
         </div>
-        <div className="flex items-end gap-1 h-24">
-          {data.daily.map((d, i) => (
-            <div key={i} className="flex-1 flex flex-col items-center gap-1">
-              <div
-                className="w-full rounded-t bg-blue-500 transition-all hover:bg-blue-600"
-                style={{ height: `${(d.count / maxDaily) * 100}%`, minHeight: d.count > 0 ? 4 : 0 }}
-                title={`${d.date}: ${d.count} 次`}
-              />
-              <span className="text-[9px] text-gray-400 -rotate-45 origin-top-left whitespace-nowrap">
+        <div className="relative">
+          {!hasDailyData && (
+            <div className="absolute inset-x-0 top-8 z-10 text-center text-xs text-gray-400">
+              最近 14 天暂无对话数据
+            </div>
+          )}
+          <div className="admin-usage-chart flex h-24 items-end gap-1.5">
+            {data.daily.map((d, i) => (
+              <div key={i} className="flex-1 flex h-full min-w-0 flex-col items-center justify-end gap-1">
+                <span className="text-[10px] text-gray-500">{d.count}</span>
+                <div
+                  className={`w-full rounded-t transition-all ${d.count > 0 ? "admin-usage-bar" : "admin-usage-bar-empty"}`}
+                  style={{ height: `${d.count > 0 ? Math.max((d.count / maxDaily) * chartHeightPx, 5) : 2}px` }}
+                  title={`${d.date}: ${d.count} 次`}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex gap-1.5">
+            {data.daily.map((d) => (
+              <span key={d.date} className="flex-1 min-w-0 text-center text-[10px] font-medium leading-none text-gray-600">
                 {d.date.slice(5)}
               </span>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
 
       {/* 子虾排行 */}
-      <div className="rounded-xl border border-gray-200 bg-white">
+      <div className="admin-panel-card rounded-xl border border-gray-200 bg-white">
         <div className="px-4 py-3 border-b border-gray-100">
           <h3 className="text-sm font-semibold text-gray-900">子虾使用排行</h3>
         </div>
@@ -144,7 +163,10 @@ export function UsageStatsTab() {
             </div>
           ))}
           {data.adoptions.length === 0 && (
-            <div className="text-sm text-gray-400 text-center py-6">暂无数据</div>
+            <div className="admin-empty-state text-sm text-gray-400 text-center py-8">
+              <BarChart3 className="mx-auto mb-2 h-5 w-5" />
+              暂无使用排行数据
+            </div>
           )}
         </div>
       </div>

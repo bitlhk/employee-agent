@@ -21,31 +21,41 @@ import {
   isSessionReadyToConsolidate,
   listMyCoopSessions,
 } from "../db/coop";
+import { requireActiveCoopProfile } from "../db/coop-identity";
 import { consolidateCoopSession } from "../_core/coop-orchestrator";
 import { notifyCoopEvent } from "../_core/coop-notify";
 
-// ── 灰度白名单（user.id 数组） ──────────────────────────────
-// MVP 阶段硬编码。上线前替换为 env 或 feature_flags 表。
-// 2026-04-17 演练：放 user 6/20/101/138 进白名单一起跑通多人协作（已绑微信的优先）
-const COOP_WHITELIST_USER_IDS: number[] = [2, 6, 7, 20, 40, 101, 138, 64, 217, 467, 468]; // Hongkun Li / 赵印伟 / 程威 / 初利宝 / 张毓芬 / 王祥倩 / 龚倩 / 袁晨明 / 陈海双 / 罗哲(浙江华为) / 颜秉洋(浙江华为) — 2026-04-27 加 467/468
-
-function isCoopWhitelisted(userId: number): boolean {
-  return COOP_WHITELIST_USER_IDS.includes(userId);
+function coopAccessMessage(kind: string): string {
+  switch (kind) {
+    case "profile_missing":
+      return "当前用户未配置组织协作资料，请联系管理员开通";
+    case "profile_pending":
+      return "当前用户组织协作权限待启用，请联系管理员";
+    case "profile_disabled":
+      return "当前用户组织协作权限已停用";
+    case "space_missing":
+      return "当前用户未分配协作空间，请联系管理员";
+    case "space_disabled":
+      return "当前协作空间已停用";
+    default:
+      return "当前用户没有组织协作权限";
+  }
 }
 
-const whitelistCoopProcedure = protectedProcedure.use(async ({ ctx, next }) => {
-  if (!ctx.user || !isCoopWhitelisted(ctx.user.id)) {
+const activeCoopProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  const access = await requireActiveCoopProfile(ctx.user!.id);
+  if (!access.ok) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: "coop session is under gated rollout",
+      message: coopAccessMessage(access.error.kind),
     });
   }
   return next();
 });
 
 export const coopRouter = router({
-  // ── 发起协作 session（白名单）─────────────────────────
-  create: whitelistCoopProcedure
+  // ── 发起协作 session（后台组织协作权限）────────────────
+  create: activeCoopProcedure
     .input(
       z.object({
         title: z.string().min(1).max(200),
@@ -112,8 +122,8 @@ export const coopRouter = router({
     return await countPendingCoop(ctx.user!.id);
   }),
 
-  // ── @ mention 候选池（白名单）───────────────────────
-  mentionCandidates: whitelistCoopProcedure
+  // ── @ mention 候选池（后台组织协作权限）────────────────
+  mentionCandidates: activeCoopProcedure
     .input(
       z
         .object({
@@ -128,7 +138,7 @@ export const coopRouter = router({
     }),
 
   // ── 被邀请者：同意 ─────────────────────────────────
-  agree: protectedProcedure
+  agree: activeCoopProcedure
     .input(z.object({
       requestId: z.number().int().positive(),
       modifiedSubtask: z.string().max(2000).optional(),
@@ -150,7 +160,7 @@ export const coopRouter = router({
     }),
 
   // ── 被邀请者：拒绝 ─────────────────────────────────
-  reject: protectedProcedure
+  reject: activeCoopProcedure
     .input(z.object({
       requestId: z.number().int().positive(),
       reason: z.string().max(500).optional(),
@@ -176,7 +186,7 @@ export const coopRouter = router({
   //   - 状态：必须在 running / approved（pending 必须先同意）
   //   - payload.attachments 是 [{name, url, source: 'chat'|'task-xxx', size?}]
   //   - skipMemoryWrite: true 时记入 event payload，下游 memory-extractor 跳过此对话
-  submitResult: protectedProcedure
+  submitResult: activeCoopProcedure
     .input(z.object({
       requestId: z.number().int().positive(),
       resultText: z.string().min(1).max(20000),
@@ -240,7 +250,7 @@ export const coopRouter = router({
   //   - 权限：creator-only
   //   - 行为：软删（数据保留），listMySessions 自动过滤；30 天回收站可后续做
   //   - 状态：任何状态都允许删（包括 published/closed）
-  softDelete: protectedProcedure
+  softDelete: activeCoopProcedure
     .input(z.object({ sessionId: z.string().min(1).max(80) }))
     .mutation(async ({ input, ctx }) => {
       const { getDb } = await import("../db");
@@ -273,7 +283,7 @@ export const coopRouter = router({
   //   - hide=true: insert lx_coop_user_hidden
   //   - hide=false: delete from lx_coop_user_hidden
   //   - 权限：当前 user 必须是该 session 的成员或发起人（防伪造）
-  toggleHide: protectedProcedure
+  toggleHide: activeCoopProcedure
     .input(z.object({ sessionId: z.string().min(1).max(80), hide: z.boolean() }))
     .mutation(async ({ input, ctx }) => {
       const { getDb } = await import("../db");
@@ -323,7 +333,7 @@ export const coopRouter = router({
     }),
 
     // ── 整合：调 LLM 生成汇总草稿（发起人触发，不写入 DB）────
-  consolidate: whitelistCoopProcedure
+  consolidate: activeCoopProcedure
     .input(z.object({
       sessionId: z.string().min(1),
       // 2026-04-17: 发起人可填的自定义汇总指令（如格式要求/重点关注/字数限制）
@@ -359,7 +369,7 @@ export const coopRouter = router({
     }),
 
   // ── 发布：写入 final_summary + 全员可见 ────────────────
-  publish: whitelistCoopProcedure
+  publish: activeCoopProcedure
     .input(z.object({
       sessionId: z.string().min(1),
       finalSummary: z.string().min(1).max(20_000),
@@ -399,7 +409,7 @@ export const coopRouter = router({
     }),
 
   // ── 关闭/解散 ──────────────────────────────────────
-  close: whitelistCoopProcedure
+  close: activeCoopProcedure
     .input(z.object({
       sessionId: z.string().min(1),
       mode: z.enum(["dissolve", "keep"]).default("keep"),
@@ -419,8 +429,13 @@ export const coopRouter = router({
       }
     }),
 
-    // ── 白名单状态（前端用来判断是否渲染入口）─────────────
+    // ── 组织协作准入状态（前端用来判断是否渲染入口）───────
   isWhitelisted: protectedProcedure.query(async ({ ctx }) => {
-    return { whitelisted: isCoopWhitelisted(ctx.user!.id) };
+    const access = await requireActiveCoopProfile(ctx.user!.id);
+    return {
+      whitelisted: access.ok,
+      reason: access.ok ? null : access.error.kind,
+      message: access.ok ? null : coopAccessMessage(access.error.kind),
+    };
   }),
 });

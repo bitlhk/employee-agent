@@ -140,12 +140,12 @@ function AgentForm({ initial, onSave, onCancel }: {
       <div className="flex gap-2 pt-1">
         <button onClick={() => onSave(v)}
           disabled={!v.id || !v.name}
-          className="px-4 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
-          style={{ background: "var(--oc-accent)", color: "var(--oc-text-primary)", border: "none", cursor: "pointer" }}>
+          className="admin-primary-action px-4 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
+          style={{ background: "var(--oc-accent)", color: "var(--oc-text-on-accent)", border: "none", cursor: "pointer" }}>
           保存
         </button>
         <button onClick={onCancel}
-          className="px-4 py-1.5 rounded-lg text-xs"
+          className="admin-secondary-action px-4 py-1.5 rounded-lg text-xs"
           style={{ background: "var(--oc-bg-active)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)", cursor: "pointer" }}>
           取消
         </button>
@@ -182,13 +182,13 @@ export function BizAgentsPanel() {
           <div className="flex items-center gap-2">
             <button onClick={() => healthCheckAllMutation.mutate()}
               disabled={healthCheckAllMutation.isPending}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+              className="admin-secondary-action flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
               style={{ background: "var(--oc-bg-active)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)", cursor: "pointer" }}>
               {healthCheckAllMutation.isPending ? "检查中…" : "🏥 健康检查"}
             </button>
             <button onClick={() => setAdding(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
-              style={{ background: "var(--oc-accent)", color: "var(--oc-text-primary)", border: "none", cursor: "pointer" }}>
+              className="admin-primary-action flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+              style={{ background: "var(--oc-accent)", color: "var(--oc-text-on-accent)", border: "none", cursor: "pointer" }}>
               <Plus size={12} /> 新增
             </button>
           </div>

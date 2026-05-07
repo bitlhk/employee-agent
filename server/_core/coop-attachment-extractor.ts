@@ -16,7 +16,8 @@ export type Attachment = {
   size?: number;
 };
 
-const COOP_UPLOAD_DIR = "/root/linggan-platform/data/coop-uploads";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
+const COOP_UPLOAD_DIR = `${APP_ROOT}/data/coop-uploads`;
 
 function formatSize(bytes?: number): string {
   if (!bytes || bytes <= 0) return "";

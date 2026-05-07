@@ -16,10 +16,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 import { renameSync } from "fs";
+import { OPENCLAW_HOME } from "./helpers";
 
 // ── 配置 ────────────────────────────────────────────────────────────
 
-const WORKSPACE_BASE = "/root/.openclaw/workspace-lingganclaw";
+const WORKSPACE_BASE = join(OPENCLAW_HOME, "workspace-lingganclaw");
 const ENTRY_DELIMITER = "\n§\n";
 const MEMORY_CHAR_LIMIT = parseInt(process.env.MEMORY_CHAR_LIMIT || "2200", 10);
 const USER_CHAR_LIMIT = parseInt(process.env.MEMORY_USER_CHAR_LIMIT || "1375", 10);

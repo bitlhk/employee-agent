@@ -189,14 +189,17 @@ export async function getCoopSession(sessionId: string, viewerUserId: number) {
       resultSummary: clawCollabRequests.resultSummary,
       resultVisibleToAll: clawCollabRequests.resultVisibleToAll,
       completedAt: clawCollabRequests.completedAt,
-      targetUserName: users.name,
+      targetUserName: sql<string | null>`COALESCE(${lxCollabUserProfiles.realName}, ${users.name}, ${users.email})`,
       targetEmail: users.email,
       targetGroupId: users.groupId,
       targetGroupName: lxGroups.name,
-      targetOrgName: sql<string | null>`COALESCE(${users.organization}, ${registrations.company})`,
+      targetOrgName: sql<string | null>`COALESCE(${lxCollabUserProfiles.organizationName}, ${users.organization}, ${registrations.company})`,
+      targetDepartmentName: lxCollabUserProfiles.departmentName,
+      targetTeamName: lxCollabUserProfiles.teamName,
     })
     .from(clawCollabRequests)
     .leftJoin(users, eq(users.id, clawCollabRequests.targetUserId))
+    .leftJoin(lxCollabUserProfiles, eq(lxCollabUserProfiles.userId, clawCollabRequests.targetUserId))
     .leftJoin(lxGroups, eq(lxGroups.id, users.groupId))
     .leftJoin(registrations, eq(registrations.email, users.email))
     .where(eq(clawCollabRequests.sessionId, sessionId))
@@ -299,11 +302,13 @@ export async function listMentionCandidates(params: {
     let rows = await db
       .select({
         userId: users.id,
-        userName: users.name,
         userEmail: users.email,
         groupId: users.groupId,
         groupName: lxGroups.name,
-        orgName: sql<string | null>`COALESCE(${users.organization}, ${registrations.company})`,
+        orgName: sql<string | null>`COALESCE(${lxCollabUserProfiles.organizationName}, ${users.organization}, ${registrations.company})`,
+        departmentName: lxCollabUserProfiles.departmentName,
+        teamName: lxCollabUserProfiles.teamName,
+        userName: sql<string | null>`COALESCE(${lxCollabUserProfiles.realName}, ${users.name}, ${users.email})`,
         adoptId: clawAdoptions.adoptId,
         adoptionId: clawAdoptions.id,
         adoptionStatus: clawAdoptions.status,
@@ -336,14 +341,24 @@ export async function listMentionCandidates(params: {
           (r.userName || "").toLowerCase().includes(q) ||
           (r.userEmail || "").toLowerCase().includes(q) ||
           (r.groupName || "").toLowerCase().includes(q) ||
-          (r.orgName || "").toLowerCase().includes(q)
+          (r.orgName || "").toLowerCase().includes(q) ||
+          (r.departmentName || "").toLowerCase().includes(q) ||
+          (r.teamName || "").toLowerCase().includes(q)
       );
     }
     if (params.groupId !== undefined && params.groupId !== null) {
       rows = rows.filter((r) => r.groupId === params.groupId);
     }
 
-    return rows.slice(0, limit);
+    const byUserId = new Map<number, (typeof rows)[number]>();
+    for (const row of rows) {
+      const current = byUserId.get(row.userId);
+      if (!current || (!current.adoptId && row.adoptId)) {
+        byUserId.set(row.userId, row);
+      }
+    }
+
+    return Array.from(byUserId.values()).slice(0, limit);
   } catch (err) {
     console.error("[coop] listMentionCandidates failed:", err);
     return [];
@@ -774,11 +789,12 @@ export async function buildOrchestratorInput(sessionId: string) {
   const members = await db
     .select({
       req: clawCollabRequests,
-      userName: users.name,
-      groupName: lxGroups.name,
+      userName: sql<string | null>`COALESCE(${lxCollabUserProfiles.realName}, ${users.name}, ${users.email})`,
+      groupName: sql<string | null>`COALESCE(${lxCollabUserProfiles.departmentName}, ${lxCollabUserProfiles.teamName}, ${lxGroups.name})`,
     })
     .from(clawCollabRequests)
     .leftJoin(users, eq(users.id, clawCollabRequests.targetUserId))
+    .leftJoin(lxCollabUserProfiles, eq(lxCollabUserProfiles.userId, clawCollabRequests.targetUserId))
     .leftJoin(lxGroups, eq(lxGroups.id, users.groupId))
     .where(eq(clawCollabRequests.sessionId, sessionId))
     .orderBy(clawCollabRequests.subtaskIndex);
@@ -834,7 +850,7 @@ export async function listMyCoopSessions(userId: number, limit: number = 50) {
     SELECT 
       s.id, s.title, s.status, s.creator_user_id, s.member_count,
       s.created_at, s.published_at, s.closed_at,
-      cu.name AS creator_name,
+      COALESCE(cup.real_name, cu.name, cu.email) AS creator_name,
       (SELECT COUNT(*) FROM claw_collab_requests WHERE sessionId = s.id) AS total_members,
       (SELECT COUNT(*) FROM claw_collab_requests WHERE sessionId = s.id AND status = 'completed') AS completed_members,
       (SELECT COUNT(*) FROM claw_collab_requests WHERE sessionId = s.id AND status = 'pending') AS pending_members,
@@ -843,6 +859,7 @@ export async function listMyCoopSessions(userId: number, limit: number = 50) {
       (SELECT status FROM claw_collab_requests WHERE sessionId = s.id AND targetUserId = ${userId} LIMIT 1) AS my_request_status
     FROM lx_coop_sessions s
     LEFT JOIN users cu ON cu.id = s.creator_user_id
+    LEFT JOIN lx_collab_user_profiles cup ON cup.user_id = s.creator_user_id
     WHERE s.deleted_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM lx_coop_user_hidden h WHERE h.user_id = ${userId} AND h.session_id = s.id)
       AND (s.creator_user_id = ${userId}

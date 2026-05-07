@@ -229,6 +229,7 @@ export default function ClawAdmin() {
   const [keyword, setKeyword] = useState("");
   const [viewingSkillId, setViewingSkillId] = useState<number | null>(null);
   const [aiReviewing, setAiReviewing] = useState(false);
+  const [skillUploading, setSkillUploading] = useState(false);
   const [aiReviewResult, setAiReviewResult] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -283,6 +284,9 @@ export default function ClawAdmin() {
     { id: viewingSkillId! },
     { enabled: !!viewingSkillId, retry: false }
   );
+  const viewSourceFiles = Array.isArray((viewSkillSource as any)?.sourceFiles)
+    ? (viewSkillSource as any).sourceFiles
+    : [];
 
   const handleAiReview = async (skillId: number) => {
     setAiReviewing(true);
@@ -325,6 +329,11 @@ export default function ClawAdmin() {
   };
 
   const handleSkillUpload = async (file: File) => {
+    if (!/\.zip$/i.test(file.name)) {
+      toast.error("请上传 .zip 技能包");
+      return;
+    }
+    setSkillUploading(true);
     try {
       const res = await fetch("/api/claw/skill-market/upload", {
         method: "POST",
@@ -332,17 +341,22 @@ export default function ClawAdmin() {
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "上传失败"); return; }
-      // 自动发布到市场（待审核）
-      publishSkillMutation.mutate({
-        skillId: data.uploadId || data.name,
-        name: data.name,
-        description: data.description,
-        author: "管理员上传",
-        status: "pending",
-      });
-      toast.success(`已上传: ${data.name}`);
+      if (!data.marketItemId) {
+        await publishSkillMutation.mutateAsync({
+          skillId: data.uploadId || data.name,
+          name: data.name,
+          description: data.description,
+          author: "管理员上传",
+          origin: "opensource",
+          status: "pending",
+        });
+      }
+      await refetchMarket();
+      toast.success(`已上传并进入待审核: ${data.name}`);
     } catch (e: any) {
       toast.error("上传失败: " + (e.message || ""));
+    } finally {
+      setSkillUploading(false);
     }
   };
 
@@ -375,7 +389,7 @@ export default function ClawAdmin() {
   const navItems = [
     { value: "instances", label: "实例管理", description: "子虾实例与权限", icon: Users },
     { value: "collaboration", label: "组织协作", description: "空间、成员与准入", icon: Building2 },
-    { value: "skills", label: "技能市场", description: "上架、审核与市场", icon: Sparkles },
+    { value: "skills", label: "技能广场", description: "上架、审核与共享", icon: Sparkles },
     { value: "usage", label: "使用统计", description: "访问与使用趋势", icon: BarChart3 },
     { value: "settings", label: "系统设置", description: "灵虾运行配置", icon: Settings },
     { value: "brand", label: "品牌设置", description: "名称、视觉与身份", icon: Sparkles },
@@ -384,19 +398,19 @@ export default function ClawAdmin() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50/80">
+    <div className="claw-admin-shell min-h-screen bg-gradient-to-b from-white to-gray-50/80">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-border/50">
+      <header className="claw-admin-header sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-border/50">
         <div className="container flex items-center justify-between h-14 px-6">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" onClick={() => setLocation("/")} className="text-muted-foreground">
+            <Button variant="ghost" size="sm" onClick={() => setLocation("/")} className="claw-admin-back-button">
               <ArrowLeft className="w-4 h-4 mr-1" />
               首页
             </Button>
             <div className="w-px h-5 bg-border" />
             <div className="flex items-center gap-2">
               <BrandIcon size={24} />
-              <h1 className="text-base font-semibold text-gray-900">灵虾管理</h1>
+              <h1 className="claw-admin-title text-base font-semibold text-gray-900">灵虾管理</h1>
             </div>
           </div>
         </div>
@@ -405,10 +419,10 @@ export default function ClawAdmin() {
       {/* Body */}
       <main className="mx-auto w-full max-w-[1440px] p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-          <aside className="sticky top-6 max-h-[calc(100vh-3rem)] self-start overflow-y-auto rounded-2xl border border-gray-200 bg-white/90 p-3 shadow-sm">
+          <aside className="claw-admin-sidebar sticky top-6 max-h-[calc(100vh-3rem)] self-start overflow-y-auto rounded-2xl border border-gray-200 bg-white/90 p-3 shadow-sm">
             <div className="px-3 py-2">
-              <div className="text-xs font-medium uppercase tracking-[0.18em] text-gray-400">Console</div>
-              <div className="mt-1 text-sm font-semibold text-gray-900">管理导航</div>
+              <div className="claw-admin-sidebar-kicker text-xs font-medium uppercase tracking-[0.18em] text-gray-400">Console</div>
+              <div className="claw-admin-sidebar-title mt-1 text-sm font-semibold text-gray-900">管理导航</div>
             </div>
             <TabsList className="mt-2 grid h-auto gap-1 bg-transparent p-0">
               {navItems.map((item) => {
@@ -417,9 +431,9 @@ export default function ClawAdmin() {
                   <TabsTrigger
                     key={item.value}
                     value={item.value}
-                    className="group h-auto justify-start rounded-xl border border-transparent px-3 py-3 text-left text-gray-600 transition hover:border-gray-200 hover:bg-gray-50 data-[state=active]:border-red-200 data-[state=active]:bg-red-50 data-[state=active]:text-red-700 data-[state=active]:shadow-sm"
+                    className="claw-admin-nav-item group h-auto justify-start rounded-xl border border-transparent px-3 py-3 text-left text-gray-600 transition"
                   >
-                    <Icon className="mr-3 h-4 w-4 shrink-0" />
+                    <Icon className="claw-admin-nav-icon mr-3 h-4 w-4 shrink-0" />
                     <span className="min-w-0">
                       <span className="block text-sm font-medium leading-none">{item.label}</span>
                       <span className="mt-1 block truncate text-[11px] font-normal text-gray-400 group-data-[state=active]:text-red-500">{item.description}</span>
@@ -684,14 +698,14 @@ export default function ClawAdmin() {
             <BrandSettingsPanel />
           </TabsContent>
 
-          {/* ── 技能市场 ── */}
+          {/* ── 技能广场 ── */}
           <TabsContent value="skills" className="space-y-4">
             {/* 上传区 */}
             <Card className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900">上传技能包</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">上传 .zip 技能包，解压后自动解析 SKILL.md，可直接上架或待审核</p>
+                  <h3 className="text-sm font-semibold text-gray-900">上传开源社区技能</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">管理员上传的 .zip 技能包默认进入“开源社区”，解析后进入待审核</p>
                 </div>
               </div>
               <div
@@ -702,28 +716,29 @@ export default function ClawAdmin() {
                 onDrop={async (e) => {
                   e.preventDefault();
                   e.currentTarget.style.borderColor = "";
+                  if (skillUploading) return;
                   const file = e.dataTransfer.files[0];
                   if (!file) return;
                   await handleSkillUpload(file);
                 }}
               >
-                <p className="text-sm text-muted-foreground">拖拽 .zip 文件到此处，或点击选择</p>
+                <p className="text-sm text-muted-foreground">{skillUploading ? "正在上传并解析技能包..." : "拖拽 .zip 文件到此处，或点击选择"}</p>
                 <input id="skill-upload-input" type="file" accept=".zip" className="hidden" onChange={async (e) => {
                   const file = e.target.files?.[0];
-                  if (file) await handleSkillUpload(file);
+                  if (file && !skillUploading) await handleSkillUpload(file);
                   e.target.value = "";
                 }} />
               </div>
             </Card>
 
-            {/* 市场技能列表 */}
+            {/* 广场技能列表 */}
             <Card className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900">技能市场</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">审核、上下架、管理市场中的技能</p>
+                  <h3 className="text-sm font-semibold text-gray-900">技能广场管理</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">审核、上下架、管理广场中的共享技能</p>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => refetchMarket()}>
+                <Button size="sm" variant="outline" className="admin-secondary-action" onClick={() => refetchMarket()}>
                   <RefreshCw className="w-3.5 h-3.5 mr-1.5" />刷新
                 </Button>
               </div>
@@ -733,6 +748,7 @@ export default function ClawAdmin() {
                 <div className="space-y-2">
                   {(marketSkills || []).map((item: any) => {
                     const catLabels: any = { finance: "金融", dev: "开发", data: "数据", writing: "写作", general: "通用" };
+                    const originLabels: any = { opensource: "开源社区", squad: "中队原创" };
                     const stLabels: any = { pending: "待审核", approved: "已上架", rejected: "已拒绝", offline: "已下架" };
                     const stColors: any = { pending: "bg-yellow-50 text-yellow-700 border-yellow-200", approved: "bg-green-50 text-green-700 border-green-200", rejected: "bg-red-50 text-red-700 border-red-200", offline: "bg-gray-50 text-gray-500 border-gray-200" };
                     return (
@@ -743,6 +759,7 @@ export default function ClawAdmin() {
                               <span className="text-sm font-semibold text-gray-900">{item.name}</span>
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-mono">{item.skillId}</span>
                               <span className={"text-[10px] px-1.5 py-0.5 rounded border font-medium " + (stColors[item.status] || "")}>{stLabels[item.status] || item.status}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-700">{originLabels[item.origin || "opensource"] || item.origin || "开源社区"}</span>
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600">{catLabels[item.category] || item.category}</span>
                             </div>
                             <div className="text-xs text-muted-foreground mt-1">{item.description || "—"}</div>
@@ -752,37 +769,37 @@ export default function ClawAdmin() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
-                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
+                            <Button size="sm" variant="outline" className="admin-secondary-action h-7 text-xs" onClick={() => {
                               setViewingSkillId(item.id);
                               setAiReviewResult(null);
                             }}>查看源码</Button>
-                            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={aiReviewing} onClick={() => {
+                            <Button size="sm" variant="outline" className="admin-secondary-action h-7 text-xs" disabled={aiReviewing} onClick={() => {
                               setViewingSkillId(item.id);
                               handleAiReview(item.id);
                             }}>{aiReviewing ? "AI审核中…" : "AI 审核"}</Button>
                             {item.status === "pending" && (
                               <>
-                                <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => reviewSkillMutation.mutate({ id: item.id, status: "approved" })}>通过</Button>
-                                <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => {
+                                <Button size="sm" className="admin-success-action h-7 text-xs" onClick={() => reviewSkillMutation.mutate({ id: item.id, status: "approved" })}>通过</Button>
+                                <Button size="sm" variant="destructive" className="admin-danger-action h-7 text-xs" onClick={() => {
                                   const note = prompt("拒绝原因：");
                                   if (note !== null) reviewSkillMutation.mutate({ id: item.id, status: "rejected", reviewNote: note || "不符合要求" });
                                 }}>拒绝</Button>
                               </>
                             )}
                             {item.status === "approved" && (
-                              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => reviewSkillMutation.mutate({ id: item.id, status: "offline" })}>下架</Button>
+                              <Button size="sm" variant="outline" className="admin-secondary-action h-7 text-xs" onClick={() => reviewSkillMutation.mutate({ id: item.id, status: "offline" })}>下架</Button>
                             )}
                             {(item.status === "offline" || item.status === "rejected") && (
-                              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => reviewSkillMutation.mutate({ id: item.id, status: "approved" })}>重新上架</Button>
+                              <Button size="sm" variant="outline" className="admin-secondary-action h-7 text-xs" onClick={() => reviewSkillMutation.mutate({ id: item.id, status: "approved" })}>重新上架</Button>
                             )}
-                            <Button size="sm" variant="ghost" className="h-7 text-xs text-red-500" onClick={() => { if (confirm("确定删除？")) deleteMarketSkillMutation.mutate({ id: item.id }); }}>删除</Button>
+                            <Button size="sm" variant="ghost" className="admin-danger-ghost-action h-7 text-xs" onClick={() => { if (confirm("确定删除？")) deleteMarketSkillMutation.mutate({ id: item.id }); }}>删除</Button>
                           </div>
                         </div>
                       </div>
                     );
                   })}
                   {(!marketSkills || marketSkills.length === 0) && (
-                    <div className="text-xs text-center py-6 text-muted-foreground">暂无市场技能，从上方上传添加</div>
+                    <div className="text-xs text-center py-6 text-muted-foreground">暂无广场技能，从上方上传添加</div>
                   )}
                 </div>
               )}
@@ -790,17 +807,30 @@ export default function ClawAdmin() {
 
             {/* 源码查看弹窗 */}
             {viewingSkillId && (
-              <Card className="p-6">
+              <Card className="admin-panel-card p-6">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-gray-900">源码查看</h3>
-                  <Button size="sm" variant="ghost" onClick={() => setViewingSkillId(null)}>关闭</Button>
+                  <Button size="sm" variant="outline" className="admin-secondary-action h-7 text-xs" onClick={() => setViewingSkillId(null)}>关闭</Button>
                 </div>
                 {viewSkillSource ? (
                   <div>
                     <div className="text-xs font-medium text-gray-700 mb-1">SKILL.md</div>
                     <pre className="text-xs bg-gray-50 border rounded-lg p-3 overflow-auto max-h-64 whitespace-pre-wrap">{viewSkillSource.skillMd || "(无)"}</pre>
-                    {viewSkillSource.scripts?.length > 0 && (
-                      <div className="mt-3">
+                    {viewSourceFiles.length > 0 ? (
+                      <div className="mt-4 space-y-3">
+                        <div className="text-xs font-medium text-gray-700">源码文件</div>
+                        {viewSourceFiles.map((file: any) => (
+                          <div key={file.path} className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                            <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2">
+                              <span className="min-w-0 truncate font-mono text-[11px] text-gray-700">{file.path}</span>
+                              <span className="shrink-0 text-[10px] text-gray-400">{file.size} bytes</span>
+                            </div>
+                            <pre className="max-h-72 overflow-auto bg-gray-50/60 p-3 text-xs font-mono text-gray-800 whitespace-pre">{file.content || "(空文件)"}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    ) : viewSkillSource.scripts?.length > 0 ? (
+                      <div className="mt-4">
                         <div className="text-xs font-medium text-gray-700 mb-1">脚本文件</div>
                         <div className="flex flex-wrap gap-1.5">
                           {viewSkillSource.scripts.map((s: string) => (
@@ -808,6 +838,8 @@ export default function ClawAdmin() {
                           ))}
                         </div>
                       </div>
+                    ) : (
+                      <div className="mt-3 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-muted-foreground">暂无脚本源码文件</div>
                     )}
                     <div className="text-[10px] text-muted-foreground mt-2">路径: {viewSkillSource.dir}</div>
                     {aiReviewResult && (
@@ -826,7 +858,7 @@ export default function ClawAdmin() {
 
           {/* ── 智能体协作 ── */}
           <TabsContent value="collab" className="space-y-4">
-            <Card className="p-6">
+            <Card className="admin-panel-card p-6">
               <BizAgentsPanel />
             </Card>
           </TabsContent>

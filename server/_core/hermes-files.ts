@@ -12,8 +12,8 @@
  */
 import path from "path";
 import { readdirSync, statSync, existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync } from "fs";
+import { hermesProfileWorkspaceDir } from "./helpers";
 
-const HERMES_HOME_BASE = process.env.HERMES_HOME_BASE || "/root/.hermes/profiles";
 const MAX_LIST_DEPTH = 4;        // Anti-DOS: limit recursion
 const MAX_FILES_PER_LIST = 500;  // Anti-DOS: cap result size
 const MAX_READ_BYTES = 10 * 1024 * 1024; // 10MB max single-file read
@@ -44,7 +44,7 @@ export type FilesProviderHandle = { adoptId: string; agentId?: string; userId: n
 export function adoptIdToWorkspace(adoptId: string): string | null {
   const m = String(adoptId || "").match(/^lgh-([a-z0-9][a-z0-9_-]{0,63})$/);
   if (!m) return null;
-  return path.join(HERMES_HOME_BASE, m[1], "workspace");
+  return hermesProfileWorkspaceDir(m[1]);
 }
 
 /**

@@ -4,6 +4,7 @@ import { existsSync, statSync, readdirSync, createReadStream } from "fs";
 import { spawnSync } from "child_process";
 import {
   requireClawOwner, resolveRuntimeAgentId,
+  openClawWorkspaceDir,
   generateFileToken,
   streamFileDownload,
   sanitizeRelPath,
@@ -23,9 +24,8 @@ export function registerDownloadRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return; // 401/403/404 已由 requireClawOwner 发出
 
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
-      const filesDir = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/sandbox-files`;
+      const filesDir = `${openClawWorkspaceDir(runtimeAgentId)}/sandbox-files`;
 
       let files: Array<{ name: string; size: number; mtime: string }> = [];
       try {
@@ -48,9 +48,8 @@ export function registerDownloadRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
-      const filePath = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/sandbox-files/${fileName}`;
+      const filePath = `${openClawWorkspaceDir(runtimeAgentId)}/sandbox-files/${fileName}`;
 
       if (!existsSync(filePath)) return sendError(res, "NOT_FOUND", "file not found");
 
@@ -70,9 +69,8 @@ export function registerDownloadRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
-      const filePath = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/${relPath}`;
+      const filePath = `${openClawWorkspaceDir(runtimeAgentId)}/${relPath}`;
 
       if (!existsSync(filePath)) return res.status(404).json({ error: "file not found: " + filePath });
 
@@ -113,12 +111,11 @@ export function registerDownloadRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, String(adoptId));
       if (!claw) return;
 
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       // claw.adoptId 是 DB 中的权威值（含 lgc- 前缀），用它来 resolve runtimeAgentId
       const canonicalAdoptId = String((claw as any).adoptId || adoptId);
       const runtimeAgentId = resolveRuntimeAgentId(canonicalAdoptId, String((claw as any).agentId || ""));
       const relPath = filePath;
-      const absPath = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/${relPath}`;
+      const absPath = `${openClawWorkspaceDir(runtimeAgentId)}/${relPath}`;
 
       if (!existsSync(absPath)) return res.status(404).json({ error: "file not found: " + absPath });
 
@@ -162,9 +159,8 @@ export function registerDownloadRoutes(app: express.Express) {
         return sendError(res, "UNAUTHORIZED", "token expired");
       }
 
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const relPath = sanitizeRelPath(String(parsed.path || "")) || "";
-      const filePath = `${remoteHome}/.openclaw/workspace-${parsed.runtimeAgentId}/${relPath}`;
+      const filePath = `${openClawWorkspaceDir(String(parsed.runtimeAgentId || ""))}/${relPath}`;
 
       if (!existsSync(filePath)) return sendError(res, "NOT_FOUND", "file not found");
 
@@ -203,9 +199,8 @@ export function registerDownloadRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
-      const workspaceDir = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}`;
+      const workspaceDir = openClawWorkspaceDir(runtimeAgentId);
       const filePath = `${workspaceDir}/${relPath}`;
 
       if (!existsSync(filePath)) return sendError(res, "NOT_FOUND", "file not found");

@@ -1,8 +1,9 @@
 import express from "express";
 import { requireClawOwner } from "./helpers";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "fs";
 
-const NOTIFY_CONFIG_PATH = "/root/linggan-platform/data/claw-notify-configs.json";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
+const NOTIFY_CONFIG_PATH = `${APP_ROOT}/data/claw-notify-configs.json`;
 
 function loadConfigs(): Record<string, any> {
   try {
@@ -11,6 +12,7 @@ function loadConfigs(): Record<string, any> {
   return {};
 }
 function saveConfigs(data: Record<string, any>) {
+  try { mkdirSync(`${APP_ROOT}/data`, { recursive: true }); } catch {}
   writeFileSync(NOTIFY_CONFIG_PATH, JSON.stringify(data, null, 2), "utf-8");
 }
 

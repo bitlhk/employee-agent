@@ -30,7 +30,7 @@ const requireUser = t.middleware(async opts => {
 export const protectedProcedure = t.procedure.use(requireUser);
 
 
-const APP_ROOT = process.env.APP_ROOT || "/root/linggan-platform";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
 const AUDIT_LOG = `${APP_ROOT}/logs/admin-audit.log`;
 try { mkdirSync(`${APP_ROOT}/logs`, { recursive: true }); } catch {}
 

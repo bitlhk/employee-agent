@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-OUT_DIR="${1:-/root/linggan-platform-oss}"
+OUT_DIR="${1:-$(cd "$SRC_DIR/.." && pwd)/linggan-platform-oss}"
 
 echo "📦 源目录: $SRC_DIR"
 echo "📤 输出到: $OUT_DIR"

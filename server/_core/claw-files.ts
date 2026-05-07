@@ -5,7 +5,7 @@
 import express from "express";
 import path from "path";
 import { existsSync, statSync, readdirSync, readFileSync, createReadStream, mkdirSync, writeFileSync, unlinkSync, rmSync } from "fs";
-import { requireClawOwner, resolveRuntimeAgentId } from "./helpers";
+import { openClawWorkspaceDir, requireClawOwner, resolveRuntimeAgentId } from "./helpers";
 import { hermesFiles, type LinggFileNode, type FilesProviderCapabilities, type FilesProviderHandle, adoptIdToWorkspace } from "./hermes-files";
 
 const OPENCLAW_FILES_CAPABILITIES: FilesProviderCapabilities = {
@@ -51,9 +51,8 @@ function toFilesHandle(claw: any): FilesProviderHandle {
 }
 
 function openclawWorkspace(claw: any, adoptId: string): string {
-  const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
   const runtimeAgentId = resolveRuntimeAgentId(adoptId, String(claw?.agentId || ""));
-  return `${remoteHome}/.openclaw/workspace-${runtimeAgentId}`;
+  return openClawWorkspaceDir(runtimeAgentId);
 }
 
 function safeJoin(workspace: string, relPath: string): string | null {

@@ -7,7 +7,8 @@ import { buildChatRequestBody, type PermissionProfile } from "./tool_schema";
 import {
   requireClawOwner, resolveRuntimeAgentId, appendLogAsync,
   readSessionEpoch, bumpSessionEpoch, lookupSessionRegistry,
-  upsertSessionRegistry, clearAgentSessionsCache, isPrivateUrl, APP_ROOT
+  upsertSessionRegistry, clearAgentSessionsCache, isPrivateUrl, APP_ROOT,
+  OPENCLAW_BASE_HOME, openClawAgentDir, openClawWorkspaceDir
 } from "./helpers";
 import { ResponseAccumulator } from "./response-accumulator";
 // 2026-04-18: eager import 避免首次 HTTP 聊天冷启动挂死（配合 claw-ws-proxy 保持一致）
@@ -97,8 +98,8 @@ export function registerChatStreamRoutes(app: express.Express) {
       // session caches, and let the next send create agent:<id>:main:e{next}.
       const dbAgentId = String((claw as any).agentId || "").trim();
       const trialAgentId = `trial_${String(adoptId)}`;
-      const remoteHomeReset = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-      const trialAgentDirReset = `${remoteHomeReset}/.openclaw/agents/${trialAgentId}`;
+      const remoteHomeReset = OPENCLAW_BASE_HOME;
+      const trialAgentDirReset = openClawAgentDir(trialAgentId);
       const runtimeAgentIdReset = existsSync(trialAgentDirReset) ? trialAgentId : dbAgentId;
       const currentEpoch = readSessionEpoch(String(adoptId));
       const currentSessionKey = lookupSessionRegistry(String(adoptId), runtimeAgentIdReset, currentEpoch)
@@ -205,8 +206,7 @@ export function registerChatStreamRoutes(app: express.Express) {
       try {
         const dbAgentId = String((claw as any).agentId || "").trim();
         const trialAgentId = `trial_${String(adoptId)}`;
-        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-        const trialAgentDir = `${remoteHome}/.openclaw/agents/${trialAgentId}`;
+        const trialAgentDir = openClawAgentDir(trialAgentId);
         const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : dbAgentId;
         const { execSync } = await import("child_process");
         const raw = execSync("openclaw memory status --json 2>/dev/null || openclaw memory status 2>/dev/null", { timeout: 8000, encoding: "utf8" });
@@ -297,11 +297,11 @@ export function registerChatStreamRoutes(app: express.Express) {
 
 
     const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
-    const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+    const remoteHome = OPENCLAW_BASE_HOME;
     const dedupEpoch = readSessionEpoch(String(adoptId));
     const dedupDbAgentId = String((claw as any).agentId || "").trim();
     const dedupTrialAgentId = `trial_${String(adoptId)}`;
-    const dedupTrialAgentDir = `${remoteHome}/.openclaw/agents/${dedupTrialAgentId}`;
+    const dedupTrialAgentDir = openClawAgentDir(dedupTrialAgentId);
     const dedupRuntimeAgentId = existsSync(dedupTrialAgentDir) ? dedupTrialAgentId : dedupDbAgentId;
     let dedupSessionKey: string;
     if (epochLabel && typeof epochLabel === "string" && epochLabel.trim().length > 0) {
@@ -426,7 +426,7 @@ export function registerChatStreamRoutes(app: express.Express) {
         const epoch = readSessionEpoch(String(adoptId));
         const dbAgentId = String((claw as any).agentId || "").trim();
         const trialAgentId = `trial_${String(adoptId)}`;
-        const trialAgentDir = `${remoteHome}/.openclaw/agents/${trialAgentId}`;
+        const trialAgentDir = openClawAgentDir(trialAgentId);
         const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : dbAgentId;
 
         // ── Session key 计算 ─────────────────────────────────────────
@@ -471,14 +471,14 @@ const options = {
     };
 
     // ── 工具代理层：拦截高危 tool_call，走 routeTool ────────────────
-    const remoteHomeLocal = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+    const remoteHomeLocal = OPENCLAW_BASE_HOME;
     const toolCtx: ToolContext = {
       adoptId: String(adoptId),
       agentId: runtimeAgentId,
       userId: Number((claw as any).userId || 0),
       permissionProfile: String((claw as any).permissionProfile || "starter") as ToolContext["permissionProfile"],
       sessionKey,
-      workspaceDir: `${remoteHomeLocal}/.openclaw/workspace-${runtimeAgentId}`,
+      workspaceDir: openClawWorkspaceDir(runtimeAgentId),
       sendEvent: (event: string, data: object) => writeEvent(event, data),  // 传入 SSE 写函数，供 routeTool 发送进度事件
     };
     const suppressedToolResults = new Set<string>();

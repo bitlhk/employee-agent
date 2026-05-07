@@ -506,7 +506,8 @@ async function checkFullWs(agentId: string): Promise<void> {
   const sendReqId = randomUUID();
 
   await new Promise<void>((resolve) => {
-    const ws = new WebSocket(wsUrl, { headers: { Origin: "http://127.0.0.1:5180" } });
+    const origin = process.env.LINGXIA_INTERNAL_BASE_URL || `http://127.0.0.1:${process.env.PORT || "5180"}`;
+    const ws = new WebSocket(wsUrl, { headers: { Origin: origin.replace(/\/+$/, "") } });
     const timer = setTimeout(() => {
       record("FULL-WS", title, "fail", "150s 超时", JSON.stringify({ sessionKey, sawAssistantDelta, sawChatFinal, sawLifecycleEnd, sessionCreated, messageSent }));
       try { ws.close(); } catch {}

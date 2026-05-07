@@ -47,6 +47,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
     networks:
       - linggan-net
 

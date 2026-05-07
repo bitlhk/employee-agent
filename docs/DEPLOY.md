@@ -10,7 +10,30 @@
 
 灵虾平台 = Node.js 应用，主聊天依赖 OpenClaw Gateway。
 
-## 方式一：Docker Compose（推荐）
+## 方式一：裸机部署（推荐，适合灵虾 + OpenClaw 同机）
+
+这是当前推荐的独立部署方式，尤其适合 `ubuntu` / 普通用户运行：
+
+```bash
+git clone https://github.com/bitlhk/linggan-claw.git
+cd linggan-claw
+bash setup.sh
+pnpm build
+pm2 start ecosystem.config.cjs
+bash scripts/check-local-openclaw-node.sh
+```
+
+说明：
+- `ecosystem.config.cjs` 由 `setup.sh` 从 `ecosystem.config.cjs.example` 生成，是本机私有 PM2 配置。
+- OpenClaw 默认按当前系统用户查找，例如 `ubuntu` 用户对应 `/home/ubuntu/.openclaw`。
+- 如果没有配置 SMTP，`setup.sh` 默认写入 `EMAIL_VERIFICATION_REQUIRED=false`，便于先完成独立部署验证。
+- 首个管理员可用脚本创建：
+
+```bash
+pnpm tsx scripts/init-admin.ts --email=admin@example.com --password='换成强密码' --name='Admin'
+```
+
+## 方式二：Docker Compose（仅适合基础平台/数据库）
 
 ```bash
 git clone https://github.com/bitlhk/linggan-claw.git
@@ -21,9 +44,9 @@ cp .env.example .env
 docker-compose up -d
 ```
 
-这会启动 MySQL + 灵虾平台。但 **OpenClaw 需要单独安装**（见下方）。
+这会启动 MySQL + 灵虾平台。但默认镜像不包含宿主机 OpenClaw 环境，主聊天如需走本机 OpenClaw，优先使用上面的裸机部署方式。
 
-## 方式二：手动部署
+## 方式三：手动部署
 
 ### Step 1: 环境准备
 

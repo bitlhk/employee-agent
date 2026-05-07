@@ -4,8 +4,10 @@ set -euo pipefail
 MODE="${1:-}"
 shift || true
 
-ROOT="${LINGGAN_ROOT:-/root/linggan-platform}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${LINGGAN_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 REPORT_ROOT="${UPGRADE_SMOKE_REPORT_ROOT:-$ROOT/docs/testing/reports/openclaw-upgrade}"
+PM2_LOG_ROOT="${PM2_LOG_ROOT:-${HOME}/.pm2/logs}"
 RUN_ID=""
 FULL=0
 ADOPT_ID="${OPENCLAW_CONTRACT_AGENT:-lgc-ofnmjm4joj}"
@@ -103,7 +105,7 @@ capture_skill_summary() {
 
 capture_critical_logs() {
   mapfile -t LOG_FILES < <(
-    find /root/.pm2/logs -maxdepth 1 -type f \
+    find "$PM2_LOG_ROOT" -maxdepth 1 -type f \
       \( -name 'linggan-claw*.log' -o -name 'hi-agent*.log' -o -name 'agent-kernel*.log' \) \
       ! -name '*__*.log' \
       2>/dev/null | sort
@@ -207,4 +209,3 @@ if [[ "$MODE" == "pre" ]]; then
 else
   post_decision
 fi
-

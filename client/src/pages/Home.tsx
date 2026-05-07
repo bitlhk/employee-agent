@@ -74,6 +74,45 @@ function markThinkingDone(msgs: any[]): any[] {
 // 用于 SSE 截断 recover 时精确匹配目标消息——用户在 recover 期间发新消息也不串
 const makeLxMsgId = () => `lx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const makeClientRunId = () => `run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+type UploadedLingxiaAttachment = {
+  name: string;
+  path: string;
+  size: number;
+  runtime?: string;
+};
+
+function formatFileSize(size: number) {
+  if (!Number.isFinite(size) || size < 0) return "unknown size";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function buildMessageWithUploadedAttachments(text: string, uploads: UploadedLingxiaAttachment[]) {
+  if (uploads.length === 0) return text;
+  const intro = text.trim() || "请查看我上传的附件。";
+  const lines = uploads.map((file) =>
+    `- ${file.name} (${formatFileSize(file.size)}) -> workspace path: ${file.path}`
+  );
+  return [
+    intro,
+    "",
+    "[已上传附件]",
+    ...lines,
+    "",
+    "需要读取附件内容时，请使用上面的 workspace path。",
+  ].join("\n");
+}
 type LxMsg = {
   id: string;
   role: "user" | "assistant";
@@ -401,6 +440,41 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
   });
   const activeLingxiaMsgs = chatV2Enabled ? chatV2.messages : lingxiaMsgs;
   const activeLingxiaStreaming = chatV2Enabled ? chatV2.isStreaming : lingxiaStreaming;
+  const uploadLingxiaAttachments = async (files: File[]): Promise<UploadedLingxiaAttachment[]> => {
+    if (!files.length) return [];
+    if (!resolvedAdoptId) throw new Error("缺少灵虾实例 ID");
+    const apiBase = import.meta.env.VITE_API_URL || "";
+    const uploads: UploadedLingxiaAttachment[] = [];
+
+    for (const file of files) {
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error(`${file.name} 超过 10MB 上传限制`);
+      }
+      const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());
+      const response = await fetch(`${apiBase}/api/claw/files/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          adoptId: resolvedAdoptId,
+          filename: file.name,
+          contentBase64,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || `${file.name} 上传失败 (${response.status})`);
+      }
+      uploads.push({
+        name: file.name,
+        path: String(payload.path || file.name),
+        size: Number(payload.size || file.size),
+        runtime: payload.runtime ? String(payload.runtime) : undefined,
+      });
+    }
+
+    return uploads;
+  };
 
   // 初始化 WSS 连接（后台自动尝试，不阻塞 UI）—— 仅 OpenClaw (lgc-*)
   useEffect(() => {
@@ -538,9 +612,9 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
     return () => clearInterval(id);
   }, [lingxiaStreaming]);
 
-  const skipCollabRef = useRef(false);
-  const sendLingxiaMessage = async () => {
-    if (!resolvedAdoptId || !lingxiaInput.trim() || lingxiaStreaming) return;
+  const sendLingxiaMessage = async (messageOverride?: string) => {
+    const sourceText = messageOverride ?? lingxiaInput;
+    if (!resolvedAdoptId || !sourceText.trim() || lingxiaStreaming) return;
     if (chatV2Enabled) return;
     // 2026-04-17 SSE race fix: 强制 abort 上一次的流，避免 WS 重连/网络抖动后旧 reader 还在
     // setLingxiaMsgs 写 delta，跟新流字符级交错（典型现象：英文 narrative + 中文技能列表混合）
@@ -552,7 +626,7 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
     streamSeqRef.current += 1;
     const myStreamSeq = streamSeqRef.current;
     const isStale = () => streamSeqRef.current !== myStreamSeq;
-    const text = lingxiaInput.trim();
+    const text = sourceText.trim();
     const nowLabel = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
     const assistantTimeLabel = nowLabel;
 
@@ -582,7 +656,6 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
       return;
     }
 
-    skipCollabRef.current = false;
     const userMessageId = makeLxMsgId();
     const assistantMessageId = makeLxMsgId();
     const clientRunId = makeClientRunId();
@@ -1592,43 +1665,6 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
                     contextPercent={m.contextPercent}
                     onDelete={m.role === "assistant" && !chatV2Enabled ? () => { setLingxiaMsgs(prev => prev.filter((_, i) => i !== idx)); } : undefined}
                   />
-                  {/* 协作推荐卡片按钮 */}
-                  {(m as any).collabSuggestion && (
-                    <div className="flex gap-2 ml-12 mt-2 mb-1 lingxia-msg-fade">
-                      <button
-                        className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
-                        style={{ background: "var(--oc-accent, #6366f1)", color: "#fff", border: "none", cursor: "pointer", opacity: 0.9 }}
-                        onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.9"; e.currentTarget.style.transform = "none"; }}
-                        onClick={() => {
-                          setCollabOpen(true);
-                          // 存预填信息到 sessionStorage，CollabDrawer 读取
-                          try {
-                            const cs = (m as any).collabSuggestion;
-                            sessionStorage.setItem("collab_prefill", JSON.stringify({ agentId: cs.agentId, prompt: cs.originalPrompt }));
-                          } catch {}
-                        }}
-                      >
-                        {(m as any).collabSuggestion.agentEmoji} 打开助手
-                      </button>
-                      <button
-                        className="px-4 py-2 rounded-lg text-sm transition-all"
-                        style={{ background: "var(--oc-bg-active)", color: "var(--oc-text-secondary)", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer" }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
-                        onClick={() => {
-                          // 删掉推荐卡片，设 skipCollab，重新发送给 Agent
-                          const originalText = (m as any).collabSuggestion.originalPrompt;
-                          setLingxiaMsgs((prev) => prev.filter((_, i) => i !== idx && i !== idx - 1));
-                          skipCollabRef.current = true;
-                          setLingxiaInput(originalText);
-                          setTimeout(() => sendLingxiaMessage(), 50);
-                        }}
-                      >
-                        💬 继续对话
-                      </button>
-                    </div>
-                  )}
                   </div>
                 );
               })}
@@ -1652,15 +1688,27 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
             <ChatInput
               value={lingxiaInput}
               onChange={setLingxiaInput}
-              onSend={() => {
+              onSend={async (files = []) => {
                 const text = (lingxiaInput || "").trim();
+                if (!text && files.length === 0) return false;
+                let finalText = text;
+                if (files.length > 0) {
+                  try {
+                    const uploaded = await uploadLingxiaAttachments(files);
+                    finalText = buildMessageWithUploadedAttachments(text, uploaded);
+                    toast.success(`已上传 ${uploaded.length} 个附件`);
+                  } catch (error: any) {
+                    toast.error(error?.message || "附件上传失败");
+                    return false;
+                  }
+                }
                 if (chatV2Enabled) {
-                  if (!text || chatV2.isStreaming) return;
+                  if (!finalText.trim() || chatV2.isStreaming) return false;
                   setMentionedUsers([]);
                   setLingxiaInput("");
                   setLingxiaNearBottom(true);
-                  void chatV2.send(text);
-                  return;
+                  await chatV2.send(finalText);
+                  return true;
                 }
                 // 重扫 text 里实际还有的 @userName，过滤掉用户已删除的 mention（防 mentionedUsers 状态 ghost）
                 // 既有限制：textarea 是 plain text，不是 chip，删除标签靠这里 reconcile 兜底
@@ -1668,36 +1716,37 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
                 if (liveMentions.length === 0) {
                   // 没 @ 任何人 → 普通消息
                   if (mentionedUsers.length > 0) setMentionedUsers([]);
-                  sendLingxiaMessage();
-                  return;
+                  await sendLingxiaMessage(finalText);
+                  return true;
                 }
                 if (!text) { toast.error("请先输入任务内容再发起协作"); return; }
                 if (liveMentions.length === 1) {
-                  // 1:1 协作 → 直接 coop.create，跳 /coop/:sessionId（保持原行为）
-                  coopCreateFromChatMut.mutate({
-                    title: text.slice(0, 80).split(/\n/)[0] || "主聊天发起的协作",
-                    originMessage: text,
-                    creatorAdoptId: resolvedAdoptId || "lgc-creator",
-                    members: liveMentions.map((u) => ({
-                      userId: u.userId,
-                      targetAdoptId: u.adoptId || `mock:${u.userId}`,
-                      subtask: text,
-                    })),
-                  });
-                  return;
-                }
+	                  // 1:1 协作 → 直接 coop.create，跳 /coop/:sessionId（保持原行为）
+	                  coopCreateFromChatMut.mutate({
+	                    title: text.slice(0, 80).split(/\n/)[0] || "主聊天发起的协作",
+	                    originMessage: finalText,
+	                    creatorAdoptId: resolvedAdoptId || "lgc-creator",
+	                    members: liveMentions.map((u) => ({
+	                      userId: u.userId,
+	                      targetAdoptId: u.adoptId || `mock:${u.userId}`,
+	                      subtask: finalText,
+	                    })),
+	                  });
+	                  return true;
+	                }
                 // ≥2 人 → 跳 /coop/new 让用户给每人分子任务（飞书+Linear 模式）
                 try {
-                  sessionStorage.setItem("coop_prefill", JSON.stringify({
-                    origin: text,
-                    title: text.slice(0, 80).split(/\n/)[0],
+	                  sessionStorage.setItem("coop_prefill", JSON.stringify({
+	                    origin: finalText,
+	                    title: text.slice(0, 80).split(/\n/)[0],
                     members: liveMentions.map((u) => ({ userId: u.userId, userName: u.userName, adoptId: u.adoptId })),
                   }));
                 } catch {}
-                setMentionedUsers([]);
-                setLingxiaInput("");
-                setLocationCoop("/coop/new");
-              }}
+	                setMentionedUsers([]);
+	                setLingxiaInput("");
+	                setLocationCoop("/coop/new");
+	                return true;
+	              }}
               onStop={chatV2Enabled ? () => chatV2.abort("home_stop") : stopLingxiaStreaming}
               streaming={activeLingxiaStreaming}
               disabled={false}

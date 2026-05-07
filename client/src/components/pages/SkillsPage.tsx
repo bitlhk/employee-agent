@@ -88,7 +88,7 @@ type StateFilter = "all" | "ready" | "attention" | "disabled";
 
 const SOURCE_LABEL: Record<SourceKind, string> = {
   builtin: "平台内置",
-  marketplace: "市场安装",
+  marketplace: "广场安装",
   uploaded: "我的上传",
   generated: "对话生成",
 };
@@ -195,6 +195,10 @@ function sourceCanUninstall(skill: RegistrySkill) {
   return skill.source.kind === "marketplace";
 }
 
+function sourceCanPublish(skill: RegistrySkill) {
+  return skill.source.kind === "uploaded" || skill.source.kind === "generated";
+}
+
 function SkillPill({ children, tone = "neutral" }: { children: ReactNode; tone?: "ok" | "warn" | "danger" | "neutral" }) {
   return <span className={`skills-chip ${pillToneClass(tone)}`}>{children}</span>;
 }
@@ -217,7 +221,7 @@ function SkillsToolbar({
   const sourceFilters: { key: SourceFilter; label: string }[] = [
     { key: "all", label: "全部" },
     { key: "builtin", label: "平台内置" },
-    { key: "marketplace", label: "市场安装" },
+    { key: "marketplace", label: "广场安装" },
     { key: "uploaded", label: "我的上传" },
     { key: "generated", label: "对话生成" },
   ];
@@ -301,6 +305,7 @@ function SkillDetailDrawer({
   onUninstall,
   onDestroy,
   onRename,
+  onPublish,
   busy,
 }: {
   skill: RegistrySkill | null;
@@ -310,6 +315,7 @@ function SkillDetailDrawer({
   onUninstall: (skill: RegistrySkill) => void;
   onDestroy: (skill: RegistrySkill) => void;
   onRename: (skill: RegistrySkill) => void;
+  onPublish: (skill: RegistrySkill) => void;
   busy: boolean;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -373,6 +379,7 @@ function SkillDetailDrawer({
                   {skill.enabled ? "停用" : "启用"}
                 </button>
                 {sourceCanRename(skill) && <button className="skills-btn" disabled={busy} onClick={() => onRename(skill)}><Pencil size={13} /> 重命名</button>}
+                {sourceCanPublish(skill) && <button className="skills-btn" disabled={busy} onClick={() => onPublish(skill)}><Store size={13} /> 发布到技能广场</button>}
                 {sourceCanUninstall(skill) && <button className="skills-btn" disabled={busy} onClick={() => onUninstall(skill)}><Trash2 size={13} /> 卸载</button>}
                 {sourceCanDestroy(skill) && <button className="skills-btn" disabled={busy} onClick={() => onDestroy(skill)}><Trash2 size={13} /> 删除</button>}
               </div>
@@ -510,7 +517,7 @@ export function SkillsPage({ adoptId }: {
   });
 
   const onUninstall = (skill: RegistrySkill) => {
-    if (!confirm(`确认卸载 ${displayNameOf(skill)}？市场源不会删除，可重新安装。`)) return;
+    if (!confirm(`确认卸载 ${displayNameOf(skill)}？广场源不会删除，可重新安装。`)) return;
     void mutate(skill, "已卸载", async () => {
       await fetchJson("/api/claw/skills/uninstall", {
         method: "POST",
@@ -539,6 +546,18 @@ export function SkillsPage({ adoptId }: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ adoptId: skill.adoptId, skillId: skill.id, displayName }),
+      });
+    });
+  };
+
+  const onPublish = (skill: RegistrySkill) => {
+    const version = prompt("发布版本号", skill.source.version || "1.0.0")?.trim() || "1.0.0";
+    if (!version) return;
+    void mutate(skill, "已提交审核", async () => {
+      await fetchJson("/api/claw/skill-market/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adoptId: skill.adoptId, skillId: skill.id, version }),
       });
     });
   };
@@ -594,7 +613,7 @@ export function SkillsPage({ adoptId }: {
           </button>
           <button id="skills-tab-market" className="page-tab" data-active={skillTab === "market" ? "true" : "false"} role="tab" aria-selected={skillTab === "market"} aria-controls="skills-panel-market" tabIndex={skillTab === "market" ? 0 : -1} onClick={() => setSkillTab("market")}>
             <Store className="page-tab__icon" aria-hidden="true" />
-            技能市场
+            技能广场
           </button>
         </div>
 
@@ -652,6 +671,7 @@ export function SkillsPage({ adoptId }: {
               onUninstall={onUninstall}
               onDestroy={onDestroy}
               onRename={onRename}
+              onPublish={onPublish}
             />
           </div>
         )}

@@ -7,8 +7,59 @@ import type { Request, Response } from "express";
 import { createContext } from "./context";
 
 // ── 可配置路径（开源部署时通过 .env 覆盖）──
-export const APP_ROOT = process.env.APP_ROOT || "/root/linggan-platform";
-export const OPENCLAW_HOME = process.env.CLAW_OPENCLAW_HOME || "/root/.openclaw";
+const processHome = process.env.HOME || process.env.USERPROFILE || "/root";
+
+export const APP_ROOT = process.env.APP_ROOT || process.cwd();
+
+export function expandHomePath(raw: string): string {
+  const value = String(raw || "").trim();
+  if (!value) return value;
+  if (value === "~") return processHome;
+  if (value.startsWith("~/")) return path.join(processHome, value.slice(2));
+  return value;
+}
+
+export function normalizeOpenClawHome(raw?: string): string {
+  const value = expandHomePath(
+    raw
+      || process.env.CLAW_OPENCLAW_HOME
+      || process.env.CLAW_REMOTE_OPENCLAW_HOME
+      || process.env.OPENCLAW_HOME
+      || processHome
+  );
+  return path.basename(value) === ".openclaw" ? value : path.join(value, ".openclaw");
+}
+
+export const OPENCLAW_HOME = normalizeOpenClawHome();
+export const OPENCLAW_BASE_HOME = path.dirname(OPENCLAW_HOME);
+export const OPENCLAW_JSON_PATH = expandHomePath(process.env.CLAW_OPENCLAW_JSON || path.join(OPENCLAW_HOME, "openclaw.json"));
+
+export const openClawPath = (...parts: string[]) => path.join(OPENCLAW_HOME, ...parts);
+export const openClawAgentDir = (agentId: string) => openClawPath("agents", String(agentId || "").trim());
+export const openClawWorkspaceDir = (runtimeAgentId: string) => openClawPath(`workspace-${String(runtimeAgentId || "").trim()}`);
+export const openClawSkillMarketDir = () => openClawPath("skill-market");
+
+export function normalizeHermesProfilesDir(raw?: string): string {
+  const value = expandHomePath(
+    raw
+      || process.env.HERMES_HOME_BASE
+      || process.env.HERMES_PROFILES_DIR
+      || process.env.HERMES_HOME
+      || path.join(processHome, ".hermes")
+  );
+  if (path.basename(value) === "profiles") return value;
+  return path.join(value, "profiles");
+}
+
+export const HERMES_PROFILES_DIR = normalizeHermesProfilesDir();
+export const hermesProfileDir = (profileName: string) => path.join(HERMES_PROFILES_DIR, String(profileName || "").trim());
+export const hermesProfileWorkspaceDir = (profileName: string) => path.join(hermesProfileDir(profileName), "workspace");
+export const hermesProfileSkillsDir = (profileName: string) => path.join(hermesProfileDir(profileName), "skills");
+
+export const INTERNAL_BASE_URL = String(
+  process.env.LINGXIA_INTERNAL_BASE_URL || `http://127.0.0.1:${process.env.PORT || "5180"}`
+).replace(/\/+$/, "");
+export const internalApiUrl = (pathname: string) => `${INTERNAL_BASE_URL}${String(pathname || "").startsWith("/") ? pathname : `/${pathname}`}`;
 
 export const LOG_DIR = `${APP_ROOT}/logs`;
 try { mkdirSync(LOG_DIR, { recursive: true }); } catch {}
@@ -145,7 +196,7 @@ export const invalidateSessionRegistry = (adoptId: string) => {
 // 无需用户手动 /new 或重置对话
 export const clearAgentSessionsCache = (agentId: string, remoteHome: string) => {
   try {
-    const sessionsPath = `${remoteHome}/.openclaw/agents/${agentId}/sessions/sessions.json`;
+    const sessionsPath = path.join(normalizeOpenClawHome(remoteHome), "agents", agentId, "sessions", "sessions.json");
     if (existsSync(sessionsPath)) {
       writeFileSync(sessionsPath, "{}", "utf-8");
     }
@@ -185,10 +236,9 @@ export const requireClawOwner = async (req: Request, res: Response, adoptId: str
 
 
 export const resolveRuntimeAgentId = (adoptId: string, dbAgentIdRaw: any) => {
-  const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
   const dbAgentId = String(dbAgentIdRaw || "").trim();
   const trialAgentId = `trial_${String(adoptId)}`;
-  const trialAgentDir = `${remoteHome}/.openclaw/agents/${trialAgentId}`;
+  const trialAgentDir = openClawAgentDir(trialAgentId);
   return existsSync(trialAgentDir) ? trialAgentId : dbAgentId;
 };
 
@@ -222,8 +272,7 @@ export function generateFileToken(adoptId: string, runtimeAgentId: string, relPa
 
 // ── Workspace helpers ──
 export const resolveClawWorkspace = (claw: any) => {
-  const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-  return `${remoteHome}/.openclaw/workspace-${String(claw?.agentId || "").trim()}`;
+  return openClawWorkspaceDir(String(claw?.agentId || "").trim());
 };
 
 export const computeEtag = (content: string) => createHash("sha1").update(content || "", "utf8").digest("hex");
@@ -231,10 +280,7 @@ export const computeEtag = (content: string) => createHash("sha1").update(conten
 // ── Read OpenClaw JSON config ──
 export const readOpenclawJson = () => {
   try {
-    // CLAW_REMOTE_OPENCLAW_HOME=/root，实际配置在 /root/.openclaw/openclaw.json
-    const ocHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-    const ocPath = `${ocHome}/.openclaw/openclaw.json`;
-    const raw = readFileSync(ocPath, "utf8");
+    const raw = readFileSync(OPENCLAW_JSON_PATH, "utf8");
     return JSON.parse(raw);
   } catch {
     return null;

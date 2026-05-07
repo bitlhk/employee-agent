@@ -22,9 +22,10 @@ import { createHash, generateKeyPairSync, sign, randomUUID } from "crypto";
 import { WsStreamWriter } from "./stream-writer";
 import { routeMessage } from "./intent-agent";
 import { createContext } from "./context";
-import { readSessionEpoch, appendLogAsync } from "./helpers";
+import { INTERNAL_BASE_URL, appendLogAsync, openClawAgentDir, openClawWorkspaceDir, readSessionEpoch } from "./helpers";
 import { ResponseAccumulator } from "./response-accumulator";
 import { normalizeWsEvent } from "./runtime";
+import { buildRuntimeUserMessage, userLikelyUsesChinese } from "./tool_schema";
 import {
   markChatRunComplete,
   markChatRunStarted,
@@ -41,9 +42,33 @@ const b64u = (b: Buffer) => b.toString("base64").replaceAll("+", "-").replaceAll
 const DEV_PUB = b64u(_raw);
 const DEV_ID = createHash("sha256").update(_raw).digest("hex");
 
-const GW_URL = `ws://127.0.0.1:${process.env.CLAW_GATEWAY_PORT || "18789"}`;
+const GW_URL = `ws://${process.env.CLAW_REMOTE_HOST || "127.0.0.1"}:${process.env.CLAW_GATEWAY_PORT || "18789"}`;
 const GW_TOKEN = process.env.CLAW_GATEWAY_TOKEN || "";
 const SCOPES = ["operator.admin", "operator.read", "operator.write"];
+const ROUTINE_ENGLISH_TOOL_PREAMBLE_RE =
+  /^\s*(?:sure[,!\s]*)?(?:ok(?:ay)?[,!\s]*)?(?:(?:i'll|i will|let me|i'm going to|i am going to|i need to)\s+(?:check|look|search|find|fetch|open|use|run|get|take|verify|inspect|read|call|query|look up)\b|i'll\s+go ahead\b)/i;
+const ROUTINE_ENGLISH_TOOL_PREAMBLE_PREFIX_RE =
+  /^\s*(?:sure[,!\s]*)?(?:ok(?:ay)?[,!\s]*)?(?:i'll|i will|let me|i'm going to|i am going to|i need to)\b/i;
+
+function isRoutineEnglishToolPreambleCandidate(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  if (trimmed.length > 240) return false;
+  if (/[\u3400-\u9fff\uf900-\ufaff]/.test(trimmed)) return false;
+  if (ROUTINE_ENGLISH_TOOL_PREAMBLE_RE.test(trimmed)) return true;
+  if (ROUTINE_ENGLISH_TOOL_PREAMBLE_PREFIX_RE.test(trimmed)) return true;
+  const lower = trimmed.toLowerCase();
+  return ["i'll", "i will", "let me", "i'm going to", "i am going to", "i need to", "sure", "okay", "ok"]
+    .some((prefix) => prefix.startsWith(lower));
+}
+
+function isRoutineEnglishToolPreamble(text: string) {
+  const trimmed = text.trim();
+  return trimmed.length > 0
+    && trimmed.length <= 240
+    && !/[\u3400-\u9fff\uf900-\ufaff]/.test(trimmed)
+    && ROUTINE_ENGLISH_TOOL_PREAMBLE_RE.test(trimmed);
+}
 
 function signPayload(nonce: string) {
   const t = Date.now();
@@ -71,10 +96,9 @@ export function registerWSProxy(server: Server) {
       if (!claw || claw.userId !== ctx.user.id) { socket.write("HTTP/1.1 403 Forbidden\r\n\r\n"); socket.destroy(); return; }
 
       const { existsSync } = await import("fs");
-      const home = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const dbAgent = String((claw as any).agentId || "").trim();
       const trialId = `trial_${adoptId}`;
-      const agentId = existsSync(`${home}/.openclaw/agents/${trialId}`) ? trialId : dbAgent;
+      const agentId = existsSync(openClawAgentDir(trialId)) ? trialId : dbAgent;
 
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req, { adoptId, agentId, userId: ctx.user!.id });
@@ -104,6 +128,31 @@ export function registerWSProxy(server: Server) {
     let activeChat = false;           // 是否有 active chat 在跑（用于 gw close 是否触发 truncated）
     let clientClosed = false;         // 浏览器主动断开（gw close 时用以区分 client_close vs gw_close）
     let activeClientRunId: string | undefined;
+    let activeUserPrefersChinese = false;
+    let pendingAssistantPreamble = "";
+    let preambleWindowOpen = false;
+
+    const emitAssistantDelta = (content: string) => {
+      if (!content) return;
+      if (memAcc) {
+        const wasEmpty = memAcc.getBuffer().length === 0;
+        memAcc.appendDelta(content);
+        if (wasEmpty) {
+          console.log("[MEMORY-DEBUG] first delta received");
+        }
+      }
+      sendToClient({
+        choices: [{ index: 0, delta: { content }, finish_reason: null }],
+      });
+    };
+
+    const flushPendingAssistantPreamble = () => {
+      if (pendingAssistantPreamble) {
+        emitAssistantDelta(pendingAssistantPreamble);
+        pendingAssistantPreamble = "";
+      }
+      preambleWindowOpen = false;
+    };
 
     // 正常完成 finalize：在 lifecycle.end 已发 __stream_end，这里只写日志
     const finalizeChatNormal = () => {
@@ -185,8 +234,7 @@ export function registerWSProxy(server: Server) {
 
     const emitWorkspaceFiles = () => {
       try {
-        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-        const wsDir = `${remoteHome}/.openclaw/workspace-${meta.agentId}`;
+        const wsDir = openClawWorkspaceDir(meta.agentId);
         if (!existsSync(wsDir) || lastUserSendMs <= 0) return;
 
         const SKIP_DIRS = new Set(["skills", "memory", "node_modules", ".git", ".dreams", "dist", "build", ".openclaw"]);
@@ -221,7 +269,7 @@ export function registerWSProxy(server: Server) {
       }
     };
 
-    gw = new WebSocket(GW_URL, { headers: { Origin: "http://127.0.0.1:5180" } });
+    gw = new WebSocket(GW_URL, { headers: { Origin: INTERNAL_BASE_URL } });
 
     gw.on("message", (raw: Buffer) => {
       try {
@@ -288,15 +336,15 @@ export function registerWSProxy(server: Server) {
           for (const evt of normalized.events) {
             switch (evt.type) {
               case "delta":
-                if (memAcc) {
-                  memAcc.appendDelta(evt.content);
-                  if (memAcc.getBuffer().length === evt.content.length) {
-                    console.log("[MEMORY-DEBUG] first delta received");
+                if (preambleWindowOpen && activeUserPrefersChinese) {
+                  pendingAssistantPreamble += evt.content;
+                  if (isRoutineEnglishToolPreambleCandidate(pendingAssistantPreamble)) {
+                    break;
                   }
+                  flushPendingAssistantPreamble();
+                } else {
+                  emitAssistantDelta(evt.content);
                 }
-                sendToClient({
-                  choices: [{ index: 0, delta: { content: evt.content }, finish_reason: null }],
-                });
                 break;
 
               case "thinking":
@@ -307,6 +355,16 @@ export function registerWSProxy(server: Server) {
 
               case "tool_call":
                 if (evt.phase === "start") {
+                  if (preambleWindowOpen && pendingAssistantPreamble) {
+                    if (isRoutineEnglishToolPreamble(pendingAssistantPreamble)) {
+                      pendingAssistantPreamble = "";
+                      preambleWindowOpen = false;
+                    } else {
+                      flushPendingAssistantPreamble();
+                    }
+                  } else {
+                    preambleWindowOpen = false;
+                  }
                   const tcId = evt.toolCallId || `tc_${Date.now()}`;
                   cmdOutputBuffers.set(tcId, "");
                   sendToClient({
@@ -347,6 +405,7 @@ export function registerWSProxy(server: Server) {
                 break;
 
               case "lifecycle_end":
+                flushPendingAssistantPreamble();
                 emitWorkspaceFiles();
                 sawLifecycleEnd = true;
                 sendToClient({ __stream_end: true });
@@ -357,6 +416,7 @@ export function registerWSProxy(server: Server) {
                 break;
 
               case "chat_final":
+                flushPendingAssistantPreamble();
                 if (memAcc) {
                   console.log("[MEMORY-DEBUG] chat final, flushing memAcc, buffer len:", memAcc.getBuffer().length);
                   memAcc.flush();
@@ -476,19 +536,24 @@ export function registerWSProxy(server: Server) {
       try {
         const msg = JSON.parse(raw.toString());
         if (msg.type === "chat" && sessionKey) {
+          const rawUserMessage = String(msg.message || "");
+          const gatewayMessage = buildRuntimeUserMessage(rawUserMessage);
           lastUserSendMs = Date.now();
           // 2026-04-29 批次 b：重置 chat-level state，准备追踪本轮 chat 完成态
           chatStartedAt = lastUserSendMs;
           sawLifecycleEnd = false;
           chatFinalized = false;
           activeChat = true;
+          activeUserPrefersChinese = userLikelyUsesChinese(rawUserMessage);
+          pendingAssistantPreamble = "";
+          preambleWindowOpen = activeUserPrefersChinese;
           activeClientRunId = normalizeClientRunId((msg as any).clientRunId);
           if (sessionKey && activeClientRunId) {
             const run = markChatRunStarted({
               sessionKey,
               clientRunId: activeClientRunId,
               transport: "ws",
-              message: String(msg.message || ""),
+              message: rawUserMessage,
             });
             if (run?.status === "in_flight") {
               sendToClient({
@@ -506,13 +571,14 @@ export function registerWSProxy(server: Server) {
           }
           // 每次用户发消息，创建新的记忆缓冲器
           if (memAcc) memAcc.flush(); // flush 上一轮
-          memAcc = new ResponseAccumulator(meta.userId, "main-chat", String(msg.message || ""));
+          memAcc = new ResponseAccumulator(meta.userId, "main-chat", rawUserMessage);
 
           // ── 平台意图路由（与 HTTP 路径共用 intent-agent）──
-            console.log("[WS-PM] entering intent routing for:", String(msg.message || "").slice(0, 30));
+          console.log("[WS-PM] entering intent routing for:", rawUserMessage.slice(0, 30));
           try {
             const wsWriter = new WsStreamWriter(client, WebSocket.OPEN);
-            console.log("[PM-DEBUG] routeMessage called, msg:", String(msg.message || "").slice(0, 50)); const handled = await routeMessage(meta.adoptId, String(msg.message || ""), wsWriter);
+            console.log("[PM-DEBUG] routeMessage called, msg:", rawUserMessage.slice(0, 50));
+            const handled = await routeMessage(meta.adoptId, rawUserMessage, wsWriter);
             if (handled) {
               markChatRunComplete(String(sessionKey || ""), activeClientRunId, "platform_handled");
               activeChat = false;
@@ -532,7 +598,7 @@ export function registerWSProxy(server: Server) {
             method: "chat.send",
             params: {
               sessionKey,
-              message: String(msg.message || ""),
+              message: gatewayMessage,
               idempotencyKey: chatRunId,
               thinking: "off",
               deliver: false,

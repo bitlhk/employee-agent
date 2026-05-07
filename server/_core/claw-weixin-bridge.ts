@@ -2,15 +2,18 @@
  * 灵虾微信双向聊天桥
  * 后台 long-poll iLink → 收到消息 → 调 OpenClaw → 回复到微信
  */
-import { readdirSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
 import { randomUUID, randomBytes } from "crypto";
+import { internalApiUrl } from "./helpers";
 
 const ILINK_BASE_URL = "https://ilinkai.weixin.qq.com";
 const ILINK_APP_ID = "bot";
 const ILINK_APP_CLIENT_VERSION = String((2 << 16) | (2 << 8) | 0);
 const CHANNEL_VERSION = "2.2.0";
-const WEIXIN_CONFIG_DIR = "/root/linggan-platform/data/weixin-accounts";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
+const WEIXIN_CONFIG_DIR = `${APP_ROOT}/data/weixin-accounts`;
+try { mkdirSync(WEIXIN_CONFIG_DIR, { recursive: true }); } catch {}
 const POLL_TIMEOUT_MS = 35000;
 
 function randomWechatUin(): string {
@@ -85,7 +88,7 @@ async function sendToWeixin(acct: any, chatId: string, text: string, contextToke
 async function chatWithLingxia(adoptId: string, message: string): Promise<string> {
   try {
     const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026"; // TODO: import from constants.ts
-    const resp = await fetch("http://127.0.0.1:5180/api/claw/chat-stream", {
+    const resp = await fetch(internalApiUrl("/api/claw/chat-stream"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

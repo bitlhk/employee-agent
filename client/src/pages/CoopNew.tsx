@@ -33,6 +33,8 @@ type Candidate = {
   groupId: number | null;
   groupName: string | null;
   orgName: string | null;
+  departmentName: string | null;
+  teamName: string | null;
   adoptId: string | null;
   adoptionStatus: string | null;
 };
@@ -185,6 +187,11 @@ export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
     [rawCandidates, selfUserId]
   );
 
+  const formatCandidateOrg = (c: Candidate) => {
+    const parts = [c.orgName, c.departmentName, c.teamName].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : "—";
+  };
+
   // 应用模板 — 整块重置，不走 prevOrigin 跟随逻辑
   const applyTemplate = (id: string) => {
     if (id === templateId) return;
@@ -228,8 +235,8 @@ export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
   if (!wlQ.data?.whitelisted) {
     return (
       <div className="flex flex-col items-center justify-center p-8 text-center">
-        <div className="text-xl font-semibold text-foreground mb-2">协作功能灰度中</div>
-        <div className="text-sm text-muted-foreground mb-6">当前版本仅对内部用户开放测试，请联系管理员加入白名单</div>
+        <div className="text-xl font-semibold text-foreground mb-2">未开通组织协作</div>
+        <div className="text-sm text-muted-foreground mb-6">{wlQ.data?.message || "请联系管理员在组织协作后台启用权限并分配协作空间"}</div>
         {onCancel ? (
           <Button variant="outline" onClick={onCancel}><ArrowLeft className="w-4 h-4 mr-1" /> 返回</Button>
         ) : null}
@@ -334,7 +341,7 @@ export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
           {candLoading ? (
             <div className="p-4 text-center text-xs text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin inline mr-1" /> 加载中</div>
           ) : candidates.length === 0 ? (
-            <div className="p-4 text-center text-xs text-muted-foreground">{(rawCandidates || []).length === 0 ? "没有候选人（需要 groupId > 0 的内部用户）" : "已全部选完 / 筛选无结果"}</div>
+            <div className="p-4 text-center text-xs text-muted-foreground">{(rawCandidates || []).length === 0 ? "没有候选人（需要后台设为 active 且在同一协作空间）" : "已全部选完 / 筛选无结果"}</div>
           ) : (
             candidates.map((c: Candidate) => (
               <button key={c.userId} onClick={() => pickCandidate(c)} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-primary/5 border-b border-border/30 last:border-b-0 text-left">
@@ -347,8 +354,8 @@ export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
                     {c.userId === selfUserId ? <span className="text-[10px] px-1.5 py-0 rounded-full bg-primary/15 text-primary font-normal">我 · 发起人</span> : null}
                   </div>
                   <div className="text-[11px] text-muted-foreground truncate">
-                    {c.orgName || "—"}
-                    {c.groupName ? <><span className="mx-1">·</span><span className="text-primary">{c.groupName}</span></> : null}
+                    {formatCandidateOrg(c)}
+                    {!c.departmentName && !c.teamName && c.groupName ? <><span className="mx-1">·</span><span className="text-primary">{c.groupName}</span></> : null}
                     {c.adoptId ? <><span className="mx-1">·</span>🟢 Agent: {c.adoptId.slice(0, 12)}</> : <><span className="mx-1">·</span>⚪ 无灵虾</>}
                   </div>
                 </div>

@@ -14,11 +14,24 @@
 
 import "dotenv/config";
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "fs";
+import path from "path";
 
 const argv = process.argv.slice(2);
 const APPLY = argv.includes("--apply");
 const DRY_RUN = argv.includes("--dry-run") || !APPLY;
-const STORE_PATH = process.env.OPENCLAW_CRON_STORE || "/root/.openclaw/cron/jobs.json";
+function expandHome(raw: string): string {
+  if (raw === "~") return process.env.HOME || raw;
+  if (raw.startsWith("~/")) return path.join(process.env.HOME || "", raw.slice(2));
+  return raw;
+}
+
+function normalizeOpenClawHome(raw?: string): string {
+  const expanded = expandHome(raw || process.env.HOME || process.cwd());
+  return path.basename(expanded) === ".openclaw" ? expanded : path.join(expanded, ".openclaw");
+}
+
+const OPENCLAW_HOME = normalizeOpenClawHome(process.env.CLAW_OPENCLAW_HOME || process.env.CLAW_REMOTE_OPENCLAW_HOME);
+const STORE_PATH = process.env.OPENCLAW_CRON_STORE || path.join(OPENCLAW_HOME, "cron", "jobs.json");
 const ROUTING_FIELDS = ["channel", "to", "account", "accountId", "token"] as const;
 
 function loadStore(): any {

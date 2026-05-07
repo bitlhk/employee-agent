@@ -2,7 +2,7 @@ import express from "express";
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import { strictLimiter } from "./security";
-import { requireClawOwner } from "./helpers";
+import { APP_ROOT, OPENCLAW_JSON_PATH, openClawAgentDir, openClawSkillMarketDir, openClawWorkspaceDir, requireClawOwner } from "./helpers";
 import { createContext } from "./context";
 
 export function registerMiscRoutes(app: express.Express) {
@@ -17,12 +17,11 @@ export function registerMiscRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const dbAgentId = String((claw as any).agentId || "").trim();
       const trialAgentId = `trial_${String(adoptId)}`;
-      const trialAgentDir = `${remoteHome}/.openclaw/agents/${trialAgentId}`;
+      const trialAgentDir = openClawAgentDir(trialAgentId);
       const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : dbAgentId;
-      const skillsDir = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/skills`;
+      const skillsDir = `${openClawWorkspaceDir(runtimeAgentId)}/skills`;
       res.json({ adoptId, dbAgentId, runtimeAgentId, skillsDir, trialAgentDirExists: existsSync(trialAgentDir) });
     } catch (e) {
       res.status(500).json({ error: "runtime info failed" });
@@ -214,7 +213,7 @@ export function registerMiscRoutes(app: express.Express) {
       const prompt = `审核此技能包，简要回答（200字内）：1.安全性 2.描述准确性 3.建议(通过/拒绝/需修改)\n\nSKILL.md(摘要):\n${skillMd.slice(0, 1000)}\n\n脚本: ${scriptFiles.join(",")}\n${scriptContent.slice(0, 1500)}`;
 
       // 调用 OpenClaw 的模型
-      const OPENCLAW_JSON = process.env.CLAW_OPENCLAW_JSON || "/root/.openclaw/openclaw.json";
+      const OPENCLAW_JSON = OPENCLAW_JSON_PATH;
       let apiBase = "";
       let apiToken = "";
       let modelId = "";
@@ -298,6 +297,12 @@ export function registerMiscRoutes(app: express.Express) {
   // ── 技能包上传（zip）────────────────────────────────
   app.post("/api/claw/skill-market/upload", async (req, res) => {
     try {
+      const ctx = await createContext({ req, res } as any);
+      if (!ctx.user || ctx.user.role !== "admin") {
+        res.status(403).json({ error: "admin only" });
+        return;
+      }
+
       const chunks: Buffer[] = [];
       req.on("data", (c: Buffer) => chunks.push(c));
       req.on("end", async () => {
@@ -305,7 +310,7 @@ export function registerMiscRoutes(app: express.Express) {
         if (buf.length === 0) { res.status(400).json({ error: "No data" }); return; }
         if (buf.length > 20 * 1024 * 1024) { res.status(413).json({ error: "File too large (max 20MB)" }); return; }
 
-        const marketDir = `${process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root"}/.openclaw/skill-market`;
+        const marketDir = openClawSkillMarketDir();
         const uploadId = `upload-${Date.now()}`;
         const tmpZip = `/tmp/${uploadId}.zip`;
         const extractDir = `${marketDir}/pending/${uploadId}`;
@@ -349,7 +354,23 @@ export function registerMiscRoutes(app: express.Express) {
             execSync(`rm -rf ${finalDir} 2>/dev/null; mv ${extractDir} ${finalDir}`, { stdio: "ignore" });
           } catch {}
         }
-        res.json({ ok: true, uploadId: skillId, name, description, path: finalDir });
+
+        const { insertSkillMarketItem } = await import("../db");
+        const marketItemId = await insertSkillMarketItem({
+          skillId,
+          name,
+          description: description || null,
+          author: "管理员上传",
+          authorUserId: ctx.user!.id,
+          version: "1.0.0",
+          category: "general",
+          origin: "opensource",
+          status: "pending",
+          license: "MIT",
+          packagePath: finalDir,
+        });
+
+        res.json({ ok: true, uploadId: skillId, name, description, path: finalDir, marketItemId });
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -368,7 +389,6 @@ export function registerMiscRoutes(app: express.Express) {
       }
 
       const { readFileSync, existsSync } = await import("fs");
-      const APP_ROOT = process.env.APP_ROOT || "/root/linggan-platform";
       const logPath = APP_ROOT + "/logs/claw-exec.log";
       if (!existsSync(logPath)) return res.json({ adoptions: [], daily: [], summary: {} });
 

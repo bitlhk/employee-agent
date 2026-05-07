@@ -10,9 +10,14 @@ import {
   resolveRuntimeAgentId,
   bumpSessionEpoch,
   clearAgentSessionsCache,
+  OPENCLAW_BASE_HOME,
+  openClawAgentDir,
+  openClawSkillMarketDir,
+  openClawWorkspaceDir,
 } from "./helpers";
 import { skillRegistry } from "./skills/skill-registry";
-import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer } from "./skills/skill-source";
+import { skillInstaller } from "./skills/skill-installer";
+import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer, parseSkillSourceDirectory } from "./skills/skill-source";
 
 function registryErrorStatus(kind?: string): number {
   if (kind === "not_found") return 404;
@@ -316,6 +321,69 @@ export function registerSkillRoutes(app: express.Express) {
     }
   });
 
+  app.post("/api/claw/skill-market/submit", async (req, res) => {
+    try {
+      const body = (req.body || {}) as any;
+      const adoptId = String(body.adoptId || "").trim();
+      const skillId = String(body.skillId || "").trim();
+      const version = String(body.version || "1.0.0").trim().slice(0, 32) || "1.0.0";
+      if (!adoptId || !skillId) {
+        res.status(400).json({ error: "adoptId and skillId required" });
+        return;
+      }
+
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+
+      const listed = await skillRegistry.listSkills(adoptId);
+      if (!listed.ok) {
+        res.status(registryErrorStatus(listed.error.kind)).json({ error: listed.error.detail, kind: listed.error.kind });
+        return;
+      }
+      const skill = listed.value.find((item) => item.id === skillId);
+      if (!skill) {
+        res.status(404).json({ error: "skill not found" });
+        return;
+      }
+      if (!["uploaded", "generated"].includes(skill.source.kind)) {
+        res.status(400).json({ error: "only uploaded or generated skills can be submitted" });
+        return;
+      }
+      if (!skill.source.sourcePath || !existsSync(skill.source.sourcePath)) {
+        res.status(404).json({ error: "skill source missing" });
+        return;
+      }
+      if (!skillInstaller.canInstall(skill.source.sourcePath)) {
+        res.status(400).json({ error: "unsupported skill source" });
+        return;
+      }
+
+      const marketDir = openClawSkillMarketDir();
+      const pendingDir = `${marketDir}/pending/${skill.id}-${Date.now()}`;
+      skillInstaller.installFromSource(skill.source.sourcePath, pendingDir);
+      const parsed = parseSkillSourceDirectory(pendingDir, skill.id);
+      const { insertSkillMarketItem } = await import("../db");
+      const marketItemId = await insertSkillMarketItem({
+        skillId: parsed.skillId || skill.id,
+        name: skill.source.displayName || parsed.displayName || skill.id,
+        description: skill.source.description || parsed.description || null,
+        author: "中队原创",
+        authorUserId: Number((claw as any).userId || 0) || null,
+        version,
+        category: "general",
+        origin: "squad",
+        status: "pending",
+        license: "内部共享",
+        packagePath: pendingDir,
+      });
+
+      res.json({ ok: true, marketItemId, status: "pending" });
+    } catch (e) {
+      console.error("[skill-market submit] failed", e);
+      res.status(500).json({ error: "submit skill to market failed" });
+    }
+  });
+
   app.get("/api/claw/skill-package/mine", async (req, res) => {
     try {
       const adoptId = String(req.query.adoptId || "").trim();
@@ -382,15 +450,14 @@ export function registerSkillRoutes(app: express.Express) {
       // best-effort clean installed dir
       const sid = String(found?.installedSkillId || "").trim();
       if (sid) {
-        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
         const { getClawByAdoptId } = await import("../db");
         const claw = await getClawByAdoptId(adoptId).catch(() => null);
         if (claw?.agentId) {
           // runtimeAgentId 优先：与 chat-stream / install 保持一致
           const trialAgentId = `trial_${adoptId}`;
-          const trialAgentDir = `${remoteHome}/.openclaw/agents/${trialAgentId}`;
+          const trialAgentDir = openClawAgentDir(trialAgentId);
           const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : claw.agentId;
-          const skillsBase = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/skills`;
+          const skillsBase = `${openClawWorkspaceDir(runtimeAgentId)}/skills`;
 
           // 1) 精确匹配
           const dir = `${skillsBase}/${sid}`;
@@ -412,11 +479,10 @@ export function registerSkillRoutes(app: express.Express) {
 
       // 清除 agent sessions 缓存，让下次对话自动感知技能变更
       if (sid) {
-        const remoteHomeD = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
         const trialAgentIdD = `trial_${adoptId}`;
-        const trialAgentDirD = `${remoteHomeD}/.openclaw/agents/${trialAgentIdD}`;
+        const trialAgentDirD = openClawAgentDir(trialAgentIdD);
         const runtimeAgentIdD = existsSync(trialAgentDirD) ? trialAgentIdD : String(claw?.agentId || "");
-        if (runtimeAgentIdD) clearAgentSessionsCache(runtimeAgentIdD, remoteHomeD);
+        if (runtimeAgentIdD) clearAgentSessionsCache(runtimeAgentIdD, OPENCLAW_BASE_HOME);
       }
       bumpSessionEpoch(adoptId);
       res.json({ ok: true });
@@ -471,10 +537,9 @@ export function registerSkillRoutes(app: express.Express) {
       }
 
 
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       // runtimeAgentId: prefer trial_{adoptId} if it exists, else fall back to db agentId
       const trialAgentIdInst = `trial_${adoptId}`;
-      const trialAgentDirInst = `${remoteHome}/.openclaw/agents/${trialAgentIdInst}`;
+      const trialAgentDirInst = openClawAgentDir(trialAgentIdInst);
       const runtimeAgentId = existsSync(trialAgentDirInst) ? trialAgentIdInst : String(claw.agentId || "");
 
       // skillId = zip 包内顶层目录名（原样，不做二次加工）
@@ -503,7 +568,7 @@ with zipfile.ZipFile(${JSON.stringify(zipPath)}, 'r') as z:
       }
       const skillId: string = JSON.parse(probeRaw.trim())?.skillId || "uploaded-skill";
 
-      const skillDir = `${remoteHome}/.openclaw/workspace-${claw.agentId}/skills/${skillId}`;
+      const skillDir = `${openClawWorkspaceDir(runtimeAgentId)}/skills/${skillId}`;
 
       const py = `import zipfile, os, json
 zip_path=${JSON.stringify(zipPath)}
@@ -558,7 +623,7 @@ print(json.dumps({'ok':True}))`;
       writeFileSync(idxPath, JSON.stringify(rows, null, 2), "utf-8");
 
       // 清除 agent sessions 缓存，让下次对话自动用新 session（含新技能快照）
-      clearAgentSessionsCache(runtimeAgentId, remoteHome);
+      clearAgentSessionsCache(runtimeAgentId, OPENCLAW_BASE_HOME);
       bumpSessionEpoch(adoptId);
 
       res.json({ ok: true, skillId, path: skillDir });
@@ -675,9 +740,8 @@ print(json.dumps({'ok':True}))`;
       copyFileSync(srcPkg.path, dstZipPath);
 
       // 4. probe skillId + unzip to workspace (same as install API)
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const trialAgentId = `trial_${adoptId}`;
-      const trialAgentDir = `${remoteHome}/.openclaw/agents/${trialAgentId}`;
+      const trialAgentDir = openClawAgentDir(trialAgentId);
       const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : String(claw.agentId || "");
 
       const pyProbe = `import zipfile, json, re
@@ -701,7 +765,7 @@ with zipfile.ZipFile(${JSON.stringify(dstZipPath)}, 'r') as z:
       }
       const skillId: string = JSON.parse(probeRaw.trim())?.skillId || "market-skill";
 
-      const skillDir = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/skills/${skillId}`;
+      const skillDir = `${openClawWorkspaceDir(runtimeAgentId)}/skills/${skillId}`;
       const pyInstall = `import zipfile, os, json
 zip_path=${JSON.stringify(dstZipPath)}
 dst=${JSON.stringify(skillDir)}
@@ -774,7 +838,7 @@ print(json.dumps({'ok':True}))`;
       writeFileSync(regPath, JSON.stringify(updatedRegistry, null, 2), "utf-8");
 
       // 7. clear cache + bump epoch
-      clearAgentSessionsCache(runtimeAgentId, remoteHome);
+      clearAgentSessionsCache(runtimeAgentId, OPENCLAW_BASE_HOME);
       bumpSessionEpoch(adoptId);
 
       res.json({ ok: true, skillId, marketItemId, path: skillDir });

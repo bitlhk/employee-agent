@@ -92,6 +92,7 @@ if [[ "$SKIP_ENV" != "true" ]]; then
 
   JWT_SECRET=$(gen_secret)
   TENANT_SECRET=$(gen_hex 32)
+  INTERNAL_API_KEY=$(gen_hex 32)
   GW_TOKEN=$(gen_hex 24)
 
   {
@@ -111,15 +112,20 @@ if [[ "$SKIP_ENV" != "true" ]]; then
     echo "# 认证与安全"
     echo "JWT_SECRET=$JWT_SECRET"
     echo "TENANT_SECRET=$TENANT_SECRET"
+    echo "INTERNAL_API_KEY=$INTERNAL_API_KEY"
+    echo "# 独立部署默认关闭注册邮箱验证码；配置 SMTP 后可改为 true"
+    echo "EMAIL_VERIFICATION_REQUIRED=false"
     echo ""
     echo "# OpenClaw"
     echo "CLAW_PROVISION_MODE=local-script"
     echo "CLAW_CHAT_MODE=local-openclaw"
-    echo "CLAW_OPENCLAW_HOME=\$HOME"
-    echo "CLAW_REMOTE_OPENCLAW_HOME=\$HOME"
+    echo "CLAW_OPENCLAW_HOME=$HOME"
+    echo "CLAW_REMOTE_OPENCLAW_HOME=$HOME"
     echo "CLAW_GATEWAY_PORT=18789"
     echo "CLAW_GATEWAY_TOKEN=$GW_TOKEN"
     echo "CLAW_REMOTE_HOST=127.0.0.1"
+    echo "HERMES_HOME=$HOME/.hermes"
+    echo "LINGXIA_INTERNAL_BASE_URL=http://127.0.0.1:$PORT"
     echo ""
     echo "# 灵虾路由"
     [[ -n "$DEMO_DOMAIN" ]] && echo "LINGGAN_CLAW_BASE_DOMAIN=$DEMO_DOMAIN"
@@ -229,6 +235,11 @@ else
   echo "  ⚠️  未检测到 pnpm: npm install -g pnpm"
 fi
 
+if [[ ! -f "ecosystem.config.cjs" && -f "ecosystem.config.cjs.example" ]]; then
+  cp ecosystem.config.cjs.example ecosystem.config.cjs
+  echo "  ✅ 已生成 PM2 配置 ecosystem.config.cjs"
+fi
+
 # ── Step 4: 数据库迁移 ────────────────────────────────────────────
 echo ""
 echo "📝 Step 4/4: 数据库迁移"
@@ -256,6 +267,8 @@ echo ""
 echo "  启动方式："
 echo "    Docker:  docker compose up -d"
 echo "    手动:    pnpm build && pnpm start"
+echo "    PM2:     pm2 start ecosystem.config.cjs"
 echo ""
 echo "  访问: $(grep '^FRONTEND_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo 'http://localhost:5180')"
+echo "  创建首个管理员: pnpm tsx scripts/init-admin.ts --email=admin@example.com --password='请换成强密码' --name='Admin'"
 echo ""

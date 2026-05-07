@@ -9,7 +9,8 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { getChannelProvider, normalizeChannelId } from "./cron/channel-provider-registry";
 import { createOpenClawRuntimeAdapter } from "./runtime";
 
-const CONFIG_PATH = "/root/linggan-platform/data/cron-delivery-config.json";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
+const CONFIG_PATH = `${APP_ROOT}/data/cron-delivery-config.json`;
 const POLL_INTERVAL_MS = 60_000;
 const USER_ID_CACHE_TTL_MS = 60 * 60 * 1000;
 

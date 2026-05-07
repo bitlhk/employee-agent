@@ -45,10 +45,15 @@ import {
   provisionLingganClawInstance,
   writeClawExecAudit,
 } from "./helpers";
+import { hermesProfileSkillsDir } from "../_core/helpers";
 import { onboardBuiltinSkillsForAdopt } from "../_core/skills/skill-onboarding";
 import { skillRegistry } from "../_core/skills/skill-registry";
 import { parseSkillSourceDirectory } from "../_core/skills/skill-source";
 import type { SkillSource } from "../../shared/types/skill";
+
+const openClawWorkspaceDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/workspace-${String(runtimeAgentId || "").trim()}`;
+const openClawSkillMarketDir = () => `${OPENCLAW_HOME}/skill-market`;
+const openClawSharedSkillsDir = () => `${OPENCLAW_HOME}/skills-shared`;
 
 export const clawRouter = router({
     me: protectedProcedure.query(async ({ ctx }) => {
@@ -213,7 +218,7 @@ export const clawRouter = router({
       }))
       .mutation(async ({ input }) => {
         const { execFileSync } = await import("child_process");
-        const scriptPath = "/root/linggan-platform/scripts/provision-hermes-claw.sh";
+        const scriptPath = `${APP_ROOT}/scripts/provision-hermes-claw.sh`;
         if (!existsSync(scriptPath)) {
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "provisioning script not found" });
         }
@@ -254,11 +259,12 @@ export const clawRouter = router({
         author: z.string().optional(),
         version: z.string().optional(),
         category: z.enum(["finance", "dev", "data", "writing", "general"]).optional(),
+        origin: z.enum(["opensource", "squad"]).optional(),
         license: z.string().optional(),
         status: z.enum(["pending", "approved", "rejected", "offline"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const marketDir = `${process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root"}/.openclaw/skill-market`;
+        const marketDir = openClawSkillMarketDir();
         const status = input.status || "approved";
         const id = await insertSkillMarketItem({
           skillId: input.skillId,
@@ -268,6 +274,7 @@ export const clawRouter = router({
           authorUserId: ctx.user!.id,
           version: input.version || "1.0.0",
           category: input.category || "general",
+          origin: input.origin || "opensource",
           status,
           license: input.license || "MIT",
           packagePath: `${marketDir}/${status}/${input.skillId}`,
@@ -285,14 +292,24 @@ export const clawRouter = router({
       .mutation(async ({ input }) => {
         const item = await getSkillMarketItem(input.id);
         if (!item) throw new TRPCError({ code: "NOT_FOUND" });
-        const marketDir = `${process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root"}/.openclaw/skill-market`;
+        const marketDir = openClawSkillMarketDir();
         const { execSync } = await import("child_process");
         const oldDir = item.packagePath || `${marketDir}/${item.status}/${item.skillId}`;
-        const newDir = `${marketDir}/${input.status}/${item.skillId}`;
+        const newDir = `${marketDir}/${input.status}/${item.skillId}-${item.id}`;
         if (oldDir !== newDir) {
           try {
             execSync(`mkdir -p ${newDir} && cp -r ${oldDir}/* ${newDir}/ 2>/dev/null; rm -rf ${oldDir}`, { stdio: "ignore" });
           } catch {}
+        }
+        if (input.status === "approved") {
+          const origin = String((item as any).origin || "opensource");
+          const approvedRows = await listSkillMarketItems("approved");
+          for (const row of approvedRows) {
+            if (Number(row.id) === Number(item.id)) continue;
+            if (String(row.skillId) !== String(item.skillId)) continue;
+            if (String((row as any).origin || "opensource") !== origin) continue;
+            await updateSkillMarketItem(Number(row.id), { status: "offline" });
+          }
         }
         await updateSkillMarketItem(input.id, {
           status: input.status,
@@ -302,19 +319,90 @@ export const clawRouter = router({
         return { ok: true };
       }),
 
-    // 查看技能源码（SKILL.md + 脚本列表）
+    // 查看技能源码（SKILL.md + 文本源码文件）
     adminViewSkillSource: adminProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         const item = await getSkillMarketItem(input.id);
         if (!item) throw new TRPCError({ code: "NOT_FOUND" });
-        const { readFileSync, readdirSync, existsSync } = await import("fs");
+        const { readFileSync, readdirSync, existsSync, statSync } = await import("fs");
+        const { join } = await import("path");
         const dir = item.packagePath || "";
         let skillMd = "";
         let scripts: string[] = [];
+        const sourceFiles: Array<{ path: string; content: string; size: number; truncated: boolean }> = [];
+        const skippedDirs = new Set([".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build"]);
+        const allowedSuffixes = [
+          ".md",
+          ".txt",
+          ".py",
+          ".ts",
+          ".tsx",
+          ".js",
+          ".jsx",
+          ".mjs",
+          ".cjs",
+          ".json",
+          ".yaml",
+          ".yml",
+          ".sh",
+          ".sql",
+          ".xml",
+          ".toml",
+          ".ini",
+          ".template",
+        ];
+        const maxFiles = 40;
+        const maxBytes = 120 * 1024;
+        const isViewableSource = (relativePath: string) => {
+          const normalized = relativePath.replace(/\\/g, "/").toLowerCase();
+          if (normalized === "skill.md") return false;
+          if (/(^|\/)(\.env|secrets?|credentials?|tokens?|passwords?)(\.|\/|$)/.test(normalized)) return false;
+          if (/\.(pem|key|p12|pfx|crt|cer|der|sqlite|db|zip|tar|gz|png|jpg|jpeg|gif|webp|pdf|docx|xlsx)$/i.test(normalized)) return false;
+          return allowedSuffixes.some((suffix) => normalized.endsWith(suffix));
+        };
+        const collectSourceFiles = (currentDir: string, prefix = "") => {
+          if (sourceFiles.length >= maxFiles) return;
+          let entries: Array<{ name: string; isDirectory: () => boolean; isFile: () => boolean }> = [];
+          try {
+            entries = readdirSync(currentDir, { withFileTypes: true }) as any;
+          } catch {
+            return;
+          }
+          for (const entry of entries) {
+            if (sourceFiles.length >= maxFiles) break;
+            const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+            const fullPath = join(currentDir, entry.name);
+            if (entry.isDirectory()) {
+              if (!skippedDirs.has(entry.name)) collectSourceFiles(fullPath, relativePath);
+              continue;
+            }
+            if (!entry.isFile() || !isViewableSource(relativePath)) continue;
+            try {
+              const stat = statSync(fullPath);
+              const tooLarge = stat.size > maxBytes;
+              const content = tooLarge
+                ? `文件大小 ${stat.size} bytes，超过源码预览上限 ${maxBytes} bytes。`
+                : readFileSync(fullPath, "utf8");
+              if (!tooLarge && content.includes("\u0000")) continue;
+              sourceFiles.push({
+                path: relativePath.replace(/\\/g, "/"),
+                content,
+                size: stat.size,
+                truncated: tooLarge,
+              });
+            } catch {}
+          }
+        };
         try { skillMd = readFileSync(`${dir}/SKILL.md`, "utf8"); } catch {}
         try { if (existsSync(`${dir}/scripts`)) scripts = readdirSync(`${dir}/scripts`); } catch {}
-        return { skillMd, scripts, dir };
+        if (dir) collectSourceFiles(dir);
+        sourceFiles.sort((a, b) => {
+          const aRank = a.path.startsWith("scripts/") ? 0 : a.path.startsWith("templates/") ? 1 : a.path.startsWith("reference/") ? 2 : 3;
+          const bRank = b.path.startsWith("scripts/") ? 0 : b.path.startsWith("templates/") ? 1 : b.path.startsWith("reference/") ? 2 : 3;
+          return aRank - bRank || a.path.localeCompare(b.path);
+        });
+        return { skillMd, scripts, sourceFiles, dir };
       }),
 
     // 删除
@@ -377,8 +465,7 @@ export const clawRouter = router({
       }),
 
         adminListSharedSkills: adminProcedure.query(async () => {
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-      const sharedDir = `${remoteHome}/.openclaw/skills-shared`;
+      const sharedDir = openClawSharedSkillsDir();
       const { readdirSync, readFileSync, existsSync, statSync } = await import("fs");
       const skills: Array<{ id: string; name: string; description: string; hasScripts: boolean }> = [];
       try {
@@ -678,7 +765,7 @@ export const clawRouter = router({
 
         if (chatMode === "local-openclaw" || chatMode === "remote-openclaw") {
           const openclawHome = process.env.CLAW_OPENCLAW_HOME || process.env.OPENCLAW_HOME || "";
-          const remoteOpenclawHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root/.openclaw";
+          const remoteOpenclawHome = OPENCLAW_HOME;
           const timeoutSec = Number(process.env.CLAW_CHAT_TIMEOUT_SECONDS || 90);
           // 安全转义：清理 shell 特殊字符，防止命令注入
           const escapedMsg = input.message
@@ -856,6 +943,7 @@ export const clawRouter = router({
           }
           const { listHermesSkills } = await import("../_core/hermes-skills");
           const hermesSkills = listHermesSkills(profileName);
+          const hermesSkillsRoot = hermesProfileSkillsDir(profileName);
           // 复用 SkillsPage 现有 UI 三栏（shared/system/private）：
           //   bundled Hermes skills → system（"系统/平台技能"）
           //   auto-generated skills → private（"我的技能"，强调"自进化"卖点）
@@ -868,7 +956,7 @@ export const clawRouter = router({
               emoji: s.emoji || "🧩",
               source: "system" as const,
               scope: "system" as const,
-              sourcePath: `/root/.hermes/profiles/${profileName}/skills/${s.id}`,
+              sourcePath: `${hermesSkillsRoot}/${s.id}`,
               visible: true,
               runnable: true,
               reason: "",
@@ -884,7 +972,7 @@ export const clawRouter = router({
               emoji: "🌱",
               source: "private" as const,
               scope: "private" as const,
-              sourcePath: `/root/.hermes/profiles/${profileName}/skills/${s.id}`,
+              sourcePath: `${hermesSkillsRoot}/${s.id}`,
               visible: true,
               runnable: true,
               reason: "",
@@ -902,9 +990,8 @@ export const clawRouter = router({
         const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
         const remoteUser = process.env.CLAW_REMOTE_USER || "root";
         const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
-        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-        const userSkillsDir = `${remoteHome}/.openclaw/workspace-${claw.agentId}/skills`;
-        const sharedSkillsDir = `${remoteHome}/.openclaw/skills-shared`;
+        const userSkillsDir = `${openClawWorkspaceDir(String(claw.agentId || ""))}/skills`;
+        const sharedSkillsDir = openClawSharedSkillsDir();
         const systemSkillsDir = `/usr/lib/node_modules/openclaw/skills`;
         const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
 
@@ -1027,19 +1114,18 @@ export const clawRouter = router({
         const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
         const remoteUser = process.env.CLAW_REMOTE_USER || "root";
         const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
-        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
         const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
 
         // 与个人技能链路对齐：运行时优先 trial_{adoptId}
         const trialAgentId = `trial_${input.adoptId}`;
-        const trialAgentDir = `${remoteHome}/.openclaw/agents/${trialAgentId}`;
+        const trialAgentDir = `${OPENCLAW_HOME}/agents/${trialAgentId}`;
         const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : String(claw.agentId || "");
 
-        const userSkillLink = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/skills/${input.skillId}`;
+        const userSkillLink = `${openClawWorkspaceDir(runtimeAgentId)}/skills/${input.skillId}`;
         // 源目录：system 来自 openclaw 内置，shared 来自公共库
         const srcDir = input.source === "system"
           ? `/usr/lib/node_modules/openclaw/skills/${input.skillId}`
-          : `${remoteHome}/.openclaw/skills-shared/${input.skillId}`;
+          : `${openClawSharedSkillsDir()}/${input.skillId}`;
 
         const runCmd = (cmd: string) => {
           if (useRemote) {
@@ -1049,7 +1135,7 @@ export const clawRouter = router({
           }
         };
 
-        const userSkillsBase = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/skills`;
+        const userSkillsBase = `${openClawWorkspaceDir(runtimeAgentId)}/skills`;
         if (input.enable) {
           // 使用软链接指向共享源目录，改技能时子虾自动获得最新版本，无需重新 toggle
           runCmd(`mkdir -p "${userSkillsBase}" && rm -rf "${userSkillLink}" 2>/dev/null || true && ln -sfn "${srcDir}" "${userSkillLink}"`);
@@ -1079,10 +1165,9 @@ export const clawRouter = router({
         const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
         const remoteUser = process.env.CLAW_REMOTE_USER || "root";
         const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
-        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
         const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
 
-        const skillDir = `${remoteHome}/.openclaw/workspace-${claw.agentId}/skills/${input.skillId}`;
+        const skillDir = `${openClawWorkspaceDir(String(claw.agentId || ""))}/skills/${input.skillId}`;
         const escaped = input.skillMd.replace(/\\/g, "\\\\").replace(/'/g, "'\\''").replace(/`/g, "\\`");
 
         if (useRemote) {
@@ -1110,10 +1195,9 @@ export const clawRouter = router({
         const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
         const remoteUser = process.env.CLAW_REMOTE_USER || "root";
         const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
-        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
         const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
 
-        const skillDir = `${remoteHome}/.openclaw/workspace-${claw.agentId}/skills/${input.skillId}`;
+        const skillDir = `${openClawWorkspaceDir(String(claw.agentId || ""))}/skills/${input.skillId}`;
         if (useRemote) {
           execSync(`sshpass -p '${remotePassword.replace(/'/g, "'\\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 ${remoteUser}@${remoteHost} "rm -rf '${skillDir}' 2>/dev/null || true"`, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
         } else {

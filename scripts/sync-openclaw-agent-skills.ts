@@ -3,11 +3,20 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFil
 import path from "path";
 import type { Skill } from "../shared/types/skill";
 
-const APP_ROOT = process.env.APP_ROOT || "/root/linggan-platform";
-const RAW_OPENCLAW_HOME = process.env.CLAW_OPENCLAW_HOME || process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root/.openclaw";
-const OPENCLAW_HOME = path.basename(RAW_OPENCLAW_HOME) === ".openclaw"
-  ? RAW_OPENCLAW_HOME
-  : path.join(RAW_OPENCLAW_HOME, ".openclaw");
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
+
+function expandHome(raw: string): string {
+  if (raw === "~") return process.env.HOME || raw;
+  if (raw.startsWith("~/")) return path.join(process.env.HOME || "", raw.slice(2));
+  return raw;
+}
+
+function normalizeOpenClawHome(raw?: string): string {
+  const expanded = expandHome(raw || process.env.HOME || process.cwd());
+  return path.basename(expanded) === ".openclaw" ? expanded : path.join(expanded, ".openclaw");
+}
+
+const OPENCLAW_HOME = normalizeOpenClawHome(process.env.CLAW_OPENCLAW_HOME || process.env.CLAW_REMOTE_OPENCLAW_HOME);
 const APPLY = process.argv.includes("--apply");
 const ADOPT_ID = process.argv.find((arg) => arg.startsWith("--adoptId="))?.split("=")[1]?.trim();
 

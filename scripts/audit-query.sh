@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-LOG_DETAIL="/root/linggan-platform/logs/claw-exec-detail.log"
-LOG_REQ="/root/linggan-platform/logs/claw-exec.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_ROOT="${APP_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+LOG_DETAIL="${LOG_DETAIL:-${APP_ROOT}/logs/claw-exec-detail.log}"
+LOG_REQ="${LOG_REQ:-${APP_ROOT}/logs/claw-exec.log}"
 
 ADOPT_ID="${ADOPT_ID:-}"
 USER_ID="${USER_ID:-}"

@@ -7,6 +7,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import "dotenv/config";
 import { createOpenClawRuntimeAdapter } from "../server/_core/runtime";
 
@@ -17,7 +18,8 @@ type DeliveryConfig = {
   channel: string;
 };
 
-const CONFIG_PATH = "/root/linggan-platform/data/cron-delivery-config.json";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
+const CONFIG_PATH = process.env.CRON_DELIVERY_CONFIG_PATH || path.join(APP_ROOT, "data", "cron-delivery-config.json");
 
 function readConfigs(): DeliveryConfig[] {
   if (!existsSync(CONFIG_PATH)) return [];

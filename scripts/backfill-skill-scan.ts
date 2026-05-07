@@ -1,9 +1,11 @@
 import "dotenv/config";
 import { existsSync, readFileSync, writeFileSync } from "fs";
+import path from "path";
 import type { Skill } from "../shared/types/skill";
 import { parseSkillPackageBuffer, parseSkillSourceFiles } from "../server/_core/skills/skill-source";
 
-const registryPath = process.env.SKILL_REGISTRY_PATH || "/root/linggan-platform/data/skill-registry.json";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
+const registryPath = process.env.SKILL_REGISTRY_PATH || path.join(APP_ROOT, "data", "skill-registry.json");
 const APPLY = process.argv.includes("--apply");
 
 async function scanSource(sourcePath?: string): Promise<{ warnings: string[]; scannedAt: string }> {

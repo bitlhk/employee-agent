@@ -19,7 +19,7 @@ import { execSync, spawnSync, spawn } from "child_process";
 import { appendFileSync, mkdirSync } from "fs";
 import path from "path";
 
-const APP_ROOT = process.env.APP_ROOT || "/root/linggan-platform";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
 
 // ── 配置 ──────────────────────────────────────────────────────────────
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "python:3.11-slim";

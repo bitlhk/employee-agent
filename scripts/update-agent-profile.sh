@@ -7,7 +7,28 @@ set -euo pipefail
 
 AGENT_ID="${1:-}"
 PROFILE="${2:-starter}"
-OPENCLAW_JSON="/root/.openclaw/openclaw.json"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_ROOT="${APP_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+
+if [[ -f "${APP_ROOT}/.env" ]]; then
+  set -a
+  source "${APP_ROOT}/.env"
+  set +a
+fi
+
+normalize_openclaw_home() {
+  local raw="${1:-${HOME}}"
+  raw="${raw/#\~/${HOME}}"
+  if [[ "$(basename "$raw")" == ".openclaw" ]]; then
+    echo "$raw"
+  else
+    echo "${raw}/.openclaw"
+  fi
+}
+
+OPENCLAW_HOME="$(normalize_openclaw_home "${CLAW_OPENCLAW_HOME:-${CLAW_REMOTE_OPENCLAW_HOME:-${HOME}}}")"
+OPENCLAW_JSON="${OPENCLAW_HOME}/openclaw.json"
 
 if [[ -z "$AGENT_ID" ]]; then
   echo "用法: $0 <agent-id> <starter|plus|internal>"

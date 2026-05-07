@@ -118,7 +118,7 @@ function nowIso(): string {
 
 async function loadLegacyAgents(): Promise<{ source: LegacySource; agents: LegacyBizAgent[] }> {
   try {
-    const baseUrl = process.env.LINGXIA_INTERNAL_BASE_URL || "http://127.0.0.1:5180";
+    const baseUrl = process.env.LINGXIA_INTERNAL_BASE_URL || `http://127.0.0.1:${process.env.PORT || "5180"}`;
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/claw/business-agents`, {
       headers: { "x-smoke-source": "agent-migrate" },
     });

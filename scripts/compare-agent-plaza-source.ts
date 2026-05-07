@@ -1,6 +1,6 @@
 import { JsonAgentRegistry } from "../server/_core/agent/agent-registry";
 
-const baseUrl = process.env.LINGXIA_INTERNAL_BASE_URL || "http://127.0.0.1:5180";
+const baseUrl = process.env.LINGXIA_INTERNAL_BASE_URL || `http://127.0.0.1:${process.env.PORT || "5180"}`;
 const expectedLiveSource = process.env.AGENT_PLAZA_EXPECT_LIVE_SOURCE || "legacy";
 const expectedCount = Number(process.env.AGENT_PLAZA_EXPECT_COUNT || 10);
 const internalLeakPattern = /migrationNote|runtime-inferred|manual-review|verify before dispatch|manual_review/i;

@@ -2,8 +2,10 @@
 set -euo pipefail
 
 MODE="${1:---fast}"
-ROOT="${LINGGAN_ROOT:-/root/linggan-platform}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${LINGGAN_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 AGENT="${OPENCLAW_CONTRACT_AGENT:-trial_lgc-ofnmjm4joj}"
+PM2_LOG_ROOT="${PM2_LOG_ROOT:-${HOME}/.pm2/logs}"
 
 cd "$ROOT"
 
@@ -64,7 +66,7 @@ echo
 
 echo "== Recent critical logs =="
 mapfile -t LOG_FILES < <(
-  find /root/.pm2/logs -maxdepth 1 -type f \
+  find "$PM2_LOG_ROOT" -maxdepth 1 -type f \
     \( -name 'linggan-claw*.log' -o -name 'hi-agent*.log' -o -name 'agent-kernel*.log' \) \
     ! -name '*__*.log' \
     2>/dev/null | sort

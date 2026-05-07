@@ -52,7 +52,7 @@ const FRONTEND_TO_HERMES_PROVIDER: Record<string, string> = {
 // - 坑 1（无记忆）：同一 adoptId 所有请求用同一 session_id，Hermes state.db 会累积 history
 // - 坑 3（/new reset）：/new 后把这个 map 的值换掉，下次请求就落到新 session_id
 // 2026-04-20 review fix: 持久化到文件，避免 pm2 restart 后 /new 基线丢失、老 session 重接
-const APP_ROOT_BRIDGE = process.env.APP_ROOT || "/root/linggan-platform";
+const APP_ROOT_BRIDGE = process.env.APP_ROOT || process.cwd();
 const MARKERS_PATH = `${APP_ROOT_BRIDGE}/data/hermes-session-markers.json`;
 
 function loadMarkers(): Map<string, string> {

@@ -17,9 +17,10 @@
 import { createHmac } from "crypto";
 import { mkdirSync, existsSync, readFileSync, readdirSync, statSync, cpSync } from "fs";
 import path from "path";
+import { OPENCLAW_HOME, OPENCLAW_JSON_PATH } from "./helpers";
 
 const TENANT_SECRET = process.env.TENANT_SECRET || "linggan-tenant-2026-default-change-me";
-const TENANT_ROOT = process.env.TENANT_ROOT || "/root/.openclaw/workspace/tenants";
+const TENANT_ROOT = process.env.TENANT_ROOT || path.join(OPENCLAW_HOME, "workspace", "tenants");
 
 export interface TenantContext {
   userId: number;
@@ -161,7 +162,7 @@ export function ensurePerTenantAgent(
 
   // 检查 OpenClaw 配置（重启后需要从这里恢复缓存）
   try {
-    const cfgRaw = readFileSync("/root/.openclaw/openclaw.json", "utf-8");
+    const cfgRaw = readFileSync(OPENCLAW_JSON_PATH, "utf-8");
     const cfg = JSON.parse(cfgRaw);
     const agents = cfg?.agents?.list || [];
     const exists = agents.some((a: any) => a.id === perTenantAgentId);
@@ -233,7 +234,7 @@ export function deletePerTenantAgent(perTenantAgentId: string): boolean {
 function syncTemplateResources(templateAgentId: string, targetWorkspace: string): void {
   try {
     // 模板 workspace 路径（基于 OpenClaw 配置）
-    const cfgRaw = readFileSync("/root/.openclaw/openclaw.json", "utf-8");
+    const cfgRaw = readFileSync(OPENCLAW_JSON_PATH, "utf-8");
     const cfg = JSON.parse(cfgRaw);
     const templateAgent = (cfg?.agents?.list || []).find((a: any) => a.id === templateAgentId);
     if (!templateAgent?.workspace) {

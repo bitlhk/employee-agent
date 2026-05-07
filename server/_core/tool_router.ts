@@ -218,7 +218,7 @@ function newAuditId(): string {
 // ─────────────────────────────────────────────────────────────────────────────
 // 日志辅助─────────────────────────────────────────────────────────────────────
 
-const APP_ROOT_TR = process.env.APP_ROOT || "/root/linggan-platform";
+const APP_ROOT_TR = process.env.APP_ROOT || process.cwd();
 const LOG_DIR = `${APP_ROOT_TR}/logs`;
 
 function ensureLogDir() {

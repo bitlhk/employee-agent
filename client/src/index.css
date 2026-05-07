@@ -1206,9 +1206,8 @@
 
 
 .lingxia-input-wrap:focus-within {
-  border-color: color-mix(in oklab, var(--banking-brand-red, #ff5c5c) 46%, var(--oc-border));
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--banking-brand-red, #ff5c5c) 18%, transparent),
-    0 2px 16px rgba(0,0,0,0.14),
+  border-color: var(--oc-border-strong);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.14),
     0 1px 4px rgba(0,0,0,0.08);
 }
 
@@ -3652,6 +3651,275 @@ html:has(:root[data-theme-mode="light"]) body {
   color: #dc2626 !important;
 }
 
+/* ClawAdmin shell visual standardization */
+.claw-admin-shell {
+  --admin-red: #dc2626;
+  --admin-red-hover: #b91c1c;
+  --admin-red-soft: rgba(220, 38, 38, 0.07);
+  --admin-red-border: rgba(220, 38, 38, 0.20);
+  --admin-ink: #111827;
+  --admin-muted: #6b7280;
+  --admin-subtle: #f8fafc;
+  --admin-border: rgba(17, 24, 39, 0.10);
+  font-family: var(--oc-font-ui, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif);
+  color: var(--admin-ink);
+  letter-spacing: 0;
+}
+.claw-admin-shell * {
+  letter-spacing: 0;
+}
+.claw-admin-header {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: var(--admin-border) !important;
+}
+.claw-admin-title {
+  color: var(--admin-ink) !important;
+}
+.claw-admin-back-button {
+  height: 32px !important;
+  border: 1px solid transparent !important;
+  color: var(--admin-muted) !important;
+  background: transparent !important;
+}
+.claw-admin-back-button:hover {
+  color: var(--admin-red) !important;
+  background: var(--admin-red-soft) !important;
+  border-color: var(--admin-red-border) !important;
+}
+.claw-admin-sidebar {
+  background: rgba(255, 255, 255, 0.94) !important;
+  border-color: var(--admin-border) !important;
+  box-shadow: 0 8px 24px rgba(17, 24, 39, 0.06) !important;
+}
+.claw-admin-sidebar-kicker {
+  color: #9ca3af !important;
+}
+.claw-admin-sidebar-title {
+  color: var(--admin-ink) !important;
+}
+.claw-admin-nav-item {
+  color: var(--admin-muted) !important;
+}
+.claw-admin-nav-item:hover {
+  background: var(--admin-subtle) !important;
+  border-color: var(--admin-border) !important;
+  color: var(--admin-ink) !important;
+}
+.claw-admin-nav-item[data-state="active"] {
+  background: var(--admin-red-soft) !important;
+  border-color: var(--admin-red-border) !important;
+  color: #b91c1c !important;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.05) !important;
+}
+.claw-admin-nav-item[data-state="active"] .claw-admin-nav-icon {
+  color: var(--admin-red) !important;
+}
+.claw-admin-nav-item[data-state="active"] span span:last-child {
+  color: #dc2626 !important;
+}
+.admin-panel-card {
+  background: #fff !important;
+  border-color: var(--admin-border, rgba(17, 24, 39, 0.10)) !important;
+  color: var(--admin-ink, #111827) !important;
+}
+.admin-primary-action {
+  background: var(--admin-red, #dc2626) !important;
+  color: #fff !important;
+  border-color: var(--admin-red, #dc2626) !important;
+}
+.admin-primary-action:hover {
+  background: var(--admin-red-hover, #b91c1c) !important;
+  color: #fff !important;
+}
+.admin-secondary-action {
+  background: #fff !important;
+  color: var(--admin-muted, #6b7280) !important;
+  border-color: var(--admin-border, rgba(17, 24, 39, 0.10)) !important;
+}
+.admin-secondary-action:hover {
+  background: var(--admin-subtle, #f8fafc) !important;
+  color: var(--admin-ink, #111827) !important;
+}
+.admin-success-action {
+  background: #16a34a !important;
+  color: #fff !important;
+  border-color: #16a34a !important;
+}
+.admin-success-action:hover {
+  background: #15803d !important;
+  color: #fff !important;
+}
+.admin-danger-action {
+  background: #dc2626 !important;
+  color: #fff !important;
+  border-color: #dc2626 !important;
+}
+.admin-danger-action:hover {
+  background: #b91c1c !important;
+  color: #fff !important;
+}
+.admin-danger-ghost-action {
+  color: #dc2626 !important;
+  background: transparent !important;
+}
+.admin-danger-ghost-action:hover {
+  color: #b91c1c !important;
+  background: rgba(220, 38, 38, 0.07) !important;
+}
+.admin-ghost-action {
+  color: var(--admin-muted, #6b7280) !important;
+}
+.admin-ghost-action:hover {
+  color: var(--admin-red, #dc2626) !important;
+}
+.admin-metric-card {
+  position: relative;
+  overflow: hidden;
+  border-color: var(--admin-border, rgba(17, 24, 39, 0.10)) !important;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+}
+.admin-metric-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.42;
+  pointer-events: none;
+}
+.admin-metric-card--red::before {
+  background: linear-gradient(135deg, rgba(220,38,38,0.10), transparent 58%);
+}
+.admin-metric-card--blue::before {
+  background: linear-gradient(135deg, rgba(37,99,235,0.10), transparent 58%);
+}
+.admin-metric-card--green::before {
+  background: linear-gradient(135deg, rgba(22,163,74,0.10), transparent 58%);
+}
+.admin-metric-icon,
+.admin-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--admin-red-soft, rgba(220,38,38,0.07));
+  color: var(--admin-red, #dc2626);
+  border: 1px solid var(--admin-red-border, rgba(220,38,38,0.20));
+}
+.admin-metric-icon {
+  width: 34px;
+  height: 34px;
+}
+.admin-section-icon {
+  width: 26px;
+  height: 26px;
+}
+.admin-metric-card--blue .admin-metric-icon {
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.18);
+}
+.admin-metric-card--green .admin-metric-icon {
+  background: rgba(22, 163, 74, 0.08);
+  color: #16a34a;
+  border-color: rgba(22, 163, 74, 0.18);
+}
+.admin-usage-chart {
+  border-bottom: 1px solid var(--admin-border, rgba(17, 24, 39, 0.10));
+  padding-top: 6px;
+}
+.admin-usage-bar {
+  background: linear-gradient(180deg, #ef4444, #dc2626);
+}
+.admin-usage-bar:hover {
+  background: linear-gradient(180deg, #f87171, #b91c1c);
+}
+.admin-usage-bar-empty {
+  background: rgba(17, 24, 39, 0.08);
+}
+.admin-empty-state {
+  color: #9ca3af !important;
+  background: linear-gradient(180deg, rgba(248,250,252,0.8), transparent);
+}
+
+/* ClawAdmin 组织协作页：跟管理后台统一字体、卡片和列表 hover 质感 */
+.admin-collaboration-tab {
+  font-family: var(--oc-font-ui, "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-size: var(--oc-text-base, 13px);
+  line-height: 1.5;
+  color: var(--oc-text-primary);
+  letter-spacing: 0;
+}
+.admin-collaboration-tab * {
+  letter-spacing: 0;
+}
+.admin-collaboration-tab [data-slot="card-title"] {
+  font-size: var(--oc-text-md, 14px);
+  line-height: 1.35;
+  font-weight: 600;
+}
+.admin-collaboration-tab [data-slot="card-description"] {
+  font-size: var(--oc-text-sm, 12px);
+  line-height: 1.5;
+}
+.admin-collaboration-tab button,
+.admin-collaboration-tab input,
+.admin-collaboration-tab textarea,
+.admin-collaboration-tab [role="combobox"] {
+  font-size: var(--oc-text-base, 13px);
+}
+.admin-collaboration-tab label {
+  font-size: var(--oc-text-sm, 12px);
+}
+.admin-collaboration-card {
+  background: var(--oc-bg-surface) !important;
+  border-color: var(--oc-border) !important;
+  color: var(--oc-text-primary) !important;
+}
+.admin-collaboration-switcher {
+  background: var(--oc-bg-surface);
+  border-color: var(--oc-border);
+}
+.admin-collaboration-space-button {
+  background: transparent;
+  border-color: var(--oc-border);
+  color: var(--oc-text-primary);
+  font-size: var(--oc-text-base, 13px);
+}
+.admin-collaboration-space-button:hover {
+  background: rgba(17, 24, 39, 0.035);
+  border-color: rgba(17, 24, 39, 0.14);
+}
+.admin-collaboration-space-button[data-active="true"] {
+  background: rgba(220, 38, 38, 0.06);
+  border-color: rgba(220, 38, 38, 0.24);
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.05);
+}
+.admin-collaboration-tab .text-gray-900 {
+  color: var(--oc-text-primary) !important;
+}
+.admin-collaboration-tab .text-gray-500 {
+  color: var(--oc-text-secondary) !important;
+}
+.admin-collaboration-tab .border-gray-200 {
+  border-color: var(--oc-border) !important;
+}
+.admin-collaboration-tab .bg-white {
+  background: var(--oc-bg-surface) !important;
+}
+.admin-collaboration-tab .bg-gray-50 {
+  background: rgba(17, 24, 39, 0.025) !important;
+}
+:root[data-theme-mode="dark"] .admin-collaboration-space-button:hover {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+:root[data-theme-mode="dark"] .admin-collaboration-space-button[data-active="true"] {
+  background: rgba(255, 92, 92, 0.10);
+  border-color: rgba(255, 92, 92, 0.28);
+}
+:root[data-theme-mode="dark"] .admin-collaboration-tab .bg-gray-50 {
+  background: rgba(255, 255, 255, 0.045) !important;
+}
+
 /* ── CollabDrawer light theme fixes ── */
 :root[data-theme-mode="light"] .collab-file-card {
   background: #F8F7FF !important;
@@ -4125,20 +4393,18 @@ html:has(:root[data-theme-mode="light"]) body {
   }
 }
 
-/* Main chat input focus: the wrapper owns the brand focus state.
+/* Main chat input focus: keep a neutral focus state.
    ChatInput sets border/shadow inline, so this final override must be important.
    The inner textarea intentionally keeps outline/ring disabled. */
 .lingxia-input-wrap:focus-within {
-  border-color: color-mix(in oklab, var(--banking-brand-red, #ff5c5c) 68%, var(--oc-border)) !important;
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--banking-brand-red, #ff5c5c) 20%, transparent),
-    0 2px 16px rgba(0,0,0,0.14),
+  border-color: var(--oc-border-strong) !important;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.14),
     0 1px 4px rgba(0,0,0,0.08) !important;
 }
 
 :root[data-theme-mode="light"] .lingxia-input-wrap:focus-within {
-  border-color: color-mix(in oklab, var(--banking-brand-red, #ff5c5c) 62%, rgba(0, 0, 0, 0.12)) !important;
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--banking-brand-red, #ff5c5c) 18%, transparent),
-    0 2px 12px rgba(0, 0, 0, 0.08),
+  border-color: rgba(0, 0, 0, 0.16) !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08),
     0 1px 4px rgba(0, 0, 0, 0.04) !important;
 }
 

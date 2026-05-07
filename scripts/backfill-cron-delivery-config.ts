@@ -13,6 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import "dotenv/config";
 
 type DeliveryConfig = {
@@ -34,7 +35,8 @@ type OpenClawJob = {
   createdAt?: string;
 };
 
-const CONFIG_PATH = "/root/linggan-platform/data/cron-delivery-config.json";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
+const CONFIG_PATH = process.env.CRON_DELIVERY_CONFIG_PATH || path.join(APP_ROOT, "data", "cron-delivery-config.json");
 const argv = process.argv.slice(2);
 const APPLY = argv.includes("--apply");
 const DRY_RUN = argv.includes("--dry-run") || !APPLY;

@@ -7,15 +7,13 @@
 import path from "path";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import type { StreamWriter } from "./stream-writer";
-
-const BASE = "http://127.0.0.1:5180";
 import { INTERNAL_API_KEY as INTERNAL_KEY } from "./constants";
 import type { ChannelId } from "@shared/types/cron";
 import type { SkillSource } from "@shared/types/skill";
 import { getBoundChannelsForAdopt, type BoundChannel } from "./cron/channel-binding-query";
 import { getChannelProvider, normalizeChannelId } from "./cron/channel-provider-registry";
 import { normalizeScheduleToolArgs } from "./cron/schedule-intent";
-import { APP_ROOT, sanitizeRelPath } from "./helpers";
+import { APP_ROOT, INTERNAL_BASE_URL as BASE, sanitizeRelPath } from "./helpers";
 import { skillRegistry } from "./skills/skill-registry";
 import { parseSkillSourceFiles, sanitizeSkillId, type SkillSourceFile } from "./skills/skill-source";
 

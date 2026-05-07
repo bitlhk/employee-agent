@@ -17,7 +17,7 @@ import express from "express";
 import { existsSync } from "fs";
 import { clawChatLimiter } from "./security";
 import {
-  requireClawOwner, readSessionEpoch, appendLogAsync,
+  appendLogAsync, openClawAgentDir, requireClawOwner, readSessionEpoch,
 } from "./helpers";
 import { createOpenClawRuntimeAdapter } from "./runtime";
 
@@ -39,15 +39,13 @@ export function registerRecoverRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, String(adoptId));
       if (!claw) return;
 
-      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-
       // 约束 #1：自己重算 sessionKey（不信前端，主聊天无 epochLabel）
       const epoch = readSessionEpoch(String(adoptId));
       const dbAgentId = String((claw as any).agentId || "").trim();
       const trialAgentId = `trial_${String(adoptId)}`;
-      const trialAgentDir = `${remoteHome}/.openclaw/agents/${trialAgentId}`;
+      const trialAgentDir = openClawAgentDir(trialAgentId);
       const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : dbAgentId;
-      const runtime = createOpenClawRuntimeAdapter({ remoteHome });
+      const runtime = createOpenClawRuntimeAdapter();
       const sessionKey = runtime.resolveMainSessionKey({
         adoptId: String(adoptId),
         runtimeAgentId,

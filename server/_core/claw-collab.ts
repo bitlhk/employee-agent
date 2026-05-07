@@ -1,7 +1,7 @@
 import express from "express";
 import { existsSync, statSync, readdirSync } from "fs";
 import { clawChatLimiter } from "./security";
-import { requireClawOwner, appendLogAsync, generateFileToken } from "./helpers";
+import { appendLogAsync, generateFileToken, openClawAgentDir, openClawWorkspaceDir, requireClawOwner } from "./helpers";
 import { canViewCoopSession } from "../db/coop-identity";
 
 type LiveClient = {
@@ -144,13 +144,12 @@ export function registerCollabRoutes(app: express.Express) {
 
     // ── 路由到目标 agent 的 gateway session ────────────────────────────
     const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
-    const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
     const gatewayPort = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
     const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
 
     const dbAgentId = String((claw as any).agentId || "").trim();
     const trialAgentId = "trial_" + String(targetAdoptId);
-    const trialAgentDir = remoteHome + "/.openclaw/agents/" + trialAgentId;
+    const trialAgentDir = openClawAgentDir(trialAgentId);
     const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : dbAgentId;
     // 协作任务使用独立 session key，不污染主 session
     const collabSessionKey = "agent:" + runtimeAgentId + ":collab:" + requestId;
@@ -216,8 +215,7 @@ export function registerCollabRoutes(app: express.Express) {
             // 扫描 B 的 workspace/output/ 目录，如果有新文件就生成 24h token 追加到结果里
             const collabArtifacts: Array<{ type: string; name: string; url: string; exp: number }> = [];
             try {
-              const remoteHomeLocal = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-              const outputDir = `${remoteHomeLocal}/.openclaw/workspace-${runtimeAgentId}/output`;
+              const outputDir = `${openClawWorkspaceDir(runtimeAgentId)}/output`;
               const collabStartMs = Date.now() - 300_000; // 扫扠5分钟内新生成的文件
               const COLLAB_TOKEN_TTL = 86400; // 24小时
               if (existsSync(outputDir)) {

@@ -26,6 +26,13 @@ function formatAttSize(bytes?: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)}MB`;
 }
 
+function formatMemberOrg(member: any): string {
+  const parts = [member.targetOrgName, member.targetDepartmentName, member.targetTeamName].filter(Boolean);
+  if (parts.length > 0) return parts.join(" · ");
+  if (member.targetGroupName && member.targetGroupId > 0) return `— · ${member.targetGroupName}`;
+  return "—";
+}
+
 function AttachmentList({ attachments }: { attachments: EventAttachment[] }) {
   if (!attachments?.length) return null;
   return (
@@ -194,8 +201,7 @@ export default function CoopSession() {
                     <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground font-normal">我</span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">
-                    {myCard.targetOrgName || "—"}
-                    {myCard.targetGroupName && myCard.targetGroupId! > 0 ? (<><span className="mx-1">·</span><span className="text-primary">{myCard.targetGroupName}</span></>) : null}
+                    {formatMemberOrg(myCard)}
                   </div>
                 </div>
                 <span className={`badge ${meta.badgeClass} inline-flex items-center gap-1 shrink-0`}>
@@ -255,8 +261,7 @@ export default function CoopSession() {
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-foreground truncate">{m.targetUserName || m.targetEmail || `#${m.targetUserId}`}</div>
                     <div className="text-xs text-muted-foreground mt-0.5">
-                      {m.targetOrgName || "—"}
-                      {m.targetGroupName && m.targetGroupId! > 0 ? (<><span className="mx-1">·</span><span className="text-primary">{m.targetGroupName}</span></>) : null}
+                      {formatMemberOrg(m)}
                     </div>
                   </div>
                   <span className={`badge ${meta.badgeClass} inline-flex items-center gap-1 shrink-0`}>

@@ -11,6 +11,7 @@
 import type { StreamWriter } from "./stream-writer";
 import { getBoundChannelsForAdopt } from "./cron/channel-binding-query";
 import { isScheduleToolV2Enabled } from "./cron/schedule-intent";
+import { internalApiUrl } from "./helpers";
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || "";
 const DEEPSEEK_BASE = "https://api.deepseek.com";
@@ -98,7 +99,7 @@ function quickScheduleAction(message: string, scheduleToolV2: boolean): { tool: 
 // ── 从 DB 加载可用 Agent 列表 ──
 async function loadAgentList(): Promise<{ id: string; name: string; description: string }[]> {
   try {
-    const resp = await fetch("http://127.0.0.1:5180/api/claw/business-agents", {
+    const resp = await fetch(internalApiUrl("/api/claw/business-agents"), {
       headers: { "X-Internal-Key": process.env.INTERNAL_API_KEY || "lingxia-bridge-2026" },
       signal: AbortSignal.timeout(3000),
     });
@@ -390,7 +391,7 @@ async function dispatchToAgent(
   const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
 
   try {
-    const resp = await fetch("http://127.0.0.1:5180/api/claw/business-chat-stream", {
+    const resp = await fetch(internalApiUrl("/api/claw/business-chat-stream"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -629,7 +630,7 @@ export async function routeMessage(
         // FIFO stack for matching hermes tool.completed (no id) back to tool.started id
         const toolIdStack: string[] = [];
         try {
-          const resp = await fetch("http://127.0.0.1:5180/api/claw/business-chat-stream", {
+          const resp = await fetch(internalApiUrl("/api/claw/business-chat-stream"), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

@@ -588,6 +588,7 @@ export const skillMarketplace = mysqlTable("skill_marketplace", {
   authorUserId:  int("author_user_id"),
   version:       varchar("version", { length: 32 }).default("1.0.0"),
   category:      mysqlEnum("category", ["finance", "dev", "data", "writing", "general", "office", "design"]).default("general"),
+  origin:        varchar("origin", { length: 32 }).default("opensource").notNull(),
   status:        mysqlEnum("status", ["pending", "approved", "rejected", "offline"]).default("pending").notNull(),
   reviewNote:    text("review_note"),
   downloadCount: int("download_count").notNull().default(0),

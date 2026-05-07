@@ -12,7 +12,8 @@ const ILINK_APP_ID = "bot";
 const ILINK_APP_CLIENT_VERSION = String((2 << 16) | (2 << 8) | 0);
 const CHANNEL_VERSION = "2.2.0";
 
-const WEIXIN_CONFIG_DIR = "/root/linggan-platform/data/weixin-accounts";
+const APP_ROOT = process.env.APP_ROOT || process.cwd();
+const WEIXIN_CONFIG_DIR = `${APP_ROOT}/data/weixin-accounts`;
 mkdirSync(WEIXIN_CONFIG_DIR, { recursive: true });
 
 function getAccountPath(adoptId: string) {

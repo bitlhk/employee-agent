@@ -1,8 +1,31 @@
 // 测试模式：仅当显式设置 TEST_MODE=true 时启用（默认关闭）
 export const TEST_MODE = process.env.TEST_MODE === "true";
 
-export const APP_ROOT = process.env.APP_ROOT || "/root/linggan-platform";
-export const OPENCLAW_HOME = process.env.CLAW_OPENCLAW_HOME || "/root/.openclaw";
+import path from "path";
+
+const processHome = process.env.HOME || process.env.USERPROFILE || "/root";
+
+function expandHomePath(raw: string): string {
+  const value = String(raw || "").trim();
+  if (!value) return value;
+  if (value === "~") return processHome;
+  if (value.startsWith("~/")) return path.join(processHome, value.slice(2));
+  return value;
+}
+
+function normalizeOpenClawHome(raw?: string): string {
+  const value = expandHomePath(
+    raw
+      || process.env.CLAW_OPENCLAW_HOME
+      || process.env.CLAW_REMOTE_OPENCLAW_HOME
+      || process.env.OPENCLAW_HOME
+      || processHome
+  );
+  return path.basename(value) === ".openclaw" ? value : path.join(value, ".openclaw");
+}
+
+export const APP_ROOT = process.env.APP_ROOT || process.cwd();
+export const OPENCLAW_HOME = normalizeOpenClawHome();
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
@@ -19,7 +42,7 @@ import {
 } from "../db";
 import { getClientIp } from "../_core/ip-utils";
 
-export const OPENCLAW_JSON_PATH = process.env.CLAW_OPENCLAW_JSON || "/root/.openclaw/openclaw.json";
+export const OPENCLAW_JSON_PATH = expandHomePath(process.env.CLAW_OPENCLAW_JSON || path.join(OPENCLAW_HOME, "openclaw.json"));
 
 // ── 每日对话额度：内存计数器（重启自动清零） ──
 export const clawDailyUsage = (() => {
