@@ -9,7 +9,26 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
 // ── 类型 ─────────────────────────────────────────────────────────────────
-interface BusinessAgent { id: string; name: string; description: string; sandboxScope: string; model: string; }
+interface AgentExample { text: string; icon?: string; }
+interface AgentUiConfig {
+  category?: string;
+  template?: string;
+  subtitle?: string;
+  welcomeTitle?: string;
+  welcomeDescription?: string;
+  examples?: AgentExample[];
+  badges?: string[];
+}
+interface BusinessAgent {
+  id: string;
+  name: string;
+  description: string;
+  sandboxScope: string;
+  model: string;
+  icon?: string;
+  tags?: string;
+  uiConfig?: AgentUiConfig;
+}
 interface HermesToolCall { id: string; name: string; preview: string; status: "running" | "done" | "error"; durationMs?: number; ts: number; }
 interface TaskMessage { role: "user" | "assistant"; text: string; status?: string; toolCalls?: HermesToolCall[]; reasoning?: string; }
 interface TaskFile { name: string; size: number; updatedAt: string; }
@@ -39,6 +58,103 @@ function agentIcon(id: string, size = 16) {
   if (id === "task-bond") return <BarChart3 size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-credit-risk") return <Compass size={size} style={{ color: "#be1e2d" }} />;
   return <Bot size={size} style={style} />;
+}
+
+const LEGACY_AGENT_CATEGORY: Record<string, string> = {
+  "task-hermes": "core",
+  "task-trace": "core",
+  "task-ppt": "tools",
+  "task-code": "tools",
+  "task-slides": "tools",
+  "task-stock": "finance",
+  "task-claim-ev": "finance",
+  "task-my-wealth": "finance",
+  "task-bond": "finance",
+  "task-credit-risk": "finance",
+};
+
+const LEGACY_AGENT_SUBTITLE: Record<string, string> = {
+  "task-hermes": "灵枢 · 共享空间",
+  "task-trace": "灵枢 · 深度求索",
+  "task-stock": "灵犀 · 11策略",
+  "task-claim-ev": "灵犀 · EV 理赔决策",
+  "task-my-wealth": "灵犀 · 个人理财",
+  "task-bond": "灵犀 · 债券投研",
+  "task-credit-risk": "灵犀 · 智贷决策",
+};
+
+const PLAZA_GROUPS = [
+  {
+    id: "core",
+    title: "灵枢 · 核心引擎",
+    icon: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#be1e2d" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>,
+  },
+  { id: "tools", title: "灵匠 · 创作工具", icon: <Code2 size={12} /> },
+  { id: "finance", title: "灵犀 · 分析研判", icon: <TrendingUp size={12} /> },
+  { id: "other", title: "其他", icon: <Bot size={12} /> },
+] as const;
+
+function normalizeUiConfig(agent: BusinessAgent): AgentUiConfig {
+  const ui = agent.uiConfig || {};
+  return {
+    ...ui,
+    category: ui.category || LEGACY_AGENT_CATEGORY[agent.id] || "other",
+    template: ui.template || (ENGINE_ICON[agent.id] ? "tool" : "general"),
+    subtitle: ui.subtitle || LEGACY_AGENT_SUBTITLE[agent.id] || "per-session · 独立沙箱",
+  };
+}
+
+function renderAgentIcon(agent: BusinessAgent, size = 16) {
+  const icon = agent.icon?.trim();
+  if (icon && icon.length <= 4 && !icon.startsWith("/")) {
+    return <span style={{ fontSize: size + 2, lineHeight: 1 }}>{icon}</span>;
+  }
+  return agentIcon(agent.id, size);
+}
+
+function getAgentSubtitle(agent: BusinessAgent) {
+  return normalizeUiConfig(agent).subtitle || "per-session · 独立沙箱";
+}
+
+function getAgentCardDescription(agent: BusinessAgent) {
+  const ui = normalizeUiConfig(agent);
+  return agentDesc(agent.id, ui.welcomeDescription || agent.description);
+}
+
+function ConfiguredAgentWelcome({ agent, onPickExample }: { agent: BusinessAgent; onPickExample: (text: string) => void }) {
+  const ui = normalizeUiConfig(agent);
+  const examples = Array.isArray(ui.examples) ? ui.examples.filter(e => e?.text) : [];
+  const badges = Array.isArray(ui.badges) ? ui.badges.filter(Boolean) : [];
+  const accent = ui.category === "finance" ? "#be1e2d" : ui.category === "tools" ? "#c7000b" : "var(--oc-accent)";
+
+  return (
+    <>
+      <div className="flex items-center justify-center">{renderAgentIcon(agent, 40)}</div>
+      <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>{ui.welcomeTitle || agent.name}</p>
+      <p className="text-xs mt-1.5 max-w-[280px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>
+        {ui.welcomeDescription || agent.description || "业务智能体"}
+      </p>
+      {examples.length > 0 && (
+        <div className="mt-4 mx-auto max-w-[280px] rounded-lg px-3 py-2.5 text-left" style={{ background: "color-mix(in oklab, var(--oc-accent) 5%, transparent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 16%, transparent)" }}>
+          <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
+          {examples.map((item) => (
+            <p key={item.text} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-start gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.72 }} onClick={() => onPickExample(item.text)}>
+              {item.icon && <span className="shrink-0">{item.icon}</span>}
+              <span>{item.text}</span>
+            </p>
+          ))}
+        </div>
+      )}
+      {badges.length > 0 && (
+        <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+          {badges.map((badge) => (
+            <span key={badge} className="px-2 py-0.5 rounded-full text-[10px]" style={{ background: "color-mix(in oklab, var(--oc-accent) 8%, transparent)", color: accent, border: "1px solid color-mix(in oklab, var(--oc-accent) 18%, transparent)" }}>{badge}</span>
+          ))}
+        </div>
+      )}
+      <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.45 }}>{ui.subtitle}</p>
+    </>
+  );
 }
 
 /** 聊天空状态动画：粒子流 — 小虾发射彩色圆点飘向引擎 icon */
@@ -514,10 +630,10 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b shrink-0" style={{ borderColor: "var(--oc-border)" }}>
         <button onClick={onBack} className="p-1 rounded hover:opacity-80 transition-colors"><ChevronLeft size={16} style={{ color: "var(--oc-text-secondary)" }} /></button>
-        <span className="flex items-center justify-center" style={{ width: 18, height: 18 }}>{agentIcon(agent.id, 18)}</span>
+        <span className="flex items-center justify-center" style={{ width: 18, height: 18 }}>{renderAgentIcon(agent, 18)}</span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold truncate" style={{ color: "var(--oc-text-primary)" }}>{agent.name}</div>
-          <div className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{agent.id === "task-hermes" ? "灵枢 · 共享空间" : agent.id === "task-stock" ? "灵犀 · 11策略" : agent.id === "task-trace" ? "灵枢 · 深度求索" : agent.id === "task-claim-ev" ? "灵犀 · EV 理赔决策" : agent.id === "task-my-wealth" ? "灵犀 · 个人理财" : agent.id === "task-bond" ? "灵犀 · 债券投研" : agent.id === "task-credit-risk" ? "灵犀 · 智贷决策" : "per-session · 独立沙箱"}</div>
+          <div className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{getAgentSubtitle(agent)}</div>
         </div>
         {countdown !== null && <span className="text-[10px] px-1.5 py-0.5 rounded animate-pulse" style={{ background: "rgba(239,68,68,0.15)", color: "var(--oc-danger)", border: "1px solid rgba(239,68,68,.3)" }}>{Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")} 后超时</span>}
         {sessionKey && !countdown && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(34,197,94,0.12)", color: "var(--oc-success)", border: "1px solid rgba(34,197,94,.25)" }}>进行中</span>}
@@ -545,7 +661,9 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
           </div>
         )}
         {msgs.length === 0 && !sessionExpired && <div className="text-center py-8">
-          {agent.id === "task-hermes" ? (
+          {agent.uiConfig ? (
+            <ConfiguredAgentWelcome agent={agent} onPickExample={setInput} />
+          ) : agent.id === "task-hermes" ? (
             <>
               <div className="flex items-center justify-center"><Dna size={40} style={{ color: "#be1e2d" }} /></div>
               <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵枢 · 共享智脑（Hermes Agent）</p>
@@ -1063,6 +1181,24 @@ function CollabGroup({
   );
 }
 
+function AgentListButton({ agent, onOpen }: { agent: BusinessAgent; onOpen: (agent: BusinessAgent) => void }) {
+  return (
+    <button
+      key={agent.id}
+      onClick={() => onOpen(agent)}
+      className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]"
+      style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}
+    >
+      <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{renderAgentIcon(agent, 20)}</span>
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{agent.name}</div>
+        <div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{getAgentCardDescription(agent)}</div>
+      </div>
+      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
+    </button>
+  );
+}
+
 // ── 智能体广场主面板 ────────────────────────────────────────────────────────
 export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptId?: string }) {
   const [bizAgents, setBizAgents] = useState<BusinessAgent[]>([]);
@@ -1185,49 +1321,17 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                     {/* ── 业务能力（折叠组） */}
                     {bizLoading ? <div className="flex items-center gap-2 py-3 justify-center"><Loader2 size={13} className="animate-spin" style={{ color: "var(--oc-text-secondary)" }} /><span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>加载中...</span></div> : (
                       <>
-                        {/* 灵枢 · 核心引擎 */}
-                        {(() => { const items = bizAgents.filter(a => ["task-hermes","task-trace"].includes(a.id)); return items.length > 0 ? (
-                          <CollabGroup id="lingshu" title="灵枢 · 核心引擎" icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#be1e2d" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
-                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
-                              <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
-                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id, a.description)}</div></div>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
-                            </button>))}</div>
-                          </CollabGroup>
-                        ) : null; })()}
-
-                        {/* 灵匠 · 创作工具 */}
-                        {(() => { const items = bizAgents.filter(a => ["task-ppt","task-code","task-slides"].includes(a.id)); return items.length > 0 ? (
-                          <CollabGroup id="lingjiang" title="灵匠 · 创作工具" icon={<Code2 size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
-                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
-                              <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
-                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id, a.description)}</div></div>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
-                            </button>))}</div>
-                          </CollabGroup>
-                        ) : null; })()}
-
-                        {/* 灵犀 · 分析研判 */}
-                        {(() => { const items = bizAgents.filter(a => ["task-stock","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"].includes(a.id)); return items.length > 0 ? (
-                          <CollabGroup id="lingxi" title="灵犀 · 分析研判" icon={<TrendingUp size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
-                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
-                              <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
-                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id, a.description)}</div></div>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
-                            </button>))}</div>
-                          </CollabGroup>
-                        ) : null; })()}
-
-                        {/* 未分类 */}
-                        {(() => { const categorized = new Set(["task-hermes","task-trace","task-ppt","task-code","task-slides","task-stock","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"]); const items = bizAgents.filter(a => !categorized.has(a.id)); return items.length > 0 ? (
-                          <CollabGroup id="other" title="其他" icon={<Bot size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
-                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
-                              <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
-                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id, a.description)}</div></div>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
-                            </button>))}</div>
-                          </CollabGroup>
-                        ) : null; })()}
+                        {PLAZA_GROUPS.map((group) => {
+                          const items = bizAgents.filter(a => normalizeUiConfig(a).category === group.id);
+                          if (items.length === 0) return null;
+                          return (
+                            <CollabGroup key={group.id} id={`plaza-${group.id}`} title={group.title} icon={group.icon} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
+                              <div className="space-y-1.5">
+                                {items.map((agent) => <AgentListButton key={agent.id} agent={agent} onOpen={setActiveAgent} />)}
+                              </div>
+                            </CollabGroup>
+                          );
+                        })}
                       </>
                     )}
 

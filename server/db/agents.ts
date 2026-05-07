@@ -40,6 +40,12 @@ export async function upsertBusinessAgent(data: InsertBusinessAgent): Promise<vo
       icon: data.icon,
       enabled: data.enabled,
       sortOrder: data.sortOrder,
+      expiresAt: data.expiresAt,
+      maxDailyRequests: data.maxDailyRequests,
+      allowedProfiles: data.allowedProfiles,
+      tags: data.tags,
+      systemPrompt: data.systemPrompt,
+      uiConfig: data.uiConfig,
     }});
 }
 

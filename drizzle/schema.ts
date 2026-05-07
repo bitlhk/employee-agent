@@ -557,6 +557,7 @@ export const businessAgents = mysqlTable("business_agents", {
   allowedProfiles: varchar("allowed_profiles", { length: 128 }).default("plus,internal"),
   tags:          varchar("tags", { length: 256 }).default(""),
   systemPrompt:  text("system_prompt"),
+  uiConfig:      text("ui_config"),
   createdAt:     timestamp("created_at").defaultNow().notNull(),
   updatedAt:     timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });

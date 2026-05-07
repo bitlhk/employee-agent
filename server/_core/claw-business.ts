@@ -22,6 +22,51 @@ export function registerBusinessRoutes(app: express.Express) {
   const REMOTE_FILE_SERVICE_PORT = 19798;
   // file-service 自己的 auth token，跟 bizAgent.apiToken（agent backend token）不同
   const FILE_SERVICE_TOKEN = "public-skill-demo-2026";
+  function parseAgentUiConfig(raw: unknown): Record<string, any> {
+    if (!raw || typeof raw !== "string") return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  async function getRequesterAgentProfile(userId: number): Promise<string[]> {
+    try {
+      const { getUserById } = await import("../db/users");
+      const user = await getUserById(userId);
+      const roleProfile = user?.role === "admin" ? "internal" : "plus";
+      const accessLevel = String((user as any)?.accessLevel || "").trim();
+      return Array.from(new Set([roleProfile, accessLevel].filter(Boolean)));
+    } catch {
+      return ["plus"];
+    }
+  }
+  function isAgentAvailableForProfiles(agent: any, profileKeys: string[]): boolean {
+    if (!agent || Number(agent.enabled) !== 1) return false;
+    if (agent.expiresAt && new Date(agent.expiresAt).getTime() < Date.now()) return false;
+    const allowed = String(agent.allowedProfiles || "plus,internal")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (allowed.length === 0) return true;
+    return profileKeys.some((profile) => allowed.includes(profile));
+  }
+  function publicAgentPayload(agent: any) {
+    const uiConfig = parseAgentUiConfig(agent.uiConfig);
+    return {
+      id: agent.id,
+      name: agent.name,
+      description: agent.description || "",
+      kind: agent.kind,
+      icon: agent.icon || "🤖",
+      sandboxScope: agent.kind === "remote" ? "remote" : "agent",
+      remote: agent.kind === "remote",
+      model: "openclaw/main",
+      tags: agent.tags || "",
+      uiConfig,
+    };
+  }
   function computeTenantShort(uid: number, aid: string): string {
     return createHmac("sha256", TENANT_SECRET_LOCAL).update(`uid:${uid}|agent:${aid}`).digest("hex").slice(0, 16);
   }
@@ -206,16 +251,12 @@ export function registerBusinessRoutes(app: express.Express) {
 
       const { listEnabledBusinessAgents } = await import("../db");
       const dbAgents = await listEnabledBusinessAgents();
-      const agents = dbAgents.map((a: any) => ({
-        id: a.id,
-        name: a.name,
-        description: a.description || "",
-        kind: a.kind,
-        icon: a.icon || "🤖",
-        sandboxScope: a.kind === "remote" ? "remote" : "agent",
-        remote: a.kind === "remote",
-        model: "openclaw/main",
-      }));
+      const userId = await resolveRequesterUserId(req, res);
+      if (!userId) return;
+      const profileKeys = await getRequesterAgentProfile(userId);
+      const agents = dbAgents
+        .filter((agent: any) => isAgentAvailableForProfiles(agent, profileKeys))
+        .map(publicAgentPayload);
       return res.json({ agents, source: "legacy" });
     } catch (e) {
       console.error("[AGENT-PLAZA] failed to load business agents", e);
@@ -244,7 +285,9 @@ export function registerBusinessRoutes(app: express.Express) {
     // 从 DB 动态取 enabled agent 列表做鉴权
     const { listEnabledBusinessAgents } = await import("../db");
     const bizAgentList = await listEnabledBusinessAgents();
-    const ALLOWED_BUSINESS_AGENTS = new Set(bizAgentList.map((a: any) => a.id));
+    const profileKeys = await getRequesterAgentProfile(userId);
+    const allowedAgents = bizAgentList.filter((agent: any) => isAgentAvailableForProfiles(agent, profileKeys));
+    const ALLOWED_BUSINESS_AGENTS = new Set(allowedAgents.map((a: any) => a.id));
     if (!ALLOWED_BUSINESS_AGENTS.has(String(agentId))) {
       return res.status(403).json({ error: "不允许的业务 Agent" });
     }
@@ -268,7 +311,7 @@ export function registerBusinessRoutes(app: express.Express) {
     const http = await import("http");
 
     // ── 远端 Agent 动态路由（从 DB 读取 api_url / api_token）──────────────
-    const bizAgentCfg = bizAgentList.find((a: any) => a.id === agentId);
+    const bizAgentCfg = allowedAgents.find((a: any) => a.id === agentId);
 
     // ── 平台级记忆：创建响应缓冲器 ──
     const memAcc = new ResponseAccumulator(userId, String(agentId), msgStr);

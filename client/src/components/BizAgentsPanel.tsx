@@ -13,6 +13,7 @@ interface BizAgent {
   healthStatus?: "healthy" | "degraded" | "offline" | "unknown";
   lastHealthCheck?: string | null;
   allowedProfiles?: string | null; tags?: string | null;
+  systemPrompt?: string | null; uiConfig?: string | null;
 }
 
 const EMPTY: Partial<BizAgent> = {
@@ -22,10 +23,104 @@ const EMPTY: Partial<BizAgent> = {
   expiresAt: null, maxDailyRequests: 0, allowedProfiles: "plus,internal", tags: "",
 };
 
+const CATEGORY_OPTIONS = [
+  { value: "core", label: "灵枢 · 核心引擎" },
+  { value: "tools", label: "灵匠 · 创作工具" },
+  { value: "finance", label: "灵犀 · 分析研判" },
+  { value: "other", label: "其他能力" },
+];
+
+const TEMPLATE_OPTIONS = [
+  { value: "general", label: "通用助手" },
+  { value: "finance", label: "金融专业" },
+  { value: "tool", label: "工程工具" },
+  { value: "compact", label: "轻量卡片" },
+];
+
+const LEGACY_CATEGORY: Record<string, string> = {
+  "task-hermes": "core",
+  "task-trace": "core",
+  "task-ppt": "tools",
+  "task-code": "tools",
+  "task-slides": "tools",
+  "task-stock": "finance",
+  "task-claim-ev": "finance",
+  "task-my-wealth": "finance",
+  "task-bond": "finance",
+  "task-credit-risk": "finance",
+};
+
+function parseUiConfig(raw?: string | null) {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as any : {};
+  } catch {
+    return {};
+  }
+}
+
+function formatExamples(examples: any) {
+  if (!Array.isArray(examples)) return "";
+  return examples
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (!item?.text) return "";
+      return item.icon ? `${item.icon}|${item.text}` : item.text;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function parseExamples(text: string) {
+  return String(text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [first, ...rest] = line.split("|");
+      return rest.length > 0 ? { icon: first.trim(), text: rest.join("|").trim() } : { text: line };
+    })
+    .filter((item) => item.text);
+}
+
+function toAgentPayload(v: any) {
+  const {
+    uiCategory, uiTemplate, uiSubtitle, welcomeTitle,
+    welcomeDescription, examplePrompts, uiBadges,
+    ...payload
+  } = v;
+  const uiConfig = {
+    category: uiCategory || "other",
+    template: uiTemplate || "general",
+    subtitle: uiSubtitle || "",
+    welcomeTitle: welcomeTitle || "",
+    welcomeDescription: welcomeDescription || "",
+    examples: parseExamples(examplePrompts || ""),
+    badges: String(uiBadges || "").split(",").map((item) => item.trim()).filter(Boolean),
+  };
+  return { ...payload, uiConfig: JSON.stringify(uiConfig) };
+}
+
+function optionLabel(options: { value: string; label: string }[], value?: string) {
+  return options.find((option) => option.value === value)?.label || value || "未配置";
+}
+
 function AgentForm({ initial, onSave, onCancel }: {
   initial: Partial<BizAgent>; onSave: (v: any) => void; onCancel: () => void;
 }) {
-  const [v, setV] = useState<any>({ ...EMPTY, ...initial });
+  const ui = parseUiConfig(initial.uiConfig);
+  const [v, setV] = useState<any>({
+    ...EMPTY,
+    ...initial,
+    uiCategory: ui.category || LEGACY_CATEGORY[String(initial.id || "")] || "other",
+    uiTemplate: ui.template || "general",
+    uiSubtitle: ui.subtitle || "",
+    welcomeTitle: ui.welcomeTitle || initial.name || "",
+    welcomeDescription: ui.welcomeDescription || initial.description || "",
+    examplePrompts: formatExamples(ui.examples),
+    uiBadges: Array.isArray(ui.badges) ? ui.badges.join(",") : "",
+  });
   const set = (k: string, val: any) => setV((p: any) => ({ ...p, [k]: val }));
   const isEdit = !!initial.id;
 
@@ -67,6 +162,54 @@ function AgentForm({ initial, onSave, onCancel }: {
           <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>图标（Emoji）</label>
           <input value={v.icon || "🤖"} onChange={e => set("icon", e.target.value)} maxLength={4}
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+        </div>
+        <div>
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>广场分组</label>
+          <select value={v.uiCategory} onChange={e => set("uiCategory", e.target.value)}
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }}>
+            {CATEGORY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>详情模板</label>
+          <select value={v.uiTemplate} onChange={e => set("uiTemplate", e.target.value)}
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }}>
+            {TEMPLATE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </div>
+        <div className="col-span-2">
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>广场副标题</label>
+          <input value={v.uiSubtitle || ""} onChange={e => set("uiSubtitle", e.target.value)} placeholder="灵犀 · 债券投研"
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+        </div>
+        <div>
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>欢迎标题</label>
+          <input value={v.welcomeTitle || ""} onChange={e => set("welcomeTitle", e.target.value)} placeholder="灵犀 · 债券投研助手"
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+        </div>
+        <div>
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>能力标签（逗号分隔）</label>
+          <input value={v.uiBadges || ""} onChange={e => set("uiBadges", e.target.value)} placeholder="中债数据,Hermes,投研"
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+        </div>
+        <div className="col-span-2">
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>欢迎说明</label>
+          <textarea value={v.welcomeDescription || ""} onChange={e => set("welcomeDescription", e.target.value)} rows={2}
+            placeholder="进入智能体后的空状态说明文案"
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none resize-none"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+        </div>
+        <div className="col-span-2">
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>示例问题（每行一个，支持“图标|问题”）</label>
+          <textarea value={v.examplePrompts || ""} onChange={e => set("examplePrompts", e.target.value)} rows={4}
+            placeholder={"📊|分析某只股票的多头趋势\n写一个 Python 脚本批量重命名文件"}
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none resize-none"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
         </div>
         {v.kind === "remote" && <>
@@ -123,11 +266,12 @@ function AgentForm({ initial, onSave, onCancel }: {
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
         </div>
         <div>
-          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>允许套餐（逗号分隔）</label>
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>允许角色（逗号分隔）</label>
           <input value={v.allowedProfiles || "plus,internal"} onChange={e => set("allowedProfiles", e.target.value)}
-            placeholder="starter,plus,internal"
+            placeholder="plus,internal"
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+          <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>plus=员工，internal=管理员</div>
         </div>
         <div className="col-span-2">
           <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>标签（逗号分隔）</label>
@@ -136,9 +280,16 @@ function AgentForm({ initial, onSave, onCancel }: {
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
         </div>
+        <div className="col-span-2">
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>系统提示词（可选）</label>
+          <textarea value={v.systemPrompt || ""} onChange={e => set("systemPrompt", e.target.value)} rows={3}
+            placeholder="仅用于后端支持该智能体自定义提示词时生效"
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none resize-none"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+        </div>
       </div>
       <div className="flex gap-2 pt-1">
-        <button onClick={() => onSave(v)}
+        <button onClick={() => onSave(toAgentPayload(v))}
           disabled={!v.id || !v.name}
           className="admin-primary-action px-4 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
           style={{ background: "var(--oc-accent)", color: "var(--oc-text-on-accent)", border: "none", cursor: "pointer" }}>
@@ -207,7 +358,9 @@ export function BizAgentsPanel() {
       )}
 
       <div className="space-y-2">
-        {agents.map(a => (
+        {agents.map(a => {
+          const ui = parseUiConfig(a.uiConfig);
+          return (
           <div key={a.id}>
             {editing?.id === a.id ? (
               <AgentForm initial={editing} onSave={(v) => upsert.mutate(v)} onCancel={() => setEditing(null)} />
@@ -238,6 +391,8 @@ export function BizAgentsPanel() {
                     {a.expiresAt && <span>有效期: {new Date(a.expiresAt).toLocaleDateString()}</span>}
                     {!a.expiresAt && <span>永久有效</span>}
                     {(a.maxDailyRequests || 0) > 0 && <span>日限: {a.maxDailyRequests}次</span>}
+                    {ui.category && <span>{optionLabel(CATEGORY_OPTIONS, ui.category)}</span>}
+                    {ui.template && <span>{optionLabel(TEMPLATE_OPTIONS, ui.template)}</span>}
                     {a.tags && <span>{String(a.tags).split(",").filter(Boolean).map(t => `[${t.trim()}]`).join(" ")}</span>}
                   </div>
                 </div>
@@ -259,7 +414,8 @@ export function BizAgentsPanel() {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
         {!listQ.isLoading && agents.length === 0 && (
           <div className="text-xs text-center py-6" style={{ color: "var(--oc-text-secondary)", opacity: 0.5 }}>
             暂无业务 Agent，点击"新增"添加第一个

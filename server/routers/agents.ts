@@ -124,6 +124,12 @@ export const bizAgentsRouter = router({
       icon: z.string().optional(),
       enabled: z.number().int().optional(),
       sortOrder: z.number().int().optional(),
+      expiresAt: z.string().nullable().optional(),
+      maxDailyRequests: z.number().int().min(0).optional(),
+      allowedProfiles: z.string().optional(),
+      tags: z.string().optional(),
+      systemPrompt: z.string().optional(),
+      uiConfig: z.string().optional(),
     })).mutation(async ({ input }) => {
       await upsertBusinessAgent({
         id: input.id,
@@ -138,6 +144,12 @@ export const bizAgentsRouter = router({
         icon: input.icon || "🤖",
         enabled: input.enabled ?? 1,
         sortOrder: input.sortOrder ?? 0,
+        expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+        maxDailyRequests: input.maxDailyRequests ?? 0,
+        allowedProfiles: input.allowedProfiles || "plus,internal",
+        tags: input.tags || "",
+        systemPrompt: input.systemPrompt || null,
+        uiConfig: input.uiConfig || null,
       } as any);
       return { ok: true };
     }),
