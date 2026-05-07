@@ -1,9 +1,12 @@
 import express from "express";
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { execSync } from "child_process";
+import path from "path";
 import { strictLimiter } from "./security";
 import { APP_ROOT, OPENCLAW_JSON_PATH, openClawAgentDir, openClawSkillMarketDir, openClawWorkspaceDir, requireClawOwner } from "./helpers";
 import { createContext } from "./context";
+import { skillInstaller } from "./skills/skill-installer";
+import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer } from "./skills/skill-source";
 
 export function registerMiscRoutes(app: express.Express) {
 
@@ -294,7 +297,7 @@ export function registerMiscRoutes(app: express.Express) {
     }
   });
 
-  // ── 技能包上传（zip）────────────────────────────────
+  // ── 管理员上传开源社区技能包（zip）────────────────────
   app.post("/api/claw/skill-market/upload", async (req, res) => {
     try {
       const ctx = await createContext({ req, res } as any);
@@ -306,71 +309,53 @@ export function registerMiscRoutes(app: express.Express) {
       const chunks: Buffer[] = [];
       req.on("data", (c: Buffer) => chunks.push(c));
       req.on("end", async () => {
-        const buf = Buffer.concat(chunks);
-        if (buf.length === 0) { res.status(400).json({ error: "No data" }); return; }
-        if (buf.length > 20 * 1024 * 1024) { res.status(413).json({ error: "File too large (max 20MB)" }); return; }
-
-        const marketDir = openClawSkillMarketDir();
-        const uploadId = `upload-${Date.now()}`;
-        const tmpZip = `/tmp/${uploadId}.zip`;
-        const extractDir = `${marketDir}/pending/${uploadId}`;
-
-        writeFileSync(tmpZip, buf);
-        mkdirSync(extractDir, { recursive: true });
-
         try {
-          execSync(`cd ${extractDir} && unzip -o ${tmpZip} 2>/dev/null`, { stdio: "ignore" });
-        } catch {
-          res.status(400).json({ error: "ZIP解压失败" });
-          return;
-        }
-        try { execSync(`rm ${tmpZip}`, { stdio: "ignore" }); } catch {}
+          const buf = Buffer.concat(chunks);
+          if (buf.length === 0) { res.status(400).json({ error: "No data" }); return; }
+          if (buf.length > MAX_SKILL_PACKAGE_BYTES) { res.status(413).json({ error: "File too large (max 30MB)" }); return; }
 
-        // 如果 zip 内部有单层目录，提升一级
-        const entries = readdirSync(extractDir);
-        if (entries.length === 1 && existsSync(`${extractDir}/${entries[0]}/SKILL.md`)) {
-          execSync(`mv ${extractDir}/${entries[0]}/* ${extractDir}/ 2>/dev/null; rmdir ${extractDir}/${entries[0]} 2>/dev/null`, { stdio: "ignore" });
-        }
+          const filename = decodeURIComponent(String(req.header("x-skill-filename") || "uploaded.zip")).trim() || "uploaded.zip";
+          const parsed = await parseSkillPackageBuffer(buf, filename);
+          const marketDir = openClawSkillMarketDir();
+          const uploadId = `upload-${Date.now()}`;
+          const tmpZip = path.join("/tmp", `${uploadId}.zip`);
+          const finalDir = path.join(marketDir, "pending", `${parsed.skillId}-${uploadId}`);
 
-        // 解析 SKILL.md
-        let name = uploadId;
-        let description = "";
-        try {
-          const md = readFileSync(`${extractDir}/SKILL.md`, "utf8");
-          const fm = md.match(/^---\n([\s\S]*?)\n---/);
-          if (fm) {
-            const nm = fm[1].match(/^name:\s*"?([^"\n]+)"?/m);
-            const dm = fm[1].match(/^description:\s*"?([^"\n]+)"?/m);
-            if (nm) name = nm[1].trim();
-            if (dm) description = dm[1].trim().slice(0, 300);
-          }
-        } catch {}
-
-        // 用 SKILL.md 中的 name 重命名目录
-        const skillId = name.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase() || uploadId;
-        const finalDir = `${marketDir}/pending/${skillId}`;
-        if (finalDir !== extractDir) {
+          writeFileSync(tmpZip, buf);
           try {
-            execSync(`rm -rf ${finalDir} 2>/dev/null; mv ${extractDir} ${finalDir}`, { stdio: "ignore" });
-          } catch {}
+            skillInstaller.installFromSource(tmpZip, finalDir);
+          } finally {
+            try { rmSync(tmpZip, { force: true }); } catch {}
+          }
+
+          const { insertSkillMarketItem } = await import("../db");
+          const marketItemId = await insertSkillMarketItem({
+            skillId: parsed.skillId,
+            name: parsed.displayName || parsed.skillId,
+            description: parsed.description || null,
+            author: "管理员上传",
+            authorUserId: ctx.user!.id,
+            version: String(parsed.manifest?.version || "1.0.0"),
+            category: "general",
+            origin: "opensource",
+            status: "pending",
+            license: String(parsed.manifest?.license || "MIT"),
+            packagePath: finalDir,
+          });
+
+          res.json({
+            ok: true,
+            uploadId: parsed.skillId,
+            name: parsed.displayName || parsed.skillId,
+            description: parsed.description || "",
+            path: finalDir,
+            marketItemId,
+            warnings: parsed.warnings,
+          });
+        } catch (err: any) {
+          console.error("[skill-market upload] failed", err);
+          res.status(400).json({ error: String(err?.message || "技能包解析失败") });
         }
-
-        const { insertSkillMarketItem } = await import("../db");
-        const marketItemId = await insertSkillMarketItem({
-          skillId,
-          name,
-          description: description || null,
-          author: "管理员上传",
-          authorUserId: ctx.user!.id,
-          version: "1.0.0",
-          category: "general",
-          origin: "opensource",
-          status: "pending",
-          license: "MIT",
-          packagePath: finalDir,
-        });
-
-        res.json({ ok: true, uploadId: skillId, name, description, path: finalDir, marketItemId });
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

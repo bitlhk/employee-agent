@@ -344,6 +344,7 @@ export default function ClawAdmin() {
     try {
       const res = await fetch("/api/claw/skill-market/upload", {
         method: "POST",
+        headers: { "x-skill-filename": encodeURIComponent(file.name) },
         body: await file.arrayBuffer(),
       });
       const data = await res.json();

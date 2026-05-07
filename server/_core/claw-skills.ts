@@ -315,9 +315,9 @@ export function registerSkillRoutes(app: express.Express) {
         manifest: parsed.manifest || {},
         warnings: parsed.warnings,
       });
-    } catch (e) {
+    } catch (e: any) {
       console.error("[skill-package upload] failed", e);
-      res.status(500).json({ error: "skill package upload failed" });
+      res.status(500).json({ error: String(e?.message || "skill package upload failed") });
     }
   });
 
@@ -378,9 +378,9 @@ export function registerSkillRoutes(app: express.Express) {
       });
 
       res.json({ ok: true, marketItemId, status: "pending" });
-    } catch (e) {
+    } catch (e: any) {
       console.error("[skill-market submit] failed", e);
-      res.status(500).json({ error: "submit skill to market failed" });
+      res.status(500).json({ error: String(e?.message || "submit skill to market failed") });
     }
   });
 
