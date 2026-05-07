@@ -126,6 +126,7 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
   const [v, setV] = useState<any>({
     ...EMPTY,
     ...initial,
+    apiToken: initial.id ? "" : (initial.apiToken || ""),
     uiCategory: ui.category || LEGACY_CATEGORY[String(initial.id || "")] || "other",
     uiTemplate: ui.template || "general",
     uiSubtitle: ui.subtitle || "",
@@ -238,6 +239,9 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
               type="password"
               className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
               style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+            {isEdit && (
+              <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>留空则保留现有 Token；填写新值才会替换</div>
+            )}
           </div>
           <div>
             <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>远端 Agent ID（默认 main）</label>

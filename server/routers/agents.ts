@@ -131,13 +131,17 @@ export const bizAgentsRouter = router({
       systemPrompt: z.string().nullable().optional(),
       uiConfig: z.string().nullable().optional(),
     })).mutation(async ({ input }) => {
+      const existing = await getBusinessAgent(input.id);
+      const nextApiToken = input.apiToken && input.apiToken.trim()
+        ? input.apiToken.trim()
+        : (existing?.apiToken || null);
       await upsertBusinessAgent({
         id: input.id,
         name: input.name,
         description: input.description || null,
         kind: input.kind,
         apiUrl: input.apiUrl || null,
-        apiToken: input.apiToken || null,
+        apiToken: nextApiToken,
         remoteAgentId: input.remoteAgentId || "main",
         localAgentId: input.localAgentId || null,
         skills: input.skills || null,
