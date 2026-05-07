@@ -30,8 +30,8 @@
   --accent-glow:  rgba(255, 92, 92, 0.20);
   --primary:      #ff5c5c;
   --ring:         #ff5c5c;
-  --focus-ring:   rgba(255, 92, 92, 0.38);
-  --focus-glow:   rgba(255, 92, 92, 0.18);
+  --focus-ring:   rgba(255, 255, 255, 0.22);
+  --focus-glow:   rgba(255, 92, 92, 0.08);
 
   /* ===== 语义状态（永不变） ===== */
   --ok:      #22c55e;
@@ -92,8 +92,8 @@ body {
   outline: none;
   box-shadow:
     0 0 0 1px var(--focus-ring),
-    0 0 0 4px var(--focus-glow);
-  border-color: var(--ring);
+    0 0 0 2px var(--focus-glow);
+  border-color: color-mix(in oklab, var(--accent) 38%, var(--border-hover));
 }
 
 /* Thin scrollbar */
