@@ -1740,6 +1740,19 @@ export function registerBusinessRoutes(app: express.Express) {
         session_id: stockSessionKey,
       });
 
+      // Keep the browser/proxy SSE connection alive while the stock runtime is still
+      // preparing headers or doing long-running analysis.
+      const stockHeartbeat = setInterval(() => {
+        if (!res.writableEnded) {
+          res.write(`: stock-keepalive ${Date.now()}\n\n`);
+          if (typeof (res as any).flush === "function") (res as any).flush();
+        } else {
+          clearInterval(stockHeartbeat);
+        }
+      }, 5000);
+      res.write(`: stock-start ${Date.now()}\n\n`);
+      if (typeof (res as any).flush === "function") (res as any).flush();
+
       const stockReq = http.request({
         hostname: stockUrl.hostname,
         port: parseInt(String(stockUrl.port || "8188"), 10),
@@ -1752,10 +1765,6 @@ export function registerBusinessRoutes(app: express.Express) {
         },
       }, (stockRes: any) => {
         let buf = "";
-        const stockHeartbeat = setInterval(() => {
-          if (!res.writableEnded) { res.write(`: keepalive\n\n`); }
-          else clearInterval(stockHeartbeat);
-        }, 5000);
 
         stockRes.on("data", (chunk: Buffer) => {
           buf += chunk.toString();
@@ -1807,9 +1816,10 @@ export function registerBusinessRoutes(app: express.Express) {
 
       stockReq.on("error", (err: any) => {
         console.error("[STOCK] request error:", err.message);
+        clearInterval(stockHeartbeat);
         if (!res.writableEnded) { res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`); res.end(); }
       });
-      req.on("close", () => { stockReq.destroy(); });
+      req.on("close", () => { clearInterval(stockHeartbeat); stockReq.destroy(); });
       stockReq.write(stockBody);
       stockReq.end();
       return;
