@@ -493,8 +493,6 @@ export default function ClawAdmin() {
               <Button variant="ghost" size="icon" onClick={() => refetchList()} className="text-muted-foreground">
                 <RefreshCw className="w-4 h-4" />
               </Button>
-              {/* 发 Hermes 虾（admin 手动给灰度用户配 lgh-* runtime） */}
-              <HermesProvisionButton onDone={() => refetchList()} />
             </div>
 
             {/* 批量操作 */}
@@ -877,50 +875,5 @@ export default function ClawAdmin() {
         </Tabs>
       </main>
     </div>
-  );
-}
-
-// ── 发 Hermes 虾按钮（admin 手动给灰度用户配 lgh-* runtime） ──
-function HermesProvisionButton({ onDone }: { onDone: () => void }) {
-  const mut = trpc.claw.adminProvisionHermesClaw.useMutation({
-    onSuccess: (r: any) => {
-      toast.success(`已发 Hermes 虾: ${r?.adoptId || ""}`);
-      onDone();
-    },
-    onError: (e: any) => {
-      toast.error(e?.message || "provisioning 失败");
-    },
-  });
-  return (
-    <Button
-      size="sm"
-      variant="outline"
-      onClick={() => {
-        const userIdStr = window.prompt("用户 ID（数字）?", "");
-        if (!userIdStr) return;
-        const userId = Number(userIdStr.trim());
-        if (!Number.isFinite(userId) || userId <= 0) {
-          toast.error("用户 ID 必须是正整数");
-          return;
-        }
-        const profileName = window.prompt(
-          "Profile 名（小写字母/数字/-/_，例如 lihongkun）",
-          "",
-        );
-        if (!profileName) return;
-        if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(profileName.trim())) {
-          toast.error("Profile 名格式非法");
-          return;
-        }
-        if (!window.confirm(`确认给 userId=${userId} 发一张 lgh-${profileName.trim()}（Hermes runtime）?`)) return;
-        mut.mutate({ userId, profileName: profileName.trim() });
-      }}
-      disabled={mut.isPending}
-      className="gap-1.5"
-      title="给指定用户手动发放 Hermes 虾（灰度期）"
-    >
-      {mut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>⚡</span>}
-      发 Hermes 虾
-    </Button>
   );
 }
