@@ -108,7 +108,9 @@ body {
 }
 
 .business-chat-input:focus,
-.business-chat-input:focus-visible {
+.business-chat-input:focus-visible,
+.main-chat-input:focus,
+.main-chat-input:focus-visible {
   border-color: transparent !important;
   box-shadow: none !important;
   outline: none !important;

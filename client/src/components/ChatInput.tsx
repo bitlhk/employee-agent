@@ -392,7 +392,7 @@ export function ChatInput({
 
       {/* 主输入卡片 */}
       <div
-        className={`lingxia-input-wrap ${streaming ? "is-streaming" : ""}`}
+        className={`lingxia-input-wrap main-chat-composer ${streaming ? "is-streaming" : ""}`}
         data-focused={inputFocused ? "true" : "false"}
         onMouseDown={() => setInputFocused(true)}
         onFocusCapture={() => setInputFocused(true)}
@@ -406,7 +406,7 @@ export function ChatInput({
           border: recording
             ? "1px solid var(--oc-accent)"
             : inputFocused
-              ? "1px solid var(--oc-border-strong)"
+              ? "1px solid color-mix(in oklab, var(--oc-accent) 34%, var(--oc-border-hover))"
               : "1px solid var(--oc-border)",
           outline: "none",
           outlineOffset: 0,
@@ -414,10 +414,10 @@ export function ChatInput({
           boxShadow: recording
             ? "0 0 0 2px rgba(255,92,92,0.2), 0 2px 16px rgba(0,0,0,0.14)"
             : inputFocused
-              ? "0 2px 14px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)"
+              ? "0 0 0 1px rgba(255,255,255,0.16), 0 0 0 3px rgba(255,92,92,0.07), 0 2px 14px rgba(0,0,0,0.12)"
               : "0 2px 16px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08)",
           overflow: "hidden",
-          transition: "border-color 0.2s, box-shadow 0.2s, outline-color 0.2s",
+          transition: "border-color 0.18s, box-shadow 0.18s, outline-color 0.18s",
         }}
       >
         <div className="px-4 pt-3 pb-1">
@@ -458,16 +458,17 @@ export function ChatInput({
               onKeyDown={onKeyDown}
               placeholder={placeholder}
               rows={1}
-              className="w-full bg-transparent text-sm resize-none outline-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+              className="main-chat-input w-full bg-transparent text-sm resize-none outline-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
               style={{
                 color: "var(--oc-text-primary)",
-                lineHeight: "22px",
-                minHeight: 22,
+                lineHeight: "24px",
+                minHeight: 28,
                 maxHeight: 144,
                 overflowY: "hidden",
                 display: "block",
                 border: "none",
                 outline: "none",
+                padding: "2px 0",
                 boxShadow: "none",
                 WebkitAppearance: "none",
               }}
