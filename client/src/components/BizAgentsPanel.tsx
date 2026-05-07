@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2 } from "lucide-react";
+import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2, Bot, Presentation, Code2, TrendingUp, Dna, BarChart3, Battery, Compass } from "lucide-react";
 import { toast } from "sonner";
 
 interface BizAgent {
@@ -49,6 +49,29 @@ const LEGACY_CATEGORY: Record<string, string> = {
   "task-bond": "finance",
   "task-credit-risk": "finance",
 };
+
+function agentIcon(id: string, size = 20) {
+  const style = { color: "var(--oc-accent)" };
+  if (id === "task-ppt") return <Presentation size={size} style={style} />;
+  if (id === "task-code") return <Code2 size={size} style={style} />;
+  if (id === "task-hermes") return <Dna size={size} style={{ color: "#be1e2d" }} />;
+  if (id === "task-trace") return <Bot size={size} style={{ color: "#be1e2d" }} />;
+  if (id === "task-stock") return <BarChart3 size={size} style={{ color: "var(--oc-danger)" }} />;
+  if (id === "task-claim-ev") return <Battery size={size} style={{ color: "#be1e2d" }} />;
+  if (id === "task-my-wealth") return <TrendingUp size={size} style={{ color: "#be1e2d" }} />;
+  if (id === "task-bond") return <BarChart3 size={size} style={{ color: "#be1e2d" }} />;
+  if (id === "task-credit-risk") return <Compass size={size} style={{ color: "#be1e2d" }} />;
+  return <Bot size={size} style={style} />;
+}
+
+function renderAgentIcon(agent: Pick<BizAgent, "id" | "icon">, size = 20) {
+  if (LEGACY_CATEGORY[agent.id]) return agentIcon(agent.id, size);
+  const icon = agent.icon?.trim();
+  if (icon && icon.length <= 4 && !icon.startsWith("/")) {
+    return <span style={{ fontSize: size + 2, lineHeight: 1 }}>{icon}</span>;
+  }
+  return <Bot size={size} style={{ color: "var(--oc-accent)" }} />;
+}
 
 function parseUiConfig(raw?: string | null) {
   if (!raw) return {};
@@ -173,10 +196,14 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
           </select>
         </div>
         <div>
-          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>图标（Emoji）</label>
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>图标（自定义 Agent Emoji）</label>
           <input value={v.icon || "🤖"} onChange={e => set("icon", e.target.value)} maxLength={4}
-            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
+            disabled={!!LEGACY_CATEGORY[String(v.id || "")]}
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none disabled:opacity-50"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+          {LEGACY_CATEGORY[String(v.id || "")] && (
+            <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>内置智能体使用平台单色图标，避免被配置覆盖</div>
+          )}
         </div>
         <div>
           <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>广场分组</label>
@@ -394,7 +421,7 @@ export function BizAgentsPanel() {
               <div className="rounded-xl border px-4 py-3 flex items-center gap-3"
                 style={{ borderColor: "var(--oc-border)", background: "var(--oc-input-bg)", opacity: a.enabled ? 1 : 0.5 }}>
                 <div className="relative">
-                  <span style={{ fontSize: 22 }}>{a.icon || "🤖"}</span>
+                  <span className="flex items-center justify-center" style={{ width: 24, height: 24 }}>{renderAgentIcon(a, 22)}</span>
                   <span style={{ position: "absolute", bottom: -2, right: -2, width: 8, height: 8, borderRadius: "50%", border: "1.5px solid var(--oc-card)", background: a.healthStatus === "healthy" ? "#22c55e" : a.healthStatus === "degraded" ? "#f59e0b" : a.healthStatus === "offline" ? "#ef4444" : "#9ca3af" }} />
                 </div>
                 <div className="flex-1 min-w-0">
