@@ -888,10 +888,18 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
       const citedIds = new Set([...output.matchAll(/\[?(src_\d{3})\]?/gi)].map((match) => match[1].toLowerCase()));
       if (citedIds.size === 0) warnings.push(`missing_citation_ids: ${stage.id} output must cite sources as [src_NNN]`);
     }
-    if (/(建议|推荐).{0,12}(买入|卖出|持有|加仓|减仓)|目标价|保证收益|稳赚/.test(output)) {
+    if (stage.id !== "risk_review" && this.containsActionableFinancialAdvice(output)) {
       warnings.push(`financial_advice_boundary_violation: ${stage.id} output contains prohibited advice wording`);
     }
     return warnings;
+  }
+
+  private containsActionableFinancialAdvice(output: string): boolean {
+    const riskyLinePattern = /(建议|推荐).{0,12}(买入|卖出|持有|加仓|减仓)|目标价|保证收益|稳赚/;
+    const safeContextPattern = /(不|不得|不能|禁止|避免|不构成|非|不可|无需|不应|边界|提醒|合规|人工复核|持牌)/;
+    return output
+      .split(/\r?\n/)
+      .some((line) => riskyLinePattern.test(line) && !safeContextPattern.test(line));
   }
 
   private now(): Date {
