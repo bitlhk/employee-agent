@@ -1,6 +1,6 @@
 import type express from "express";
 import * as http from "http";
-import { auditTenantAccess, beginTenantSession } from "../tenant-isolation";
+import { auditTenantAccess, beginTenantSession, buildRuntimeSessionKey } from "../tenant-isolation";
 import { injectMemory, type ResponseAccumulator } from "../response-accumulator";
 
 type BeginTenantSessionFn = typeof beginTenantSession;
@@ -117,7 +117,7 @@ export async function runBondHermesV1(input: RunBondHermesV1Input): Promise<void
     userId, agentId, "chat_send",
     { message_length: message.length, ua: userAgent }
   );
-  const bondSessionKey = `task-bond_user${userId}_${tenantCtx.sessionKey}`;
+  const bondSessionKey = buildRuntimeSessionKey("hermes", agentId, tenantCtx.tenantShort);
   console.log("[BOND] starting run", { agentId, session: bondSessionKey, tenant: tenantCtx.tenantShort });
   const bondUrl = new URL(bizAgent.apiUrl || "http://127.0.0.1:8642");
   const bondToken = bizAgent.apiToken || "";

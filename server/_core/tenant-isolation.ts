@@ -14,7 +14,7 @@
  *   - 下游服务无法从 tenantToken 反推 userId（HMAC 不可逆）
  */
 
-import { createHmac } from "crypto";
+import { createHash, createHmac } from "crypto";
 import { mkdirSync, existsSync, readFileSync, readdirSync, statSync, cpSync } from "fs";
 import path from "path";
 import { OPENCLAW_HOME, OPENCLAW_JSON_PATH } from "./helpers";
@@ -62,6 +62,25 @@ export function buildTenantContext(userId: number, agentId: string): TenantConte
   const sessionKey = `business:${agentId}:t:${tenantShort}:main`;
 
   return { userId, agentId, tenantToken, tenantShort, workspace, sessionKey };
+}
+
+/**
+ * 构造传给下游 runtime 的稳定 session id。
+ * 部分 OpenAI-compatible runtime 会把 session_id 映射为 prompt_cache_key，
+ * 上游限制最大 64 字符，所以这里统一压到安全长度内。
+ */
+export function buildRuntimeSessionKey(
+  runtime: string,
+  agentId: string,
+  tenantShort: string,
+  maxLength = 64,
+): string {
+  const normalizedRuntime = runtime.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 16) || "runtime";
+  const normalizedAgentId = agentId.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const base = `${normalizedRuntime}:${normalizedAgentId}:t:${tenantShort}`;
+  if (base.length <= maxLength) return base;
+  const digest = createHash("sha256").update(base).digest("hex").slice(0, 16);
+  return `${normalizedRuntime}:t:${tenantShort}:h:${digest}`;
 }
 
 /**

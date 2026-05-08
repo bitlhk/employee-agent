@@ -2,7 +2,7 @@ import express from "express";
 import { sanitizeFileName, streamFileDownload } from "./helpers";
 import { mkdirSync, existsSync, readdirSync, statSync } from "fs";
 import { clawChatLimiter } from "./security";
-import { beginTenantSession, auditTenantAccess, ensurePerTenantAgent, type TenantContext } from "./tenant-isolation";
+import { beginTenantSession, auditTenantAccess, ensurePerTenantAgent, buildRuntimeSessionKey, type TenantContext } from "./tenant-isolation";
 import { resolveRequesterUserId, readOpenclawJson, OPENCLAW_HOME } from "./helpers";
 import path from "path";
 import { createHmac } from "crypto";
@@ -363,7 +363,7 @@ export function registerBusinessRoutes(app: express.Express) {
         userId, agentId, "chat_send",
         { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
       );
-      const creditSessionKey = `task-credit-risk_user${userId}_${tenantCtx.sessionKey}`;
+      const creditSessionKey = buildRuntimeSessionKey("hermes", agentId, tenantCtx.tenantShort);
       console.log("[CREDIT-RISK] starting run", { agentId, session: creditSessionKey, tenant: tenantCtx.tenantShort });
       // 合规验证器：每次请求重置缓冲
       creditReportBuffer = "";
@@ -674,7 +674,7 @@ export function registerBusinessRoutes(app: express.Express) {
         userId, agentId, "chat_send",
         { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
       );
-      const wealthSessionKey = `task-my-wealth_user${userId}_${tenantCtx.sessionKey}`;
+      const wealthSessionKey = buildRuntimeSessionKey("hermes", agentId, tenantCtx.tenantShort);
       console.log("[MY-WEALTH] starting run", { agentId, session: wealthSessionKey, tenant: tenantCtx.tenantShort });
       const wealthUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8642");
       const wealthToken = bizAgentCfg.apiToken || "";
@@ -932,9 +932,8 @@ export function registerBusinessRoutes(app: express.Express) {
         userId, agentId, "chat_send",
         { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
       );
-      // session_id 三元组隔离：task-claim-ev_<userId>_<TIL sessionKey>
-      // 同一用户的多个 case 会拿到不同 session（因为 TIL sessionKey 含时间戳），互不串扰
-      const claimSessionKey = `task-claim-ev_user${userId}_${tenantCtx.sessionKey}`;
+      // session_id 使用脱敏 tenantShort，保持隔离且满足下游 prompt_cache_key 长度限制。
+      const claimSessionKey = buildRuntimeSessionKey("hermes", agentId, tenantCtx.tenantShort);
       console.log("[CLAIM-EV] starting run", { agentId, session: claimSessionKey, tenant: tenantCtx.tenantShort });
       const claimUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8642");
       const claimToken = bizAgentCfg.apiToken || "";
