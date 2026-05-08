@@ -103,7 +103,7 @@ function endpointConfigTemplate(providerType: string) {
     return JSON.stringify({ rpcPath: "/mcp", toolName: "chat", messageParam: "message", arguments: {} }, null, 2);
   }
   if (providerType === "a2a") {
-    return JSON.stringify({ rpcPath: "/", stream: false }, null, 2);
+    return JSON.stringify({ rpcPath: "/", healthPath: "/.well-known/agent-card.json", stream: false }, null, 2);
   }
   return JSON.stringify({ path: "/v1/chat/completions", timeoutMs: 0 }, null, 2);
 }
@@ -199,6 +199,39 @@ function parseExamples(text: string) {
     .filter((item) => item.text);
 }
 
+function endpointConfigObject(providerType: string | null | undefined, raw: string | null | undefined): Record<string, any> {
+  const fallback = endpointConfigTemplate(providerType || "openai-compatible");
+  try {
+    const parsed = JSON.parse(raw && raw.trim() ? raw : fallback);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    try {
+      return JSON.parse(fallback);
+    } catch {
+      return {};
+    }
+  }
+}
+
+function prettyJson(value: unknown) {
+  return JSON.stringify(value, null, 2);
+}
+
+function adapterOptionsForProvider(providerType: string | null | undefined, current?: string | null) {
+  const allowed: Record<string, string[]> = {
+    "mcp": ["mcp-tools-v1"],
+    "a2a": ["a2a-task-v1"],
+    "openclaw-local": ["openclaw-chat"],
+    "openai-compatible": ["openai-chat-completions"],
+    "openclaw-remote": ["openai-chat-completions", "openclaw-chat"],
+    "http-sse": ["stock-agent-v1"],
+    "hermes": ["hermes-events", "my-wealth-hermes-v1", "bond-hermes-v1", "credit-risk-hermes-v1", "claim-ev-hermes-v1"],
+  };
+  const keys = allowed[String(providerType || "")] || ADAPTER_OPTIONS.map((option) => option.value);
+  const merged = current && !keys.includes(current) ? [...keys, current] : keys;
+  return ADAPTER_OPTIONS.filter((option) => merged.includes(option.value));
+}
+
 function toAgentPayload(v: any) {
   const {
     uiCategory, uiTemplate, uiSubtitle, welcomeTitle,
@@ -243,6 +276,10 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
 }) {
   const ui = parseUiConfig(initial.uiConfig);
   const runtimeDefaults = defaultRuntimeFor(String(initial.id || ""), String(initial.kind || "remote"));
+  const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
+  const [argumentsDraft, setArgumentsDraft] = useState(
+    prettyJson(endpointConfigObject(initial.providerType || runtimeDefaults.providerType, initial.endpointConfigJson).arguments || {}),
+  );
   const [v, setV] = useState<any>({
     ...EMPTY,
     ...initial,
@@ -261,6 +298,11 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
   });
   const set = (k: string, val: any) => setV((p: any) => ({ ...p, [k]: val }));
   const isEdit = !!initial.id;
+  const endpointConfig = endpointConfigObject(v.providerType, v.endpointConfigJson);
+  const availableAdapterOptions = adapterOptionsForProvider(v.providerType, v.adapterProtocol);
+  const patchEndpointConfig = (patch: Record<string, any>) => {
+    set("endpointConfigJson", prettyJson({ ...endpointConfigObject(v.providerType, v.endpointConfigJson), ...patch }));
+  };
   const handleProviderChange = (providerType: string) => {
     const defaults = defaultRuntimeForProvider(providerType, String(v.kind || "remote"));
     setV((p: any) => ({
@@ -268,7 +310,7 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
       providerType,
       adapterProtocol: defaults.adapterProtocol,
       capabilitiesJson: defaults.capabilitiesJson,
-      endpointConfigJson: p.endpointConfigJson || endpointConfigTemplate(providerType),
+      endpointConfigJson: endpointConfigTemplate(providerType),
     }));
   };
   const handleSave = () => {
@@ -335,8 +377,11 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
           <select value={v.adapterProtocol || "openai-chat-completions"} onChange={e => set("adapterProtocol", e.target.value)}
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }}>
-            {ADAPTER_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            {availableAdapterOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
+          <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>
+            已按调用方式过滤适配器，避免误选不兼容协议
+          </div>
         </div>
         <div className="col-span-2">
           <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>能力声明 JSON</label>
@@ -345,23 +390,127 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
         </div>
-        <div className="col-span-2">
-          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>连接配置 JSON（可选）</label>
-          <textarea value={v.endpointConfigJson || ""} onChange={e => set("endpointConfigJson", e.target.value)} rows={4}
-            placeholder={endpointConfigPlaceholder(v.providerType)}
-            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none resize-none font-mono"
-            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+        <div className="col-span-2 rounded-lg border p-3 space-y-3" style={{ borderColor: "var(--oc-border)", background: "color-mix(in oklab, var(--oc-card) 70%, transparent)" }}>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>连接配置</label>
+              <div className="text-[9px]" style={{ color: "var(--oc-text-secondary)", opacity: 0.72 }}>
+                常用字段可直接填写；复杂场景再展开高级 JSON
+              </div>
+            </div>
+            <button type="button" onClick={() => {
+              const template = endpointConfigTemplate(v.providerType || "openai-compatible");
+              set("endpointConfigJson", template);
+              setArgumentsDraft(prettyJson(endpointConfigObject(v.providerType, template).arguments || {}));
+            }}
+              className="admin-secondary-action px-3 py-1 rounded-lg text-[10px]"
+              style={{ background: "var(--oc-bg-active)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)", cursor: "pointer" }}>
+              填入模板
+            </button>
+          </div>
           {v.providerType === "mcp" && (
-            <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>MCP 模板字段：rpcPath / toolName / messageParam / arguments</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>MCP RPC Path</label>
+                <input value={endpointConfig.rpcPath ?? ""} onChange={e => patchEndpointConfig({ rpcPath: e.target.value })}
+                  placeholder="/mcp；端点已带 /mcp 时可留空"
+                  className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
+                  style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+              </div>
+              <div>
+                <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>工具名</label>
+                <input value={endpointConfig.toolName ?? ""} onChange={e => patchEndpointConfig({ toolName: e.target.value })}
+                  placeholder="tavily_search"
+                  className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
+                  style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+              </div>
+              <div>
+                <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>消息参数名</label>
+                <input value={endpointConfig.messageParam ?? "message"} onChange={e => patchEndpointConfig({ messageParam: e.target.value })}
+                  placeholder="query / message"
+                  className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
+                  style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+              </div>
+              <div>
+                <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>健康检查 Path（可选）</label>
+                <input value={endpointConfig.healthPath ?? ""} onChange={e => patchEndpointConfig({ healthPath: e.target.value || undefined })}
+                  placeholder="默认复用 rpcPath"
+                  className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
+                  style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+              </div>
+              <div className="col-span-2">
+                <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>固定参数 JSON</label>
+                <textarea value={argumentsDraft} onChange={e => {
+                  const nextText = e.target.value;
+                  setArgumentsDraft(nextText);
+                  try { patchEndpointConfig({ arguments: JSON.parse(nextText || "{}") }); } catch {}
+                }} rows={3}
+                  placeholder='{"max_results":5}'
+                  className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none resize-none font-mono"
+                  style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+              </div>
+            </div>
           )}
           {v.providerType === "a2a" && (
-            <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>A2A 模板字段：rpcPath / stream，默认使用 message/send</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>A2A RPC Path</label>
+                <input value={endpointConfig.rpcPath ?? "/"} onChange={e => patchEndpointConfig({ rpcPath: e.target.value })}
+                  placeholder="/"
+                  className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
+                  style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+              </div>
+              <div>
+                <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>Agent Card Path</label>
+                <input value={endpointConfig.healthPath ?? "/.well-known/agent-card.json"} onChange={e => patchEndpointConfig({ healthPath: e.target.value })}
+                  placeholder="/.well-known/agent-card.json"
+                  className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
+                  style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+              </div>
+              <div className="col-span-2 flex items-center justify-between rounded-lg px-3 py-2" style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)" }}>
+                <div>
+                  <div className="text-[10px] font-medium" style={{ color: "var(--oc-text-primary)" }}>流式调用</div>
+                  <div className="text-[9px]" style={{ color: "var(--oc-text-secondary)", opacity: 0.72 }}>关闭时使用 message/send；开启后使用 message/stream</div>
+                </div>
+                <input type="checkbox" checked={endpointConfig.stream === true} onChange={e => patchEndpointConfig({ stream: e.target.checked })}
+                  className="h-4 w-4 accent-[#be1e2d]" />
+              </div>
+            </div>
+          )}
+          {!["mcp", "a2a"].includes(String(v.providerType || "")) && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>请求路径</label>
+                <input value={endpointConfig.path ?? "/v1/chat/completions"} onChange={e => patchEndpointConfig({ path: e.target.value })}
+                  placeholder="/v1/chat/completions"
+                  className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
+                  style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+              </div>
+              <div>
+                <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>超时毫秒（0=默认）</label>
+                <input type="number" value={endpointConfig.timeoutMs ?? 0} onChange={e => patchEndpointConfig({ timeoutMs: parseInt(e.target.value) || 0 })}
+                  className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
+                  style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+              </div>
+            </div>
+          )}
+          <button type="button" onClick={() => setShowAdvancedConfig(!showAdvancedConfig)}
+            className="text-[10px] font-medium"
+            style={{ color: "var(--oc-accent)", background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+            {showAdvancedConfig ? "收起高级 JSON" : "展开高级 JSON"}
+          </button>
+          {showAdvancedConfig && (
+            <textarea value={v.endpointConfigJson || ""} onChange={e => set("endpointConfigJson", e.target.value)} rows={5}
+              placeholder={endpointConfigPlaceholder(v.providerType)}
+              className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none resize-none font-mono"
+              style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
           )}
         </div>
         <div>
-          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>图标（自定义 Agent Emoji）</label>
-          <input value={v.icon || "🤖"} onChange={e => set("icon", e.target.value)} maxLength={4}
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>图标（Emoji 或单色图标名）</label>
+          <input value={v.icon || "Bot"} onChange={e => set("icon", e.target.value)}
             disabled={!!LEGACY_CATEGORY[String(v.id || "")]}
+            placeholder="Search / FileText / Globe2 / Bot"
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none disabled:opacity-50"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
           {LEGACY_CATEGORY[String(v.id || "")] && (
