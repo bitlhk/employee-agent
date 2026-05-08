@@ -32,7 +32,7 @@ export const TASK_STAGE_EXECUTION_MODES = ["single", "parallel"] as const;
 export const taskStageExecutionModeSchema = z.enum(TASK_STAGE_EXECUTION_MODES);
 export type TaskStageExecutionMode = z.infer<typeof taskStageExecutionModeSchema>;
 
-export const TASK_STAGE_TYPES = ["agent", "source_research"] as const;
+export const TASK_STAGE_TYPES = ["agent", "source_research", "llm_synthesis"] as const;
 export const taskStageTypeSchema = z.enum(TASK_STAGE_TYPES);
 export type TaskStageType = z.infer<typeof taskStageTypeSchema>;
 

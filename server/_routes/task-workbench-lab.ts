@@ -252,7 +252,7 @@ export function createTaskWorkbenchLabHandlers(options: {
       const user = await authenticate(req, res);
       if (!user) return;
       const runner = options.createRunner ? options.createRunner(user) : createDefaultRunner(user);
-      const ids = ["ai_topic_insight_ppt"];
+      const ids = ["market_research_brief", "ai_topic_insight_ppt"];
       const templates = [];
       for (const id of ids) {
         const result = await runner.loadTemplate(id);

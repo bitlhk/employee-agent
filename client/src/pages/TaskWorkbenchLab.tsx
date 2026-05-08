@@ -141,11 +141,13 @@ type BusinessFile = {
 };
 
 const TASK_ICONS: Record<string, typeof FileText> = {
+  market_research_brief: BarChart3,
   ppt_report_writing: Presentation,
   stock_ppt_report: TrendingUp,
 };
 
 const TASK_PLACEHOLDERS: Record<string, string> = {
+  market_research_brief: "输入研究主题，例如：跨境支付行业的最新变化、机会和风险",
   ai_topic_insight_ppt: "输入你想研究的热点话题，例如：Sequoia Ascent 2026 的最新观点",
   ppt_report_writing: "输入要做成 PPT 的主题、受众和风格...",
   stock_ppt_report: "输入要研究的股票、报告用途和关注维度...",
@@ -153,8 +155,8 @@ const TASK_PLACEHOLDERS: Record<string, string> = {
 
 const PERSONA_LABELS: Record<string, string> = {
   wenzhou: "闻舟 (AI) · 趋势洞察师",
-  moheng: "墨衡 (AI) · 研究审阅员",
-  jianye: "简页 (AI) · PPT 制作师",
+  moheng: "墨衡 (AI) · 研究分析师",
+  jianye: "简页 (AI) · 材料写作师",
   hengyue: "衡岳 (AI) · 股票数据研究员",
   qingzhan: "青栈 (AI) · 代码工程师",
 };
@@ -169,8 +171,8 @@ const PERSONA_INITIALS: Record<string, string> = {
 
 const PERSONA_STEPS: Record<string, string[]> = {
   wenzhou: ["理解研究主题", "规划搜索路径", "筛选可信来源", "整理证据包"],
-  moheng: ["阅读证据包", "提炼核心洞察", "标注引用来源", "生成 PPT 逻辑线"],
-  jianye: ["理解任务与材料", "整理结构大纲", "生成演示文稿", "准备预览与下载"],
+  moheng: ["阅读证据包", "提炼核心洞察", "标注引用来源", "复核合规边界"],
+  jianye: ["理解任务与材料", "整理结构大纲", "生成研究材料", "准备交付说明"],
   hengyue: ["读取股票数据", "分析走势与风险", "生成研究结论"],
   qingzhan: ["理解代码需求", "规划实现路径", "生成代码建议"],
 };
@@ -178,7 +180,7 @@ const PERSONA_STEPS: Record<string, string[]> = {
 const PERSONA_DESCRIPTIONS: Record<string, string> = {
   wenzhou: "搜索、筛选并组织可信资料，输出结构化证据包。",
   moheng: "复核证据质量，提炼逻辑线、风险点和引用依据。",
-  jianye: "将研究材料转成可预览、可下载的演示文稿。",
+  jianye: "将研究材料整理成简报、汇报稿或可交付材料。",
   hengyue: "读取行情与指标，生成股票数据研究和风险提示。",
   qingzhan: "协助代码分析、改造建议和工程化落地。",
 };
@@ -1598,6 +1600,9 @@ function TaskSelector({
                         </div>
                         <div className="mt-1 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
                           预计 {formatDuration(template.estimatedDurationMs)}
+                        </div>
+                        <div className="mt-1 line-clamp-2 text-[11px] leading-5" style={{ color: "var(--oc-text-tertiary)" }}>
+                          {template.shortDescription}
                         </div>
                       </div>
                     </div>

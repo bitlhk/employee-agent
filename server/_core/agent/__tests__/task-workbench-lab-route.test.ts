@@ -117,19 +117,30 @@ describe("task workbench lab route", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("lists only the focused topic-insight PPT template for admin users", async () => {
+  it("lists the focused task workbench templates for admin users", async () => {
     const res = mockResponse();
+    const loadedIds: string[] = [];
     const handlers = createTaskWorkbenchLabHandlers({
       enabled: () => true,
       authenticateUser: async () => ({ id: 2, role: "admin" }),
-      createRunner: () => runner(),
+      createRunner: () => ({
+        loadTemplate: async (templateId: string) => {
+          loadedIds.push(templateId);
+          return { ok: true, value: { ...baseTemplate, id: templateId } };
+        },
+        runTask: async () => ({ ok: true, value: baseRun }),
+      }),
     });
 
     await handlers.listTemplates({} as any, res as any);
 
     expect(res.statusCode).toBe(200);
     expect(res.body.source).toBe("task-workbench-lab");
-    expect(res.body.templates).toHaveLength(1);
+    expect(res.body.templates.map((template: any) => template.id)).toEqual([
+      "market_research_brief",
+      "ai_topic_insight_ppt",
+    ]);
+    expect(loadedIds).toEqual(["market_research_brief", "ai_topic_insight_ppt"]);
   });
 
   it("runs a task and redacts sensitive fields", async () => {
