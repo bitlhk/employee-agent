@@ -35,10 +35,10 @@ const CATEGORY_OPTIONS = [
 ];
 
 const TEMPLATE_OPTIONS = [
-  { value: "general", label: "通用助手" },
-  { value: "finance", label: "金融专业" },
-  { value: "tool", label: "工程工具" },
-  { value: "compact", label: "轻量卡片" },
+  { value: "general_chat", label: "通用对话模板" },
+  { value: "research_analysis", label: "研究分析模板" },
+  { value: "artifact_generation", label: "产物生成模板" },
+  { value: "workflow_decision", label: "专业流程模板" },
 ];
 
 const PROVIDER_OPTIONS = [
@@ -76,6 +76,28 @@ const LEGACY_CATEGORY: Record<string, string> = {
   "task-bond": "finance",
   "task-credit-risk": "finance",
 };
+
+const LEGACY_TEMPLATE_MAP: Record<string, string> = {
+  general: "general_chat",
+  finance: "research_analysis",
+  tool: "artifact_generation",
+  compact: "general_chat",
+};
+
+function normalizeUiTemplate(value?: string | null) {
+  const raw = String(value || "").trim();
+  const normalized = LEGACY_TEMPLATE_MAP[raw] || raw;
+  return TEMPLATE_OPTIONS.some((option) => option.value === normalized) ? normalized : "";
+}
+
+function defaultUiTemplateFor(id: string, providerType?: string | null, adapterProtocol?: string | null) {
+  if (["task-ppt", "task-code", "task-slides"].includes(id)) return "artifact_generation";
+  if (["task-stock", "task-bond", "task-my-wealth"].includes(id)) return "research_analysis";
+  if (["task-credit-risk", "task-claim-ev"].includes(id)) return "workflow_decision";
+  if (String(adapterProtocol || "").includes("bond") || String(adapterProtocol || "").includes("stock")) return "research_analysis";
+  if (String(providerType || "") === "hermes") return "research_analysis";
+  return "general_chat";
+}
 
 function defaultRuntimeFor(id: string, kind: string) {
   if (id === "task-stock") return { providerType: "http-sse", adapterProtocol: "stock-agent-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
@@ -240,7 +262,7 @@ function toAgentPayload(v: any) {
   } = v;
   const uiConfig = {
     category: uiCategory || "other",
-    template: uiTemplate || "general",
+    template: normalizeUiTemplate(uiTemplate) || "general_chat",
     subtitle: uiSubtitle || "",
     welcomeTitle: welcomeTitle || "",
     welcomeDescription: welcomeDescription || "",
@@ -285,7 +307,7 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
     ...initial,
     apiToken: initial.id ? "" : (initial.apiToken || ""),
     uiCategory: ui.category || LEGACY_CATEGORY[String(initial.id || "")] || "other",
-    uiTemplate: ui.template || "general",
+    uiTemplate: normalizeUiTemplate(ui.template) || defaultUiTemplateFor(String(initial.id || ""), initial.providerType || runtimeDefaults.providerType, initial.adapterProtocol || runtimeDefaults.adapterProtocol),
     uiSubtitle: ui.subtitle || "",
     welcomeTitle: ui.welcomeTitle || initial.name || "",
     welcomeDescription: ui.welcomeDescription || initial.description || "",
@@ -526,12 +548,13 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
           </select>
         </div>
         <div>
-          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>详情模板</label>
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>前端模板</label>
           <select value={v.uiTemplate} onChange={e => set("uiTemplate", e.target.value)}
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }}>
             {TEMPLATE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
+          <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>只控制广场和聊天页展示形态；实际调用由下面的协议适配器决定</div>
         </div>
         <div className="col-span-2">
           <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>广场副标题</label>

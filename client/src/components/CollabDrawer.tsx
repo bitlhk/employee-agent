@@ -107,12 +107,69 @@ const PLAZA_GROUPS = [
   { id: "other", title: "其他", icon: <Bot size={12} /> },
 ] as const;
 
+const LEGACY_TEMPLATE_MAP: Record<string, string> = {
+  general: "general_chat",
+  finance: "research_analysis",
+  tool: "artifact_generation",
+  compact: "general_chat",
+};
+
+const AGENT_TEMPLATE_META: Record<string, { label: string; examplesTitle: string; hint: string; accent: string; defaultBadges: string[] }> = {
+  general_chat: {
+    label: "通用对话",
+    examplesTitle: "试试问我",
+    hint: "支持多轮对话 · 30分钟无操作自动终止",
+    accent: "var(--oc-accent)",
+    defaultBadges: ["对话", "工具", "会话"],
+  },
+  research_analysis: {
+    label: "研究分析",
+    examplesTitle: "分析入口",
+    hint: "适合投研、搜索、数据分析类任务",
+    accent: "#be1e2d",
+    defaultBadges: ["研判", "数据", "工具"],
+  },
+  artifact_generation: {
+    label: "产物生成",
+    examplesTitle: "生成入口",
+    hint: "适合报告、PPT、代码和文件产物生成",
+    accent: "#c7000b",
+    defaultBadges: ["产物", "文件", "预览"],
+  },
+  workflow_decision: {
+    label: "专业流程",
+    examplesTitle: "流程入口",
+    hint: "适合多阶段决策、审核和合规任务",
+    accent: "#be1e2d",
+    defaultBadges: ["流程", "审慎", "审计"],
+  },
+};
+
+function normalizeUiTemplate(value?: string | null) {
+  const raw = String(value || "").trim();
+  const normalized = LEGACY_TEMPLATE_MAP[raw] || raw;
+  return AGENT_TEMPLATE_META[normalized] ? normalized : "";
+}
+
+function defaultUiTemplateFor(agent: BusinessAgent) {
+  if (["task-ppt", "task-code", "task-slides"].includes(agent.id)) return "artifact_generation";
+  if (["task-stock", "task-bond", "task-my-wealth"].includes(agent.id)) return "research_analysis";
+  if (["task-credit-risk", "task-claim-ev"].includes(agent.id)) return "workflow_decision";
+  return "general_chat";
+}
+
+function getAgentTemplate(agent: BusinessAgent) {
+  const ui = agent.uiConfig || {};
+  return normalizeUiTemplate(ui.template) || defaultUiTemplateFor(agent);
+}
+
 function normalizeUiConfig(agent: BusinessAgent): AgentUiConfig {
   const ui = agent.uiConfig || {};
+  const template = normalizeUiTemplate(ui.template) || defaultUiTemplateFor(agent);
   return {
     ...ui,
     category: ui.category || LEGACY_AGENT_CATEGORY[agent.id] || "other",
-    template: ui.template || (ENGINE_ICON[agent.id] ? "tool" : "general"),
+    template,
     subtitle: ui.subtitle || LEGACY_AGENT_SUBTITLE[agent.id] || "per-session · 独立沙箱",
   };
 }
@@ -135,22 +192,42 @@ function getAgentCardDescription(agent: BusinessAgent) {
   return agentDesc(agent.id, ui.welcomeDescription || agent.description);
 }
 
+function getAgentPromptPlaceholder(agent: BusinessAgent) {
+  const template = getAgentTemplate(agent);
+  if (template === "research_analysis") return `向 ${agent.name} 发起分析...`;
+  if (template === "artifact_generation") return `让 ${agent.name} 生成产物...`;
+  if (template === "workflow_decision") return `向 ${agent.name} 发起流程任务...`;
+  return `向 ${agent.name} 发起任务...`;
+}
+
 function ConfiguredAgentWelcome({ agent, onPickExample }: { agent: BusinessAgent; onPickExample: (text: string) => void }) {
   const ui = normalizeUiConfig(agent);
+  const template = getAgentTemplate(agent);
+  const templateMeta = AGENT_TEMPLATE_META[template] || AGENT_TEMPLATE_META.general_chat;
   const examples = Array.isArray(ui.examples) ? ui.examples.filter(e => e?.text) : [];
-  const badges = Array.isArray(ui.badges) ? ui.badges.filter(Boolean) : [];
-  const accent = ui.category === "finance" ? "#be1e2d" : ui.category === "tools" ? "#c7000b" : "var(--oc-accent)";
+  const badges = Array.isArray(ui.badges) && ui.badges.length > 0 ? ui.badges.filter(Boolean) : templateMeta.defaultBadges;
+  const accent = templateMeta.accent || (ui.category === "finance" ? "#be1e2d" : ui.category === "tools" ? "#c7000b" : "var(--oc-accent)");
+  const useEngineAnimation = template === "artifact_generation" && !!ENGINE_ICON[agent.id];
 
   return (
     <>
-      <div className="flex items-center justify-center">{renderAgentIcon(agent, 40)}</div>
+      {useEngineAnimation ? (
+        <AgentHeroAnimation agentId={agent.id} />
+      ) : (
+        <div className="flex items-center justify-center">{renderAgentIcon(agent, template === "workflow_decision" ? 46 : 40)}</div>
+      )}
       <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>{ui.welcomeTitle || agent.name}</p>
       <p className="text-xs mt-1.5 max-w-[280px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>
         {ui.welcomeDescription || agent.description || "业务智能体"}
       </p>
+      <div className="mt-2 flex justify-center">
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ background: "color-mix(in oklab, var(--oc-accent) 7%, transparent)", color: accent, border: "1px solid color-mix(in oklab, var(--oc-accent) 18%, transparent)" }}>
+          {templateMeta.label}
+        </span>
+      </div>
       {examples.length > 0 && (
         <div className="mt-4 mx-auto max-w-[280px] rounded-lg px-3 py-2.5 text-left" style={{ background: "color-mix(in oklab, var(--oc-accent) 5%, transparent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 16%, transparent)" }}>
-          <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
+          <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>{templateMeta.examplesTitle}</p>
           {examples.map((item) => (
             <p key={item.text} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-start gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.72 }} onClick={() => onPickExample(item.text)}>
               {item.icon && <span className="shrink-0 pt-0.5">{configuredIcon(item.icon, 12)}</span>}
@@ -166,7 +243,7 @@ function ConfiguredAgentWelcome({ agent, onPickExample }: { agent: BusinessAgent
           ))}
         </div>
       )}
-      <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.45 }}>{ui.subtitle}</p>
+      <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.45 }}>{ui.subtitle || templateMeta.hint}</p>
     </>
   );
 }
@@ -1139,7 +1216,7 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
       )}
       <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: "var(--oc-border)" }}>
         <div className="business-chat-composer flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", opacity: sessionExpired ? 0.5 : 1 }}>
-          <button onClick={renewSession} title="新会话" className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-80 transition-colors" style={{ background: "var(--oc-border)", border: "none" }}><Plus size={14} style={{ color: "var(--oc-text-secondary)" }} /></button><textarea value={input} disabled={sessionExpired} onChange={(e) => { setInput(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder={sessionExpired ? "会话已超时" : `向 ${agent.name} 发起任务...`} rows={1} className="business-chat-input flex-1 bg-transparent text-sm resize-none focus:outline-none" style={{ color: "var(--oc-text-primary)", lineHeight: "24px", height: 28, minHeight: 28, maxHeight: 100, overflowY: "hidden", padding: "2px 0" }} />
+          <button onClick={renewSession} title="新会话" className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-80 transition-colors" style={{ background: "var(--oc-border)", border: "none" }}><Plus size={14} style={{ color: "var(--oc-text-secondary)" }} /></button><textarea value={input} disabled={sessionExpired} onChange={(e) => { setInput(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder={sessionExpired ? "会话已超时" : getAgentPromptPlaceholder(agent)} rows={1} className="business-chat-input flex-1 bg-transparent text-sm resize-none focus:outline-none" style={{ color: "var(--oc-text-primary)", lineHeight: "24px", height: 28, minHeight: 28, maxHeight: 100, overflowY: "hidden", padding: "2px 0" }} />
           <button onClick={toggleRecording} disabled={sessionExpired} className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-colors" style={{ background: recording ? "#ef4444" : "var(--oc-border)", border: "none" }} title={recording ? "停止录音" : "语音输入"}>{recording ? <MicOff size={13} color="white" /> : <Mic size={13} style={{ color: "var(--oc-text-secondary)" }} />}</button>
           {streaming ? (<button onClick={() => stopBusinessMessage(agent.id)} title="停止生成" className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-colors" style={{ background: "#ef4444", border: "none" }}><Square size={11} color="white" fill="white" /></button>) : (<button onClick={sendMessage} disabled={!input.trim() || sessionExpired} className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center disabled:opacity-25 active:scale-90" style={{ background: "var(--oc-accent)", border: "none" }}><Send size={12} color="white" /></button>)}
         </div>
@@ -1196,6 +1273,7 @@ function CollabGroup({
 }
 
 function AgentListButton({ agent, onOpen }: { agent: BusinessAgent; onOpen: (agent: BusinessAgent) => void }) {
+  const templateMeta = AGENT_TEMPLATE_META[getAgentTemplate(agent)] || AGENT_TEMPLATE_META.general_chat;
   return (
     <button
       key={agent.id}
@@ -1208,6 +1286,7 @@ function AgentListButton({ agent, onOpen }: { agent: BusinessAgent; onOpen: (age
         <div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{agent.name}</div>
         <div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{getAgentCardDescription(agent)}</div>
       </div>
+      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 8%, transparent)", color: templateMeta.accent, border: "1px solid color-mix(in oklab, var(--oc-accent) 18%, transparent)" }}>{templateMeta.label}</span>
       <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
     </button>
   );
