@@ -1,6 +1,10 @@
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { z } from "zod";
 import {
+  isBuiltinBusinessAgentAdapter,
+  isReservedLegacyBusinessAgentId,
+} from "@shared/business-agent-presets";
+import {
   listBusinessAgents,
   listEnabledBusinessAgents,
   getBusinessAgent,
@@ -77,6 +81,20 @@ function assertProviderAdapterMatch(providerType: string, adapterProtocol: strin
   }
   if (providerType === "a2a" && adapterProtocol !== "a2a-task-v1") {
     throw new Error("A2A 调用方式必须使用 a2a-task-v1 适配器");
+  }
+}
+
+function builtinBusinessAgentPresetsEnabled() {
+  return String(process.env.ENABLE_BUILTIN_BUSINESS_AGENT_PRESETS || "false").toLowerCase() === "true";
+}
+
+function assertBuiltinPresetAllowed(input: { id?: string | null; adapterProtocol?: string | null }) {
+  if (builtinBusinessAgentPresetsEnabled()) return;
+  if (isReservedLegacyBusinessAgentId(input.id)) {
+    throw new Error("该智能体 ID 属于内置演示 Preset 保留名。开源/独立部署请使用自定义 ID，或显式开启 ENABLE_BUILTIN_BUSINESS_AGENT_PRESETS。");
+  }
+  if (isBuiltinBusinessAgentAdapter(input.adapterProtocol)) {
+    throw new Error("该运行适配器属于内置演示 Preset。开源/独立部署请使用通用适配器，或显式开启 ENABLE_BUILTIN_BUSINESS_AGENT_PRESETS。");
   }
 }
 
@@ -258,6 +276,7 @@ export const bizAgentsRouter = router({
       validateJsonField("能力声明 JSON", input.capabilitiesJson, "array");
       validateJsonField("连接配置 JSON", input.endpointConfigJson, "object");
       assertProviderAdapterMatch(providerType, adapterProtocol);
+      assertBuiltinPresetAllowed({ id: input.id, adapterProtocol });
       await upsertBusinessAgent({
         id: input.id,
         name: input.name,
@@ -289,6 +308,13 @@ export const bizAgentsRouter = router({
       return { ok: true };
     }),
     setEnabled: adminProcedure.input(z.object({ id: z.string(), enabled: z.number().int() })).mutation(async ({ input }) => {
+      if (input.enabled) {
+        const existing = await getBusinessAgent(input.id);
+        assertBuiltinPresetAllowed({
+          id: input.id,
+          adapterProtocol: existing?.adapterProtocol || inferAdapterProtocol({ id: input.id, kind: existing?.kind }),
+        });
+      }
       await updateBusinessAgentEnabled(input.id, input.enabled);
       return { ok: true };
     }),

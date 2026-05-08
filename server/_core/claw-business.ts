@@ -10,8 +10,11 @@ import { ResponseAccumulator, injectMemory } from "./response-accumulator";
 import { runProtocolAgentAdapter } from "./agent-protocol-adapters";
 import { runStockAgentV1 } from "./agent-runtime-adapters/stock-agent-v1";
 import { runBondHermesV1 } from "./agent-runtime-adapters/bond-hermes-v1";
+import { isBuiltinBusinessAgentAdapter } from "@shared/business-agent-presets";
 
 export function registerBusinessRoutes(app: express.Express) {
+  const builtinBusinessAgentPresetsEnabled = () =>
+    String(process.env.ENABLE_BUILTIN_BUSINESS_AGENT_PRESETS || "false").toLowerCase() === "true";
 
   // ── 内部调用 IP 白名单（防止 INTERNAL_API_KEY 兜底字符串泄露后被外网伪造身份）──
   const isInternalCallerIp = (req: express.Request) => {
@@ -350,6 +353,14 @@ export function registerBusinessRoutes(app: express.Express) {
     const providerType = inferProviderType(bizAgentCfg, String(agentId));
     const adapterProtocol = inferAdapterProtocol(bizAgentCfg, String(agentId));
     const endpointConfig = parseJsonRecord((bizAgentCfg as any)?.endpointConfigJson);
+
+    if (isBuiltinBusinessAgentAdapter(adapterProtocol) && !builtinBusinessAgentPresetsEnabled()) {
+      res.write(`data: ${JSON.stringify({
+        error: "该智能体使用内置演示 Preset 适配器，当前部署未开启。请在后台改用通用适配器，或由管理员显式开启 ENABLE_BUILTIN_BUSINESS_AGENT_PRESETS。",
+      })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      return res.end();
+    }
 
     // ── 平台级记忆：创建响应缓冲器 ──
     const memAcc = new ResponseAccumulator(userId, String(agentId), msgStr);

@@ -2,6 +2,10 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2, Bot, Presentation, Code2, TrendingUp, Dna, BarChart3, Battery, Compass, Search, FileText, Globe2 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  isBuiltinBusinessAgentAdapter,
+  isReservedLegacyBusinessAgentId,
+} from "@shared/business-agent-presets";
 
 interface BizAgent {
   id: string; name: string; description?: string | null;
@@ -322,6 +326,7 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
   const isEdit = !!initial.id;
   const endpointConfig = endpointConfigObject(v.providerType, v.endpointConfigJson);
   const availableAdapterOptions = adapterOptionsForProvider(v.providerType, v.adapterProtocol);
+  const usesBuiltinPreset = isReservedLegacyBusinessAgentId(v.id) || isBuiltinBusinessAgentAdapter(v.adapterProtocol);
   const patchEndpointConfig = (patch: Record<string, any>) => {
     set("endpointConfigJson", prettyJson({ ...endpointConfigObject(v.providerType, v.endpointConfigJson), ...patch }));
   };
@@ -336,6 +341,9 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
     }));
   };
   const handleSave = () => {
+    if (usesBuiltinPreset) {
+      toast.warning("当前配置命中了内置演示 Preset。开源/独立部署默认会由后端拒绝，需显式开启 ENABLE_BUILTIN_BUSINESS_AGENT_PRESETS。");
+    }
     if ((v.providerType === "mcp" && v.adapterProtocol !== "mcp-tools-v1") || (v.providerType === "a2a" && v.adapterProtocol !== "a2a-task-v1")) {
       toast.error("调用方式和协议适配器不匹配");
       return;
@@ -412,6 +420,12 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
         </div>
+        {usesBuiltinPreset && (
+          <div className="col-span-2 rounded-lg px-3 py-2 text-[10px] leading-relaxed"
+            style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.28)", color: "#b45309" }}>
+            命中内置演示 Preset：该 ID 或适配器会触发平台内置金融 demo 逻辑。开源/独立部署默认关闭，请使用自定义 ID + 通用适配器，或由管理员显式开启 ENABLE_BUILTIN_BUSINESS_AGENT_PRESETS。
+          </div>
+        )}
         <div className="col-span-2 rounded-lg border p-3 space-y-3" style={{ borderColor: "var(--oc-border)", background: "color-mix(in oklab, var(--oc-card) 70%, transparent)" }}>
           <div className="flex items-center justify-between gap-2">
             <div>
