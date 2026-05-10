@@ -117,11 +117,14 @@ if [[ -f "$MAIN_AUTH" ]]; then
 fi
 
 # Bootstrap workspace files (idempotent)
-if [[ ! -f "$WORKSPACE_DIR/IDENTITY.md" ]]; then
+IDENTITY_FILE="$WORKSPACE_DIR/IDENTITY.md"
+if [[ ! -f "$IDENTITY_FILE" ]] || grep -qE 'pick something you like|Who Am I\\?|Creature:|ghost in the machine' "$IDENTITY_FILE" 2>/dev/null; then
   cat > "$WORKSPACE_DIR/IDENTITY.md" <<EOF
 # IDENTITY.md
 
 - **Name:** LingganClaw
+- **Creature:** AI agent
+- **Vibe:** warm, professional, concise
 - **Emoji:** 🦞
 - **Owner User ID:** $USER_ID
 - **Adopt ID:** $ADOPT_ID
