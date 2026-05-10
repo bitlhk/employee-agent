@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/.env"
 
+export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+
 read_env() {
   local key="$1"
   if [[ -f "$ENV_FILE" ]]; then

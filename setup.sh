@@ -25,6 +25,8 @@ DB_USER_VALUE="${LINGXIA_DB_USER:-linggan}"
 DB_PASS_VALUE="${LINGXIA_DB_PASSWORD:-}"
 DB_NAME_VALUE="${LINGXIA_DB_NAME:-linggan}"
 
+export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+
 usage() {
   cat <<'EOF'
 Usage: bash setup.sh [options]

@@ -23,6 +23,8 @@ USER_ID=""
 PROFILE="plus"
 TTL_DAYS="0"
 
+export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+
 for arg in "$@"; do
   case "$arg" in
     --adopt-id=*) ADOPT_ID="${arg#*=}" ;;
