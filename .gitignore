@@ -135,3 +135,6 @@ logs/
 *.bak.*
 *.before-*
 *.before.*
+
+# Agent runtime backup files
+server/_core/agent/data/*.bak-*

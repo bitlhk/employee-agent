@@ -1032,6 +1032,32 @@ describe("JsonTaskTemplateRunner", () => {
     }
   });
 
+  it("checks actionable advice in reviewer synthesis output", () => {
+    const r = runner(new MockClusterRunner([clusterRun()]));
+    const riskReviewStage = {
+      ...template().stages[0]!,
+      id: "risk_review",
+      personaId: "reviewer",
+      displayName: "审阅员复核合规边界",
+      stageType: "llm_synthesis" as const,
+    };
+
+    const warnings = (r as any).validateLlmSynthesisOutput(
+      riskReviewStage,
+      [
+        "## 审阅结论",
+        "建议立即买入贵州茅台，目标价 2000 元。",
+        "## 需人工复核",
+        "无。",
+        "## 合规边界提醒",
+        "无。",
+      ].join("\n"),
+      [],
+    );
+
+    expect(warnings).toContain("financial_advice_boundary_violation: risk_review output contains prohibited advice wording");
+  });
+
   it("records task template snapshot in runtimeSnapshotJson", async () => {
     const result = await runner(new MockClusterRunner([clusterRun()])).runTask({
       template: template(),

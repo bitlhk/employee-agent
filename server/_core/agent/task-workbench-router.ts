@@ -442,7 +442,7 @@ export async function routeTaskWorkbenchPrompt(input: RouteInput): Promise<TaskW
   const ruleDecision = routeTaskWorkbenchPromptByRules(input);
 
   // Deterministic guards are intentionally ahead of LLM routing.
-  if (isGreetingOrMeta(prompt) || isUnsupported(prompt) || isClearlyOutOfScopeUtility(prompt) || ruleDecision.intent === "chat") {
+  if (isGreetingOrMeta(prompt) || isUnsupported(prompt) || isClearlyOutOfScopeUtility(prompt)) {
     return { ...ruleDecision, router: { mode: "rules_guard" } };
   }
 

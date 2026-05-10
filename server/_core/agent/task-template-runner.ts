@@ -892,7 +892,7 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
       const citedIds = new Set([...output.matchAll(/\[?(src_\d{3})\]?/gi)].map((match) => match[1].toLowerCase()));
       if (citedIds.size === 0) warnings.push(`missing_citation_ids: ${stage.id} output must cite sources as [src_NNN]`);
     }
-    if (role !== "reviewer" && this.containsActionableFinancialAdvice(output)) {
+    if (this.containsActionableFinancialAdvice(output)) {
       warnings.push(`financial_advice_boundary_violation: ${stage.id} output contains prohibited advice wording`);
     }
     return warnings;
