@@ -4114,6 +4114,82 @@ body[data-admin-light="true"] [data-radix-popper-content-wrapper] [role="option"
 .claw-admin-shell * {
   letter-spacing: 0;
 }
+
+/* ClawHome follows the product landing light palette regardless of user theme. */
+body[data-home-light="true"] {
+  color-scheme: light;
+  --bg: #f9fafb;
+  --bg-elevated: #ffffff;
+  --panel: #ffffff;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --input: #ffffff;
+  --text: #111827;
+  --text-strong: #111827;
+  --muted: #6b7280;
+  --faint: #9ca3af;
+  --border: rgba(17, 24, 39, 0.10);
+  --border-strong: rgba(17, 24, 39, 0.14);
+  --border-hover: rgba(17, 24, 39, 0.20);
+  --background: oklch(0.99 0 0);
+  --foreground: oklch(0.2 0.01 65);
+  --card-foreground: oklch(0.2 0.01 65);
+  --popover-foreground: oklch(0.2 0.01 65);
+  --secondary: oklch(0.97 0.001 286);
+  --secondary-foreground: oklch(0.35 0.01 65);
+  --muted-foreground: oklch(0.5 0.01 286);
+  --accent: oklch(0.96 0.001 286);
+  --accent-foreground: oklch(0.2 0.005 286);
+  --primary-foreground: #ffffff;
+  --destructive-foreground: #ffffff;
+  --oc-bg: #f9fafb;
+  --oc-bg-surface: #ffffff;
+  --oc-panel: #ffffff;
+  --oc-card: #ffffff;
+  --oc-border: rgba(17, 24, 39, 0.10);
+  --oc-text-primary: #111827;
+  --oc-text-secondary: #6b7280;
+  --oc-text-tertiary: #9ca3af;
+}
+.claw-home-shell {
+  background: linear-gradient(180deg, #ffffff 0%, rgba(249,250,251,0.82) 100%) !important;
+  color: #111827 !important;
+}
+.claw-home-shell header,
+.claw-home-shell footer {
+  background: rgba(255, 255, 255, 0.88) !important;
+  border-color: rgba(17, 24, 39, 0.10) !important;
+}
+.claw-home-shell [data-slot="card"],
+.claw-home-shell .bg-white,
+.claw-home-shell .bg-white\/80 {
+  background: rgba(255, 255, 255, 0.88) !important;
+  border-color: rgba(17, 24, 39, 0.10) !important;
+  color: #111827 !important;
+}
+.claw-home-shell .text-gray-900 {
+  color: #111827 !important;
+}
+.claw-home-shell .text-muted-foreground,
+.claw-home-shell .text-muted-foreground\/70 {
+  color: #6b7280 !important;
+}
+body[data-home-light="true"] [data-radix-popper-content-wrapper] [data-slot="dropdown-menu-content"],
+body[data-home-light="true"] [data-radix-popper-content-wrapper] [data-slot="dropdown-menu-item"],
+body[data-home-light="true"] [data-radix-popper-content-wrapper] [data-slot="select-content"],
+body[data-home-light="true"] [data-radix-popper-content-wrapper] [role="menu"],
+body[data-home-light="true"] [data-radix-popper-content-wrapper] [role="listbox"] {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border-color: rgba(17, 24, 39, 0.10) !important;
+}
+body[data-home-light="true"] [data-radix-popper-content-wrapper] [role="menuitem"]:hover,
+body[data-home-light="true"] [data-radix-popper-content-wrapper] [role="menuitem"][data-highlighted],
+body[data-home-light="true"] [data-radix-popper-content-wrapper] [role="option"]:hover,
+body[data-home-light="true"] [data-radix-popper-content-wrapper] [role="option"][data-highlighted] {
+  background: #f9fafb !important;
+  color: #111827 !important;
+}
 .claw-admin-header {
   background: rgba(255, 255, 255, 0.92) !important;
   border-color: var(--admin-border) !important;

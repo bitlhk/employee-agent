@@ -4,7 +4,7 @@
  * 功能：Hero + 功能介绍 + 领养/进入
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BrandIcon } from "@/components/BrandIcon";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -141,6 +141,15 @@ export default function ClawHome() {
   const [provisioning, setProvisioning] = useState(false);
   const [provisionStep, setProvisionStep] = useState("");
 
+  useEffect(() => {
+    const previous = document.body.getAttribute("data-home-light");
+    document.body.setAttribute("data-home-light", "true");
+    return () => {
+      if (previous === null) document.body.removeAttribute("data-home-light");
+      else document.body.setAttribute("data-home-light", previous);
+    };
+  }, []);
+
   const { data: clawMe, refetch: refetchClawMe, isLoading } = trpc.claw.me.useQuery(undefined, {
     enabled: !!user,
     retry: false,
@@ -211,7 +220,7 @@ export default function ClawHome() {
   const hasAnyClaw = adoptions.length > 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50/80">
+    <div className="claw-home-shell min-h-screen bg-gradient-to-b from-white to-gray-50/80">
       {/* ── Header ── */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-border/50">
         <div className="container flex items-center justify-between h-14 px-6">
