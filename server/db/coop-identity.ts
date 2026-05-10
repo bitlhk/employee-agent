@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   lxCollabSpaces,
   lxCollabUserProfiles,
@@ -116,17 +116,7 @@ class DatabaseCoopIdentityDirectory implements CoopIdentityDirectory {
     return db
       .select({ targetUserId: clawCollabRequests.targetUserId })
       .from(clawCollabRequests)
-      .where(and(
-        eq(clawCollabRequests.sessionId, sessionId),
-        inArray(clawCollabRequests.status, [
-          "approved",
-          "running",
-          "completed",
-          "failed",
-          "partial_success",
-          "waiting_input",
-        ]),
-      ));
+      .where(eq(clawCollabRequests.sessionId, sessionId));
   }
 }
 

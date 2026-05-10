@@ -1,25 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  isScheduleToolV2Enabled,
   normalizeScheduleToolArgs,
   normalizeWeekdays,
 } from "./schedule-intent";
-
-describe("schedule intent flag", () => {
-  it("is off when allowlist is empty", () => {
-    expect(isScheduleToolV2Enabled("lgc-x", { SCHEDULE_TOOL_V2_ALLOWLIST: "" } as any)).toBe(false);
-  });
-
-  it("matches comma-separated adopt ids", () => {
-    const env = { SCHEDULE_TOOL_V2_ALLOWLIST: "lgc-x, lgc-y" } as any;
-    expect(isScheduleToolV2Enabled("lgc-x", env)).toBe(true);
-    expect(isScheduleToolV2Enabled("lgc-z", env)).toBe(false);
-  });
-
-  it("supports wildcard", () => {
-    expect(isScheduleToolV2Enabled("lgc-anyone", { SCHEDULE_TOOL_V2_ALLOWLIST: "*" } as any)).toBe(true);
-  });
-});
 
 describe("normalize schedule tool args", () => {
   it("maps daily time to cron with Chinese display", () => {

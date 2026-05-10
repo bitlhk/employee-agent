@@ -81,13 +81,6 @@ const WEEKDAY_DISPLAY: Record<number, string> = {
   6: "六",
 };
 
-export function isScheduleToolV2Enabled(adoptId: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = String(env.SCHEDULE_TOOL_V2_ALLOWLIST || "").trim();
-  if (!raw) return false;
-  if (raw === "*") return true;
-  return raw.split(",").map((item) => item.trim()).filter(Boolean).includes(adoptId);
-}
-
 export function normalizeChannelId(value?: string): ChannelId | undefined {
   const v = String(value || "").toLowerCase();
   if (v === "wechat" || v === "weixin" || v === "微信") return "wechat";

@@ -150,80 +150,28 @@ export async function executePlatformIntent(
   // ── 创建定时任务 ──
   if (intent.type === "schedule_create") {
     const channels = await getBoundChannelsForAdopt(adoptId);
-    if (intent.schedule) {
-      const normalized = normalizeScheduleToolArgs(intent, channels.map((channel) => channel.channelId));
-      if (!normalized.ok) {
-        writer.writeText(`⚠️ ${normalized.question}\n`);
-        writer.writeEnd();
-        return;
-      }
-      const bound = findBoundChannel(channels, normalized.value.channel);
-      const job = {
-        name: normalized.value.name,
-        description: normalized.value.prompt.slice(0, 100),
-        enabled: true,
-        schedule: normalized.value.schedule,
-        prompt: normalized.value.prompt,
-        delivery: {
-          targets: normalized.value.delivery.targets.map((target) => ({
-            ...target,
-            targetLabel: bound?.targetLabel || target.targetLabel,
-          })),
-        },
-        meta: { sessionTarget: "isolated" },
-      };
-      try {
-        const resp = await fetch(`${BASE}/api/claw/cron/add`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Internal-Key": INTERNAL_KEY },
-          body: JSON.stringify({ adoptId, job }),
-        });
-        const data = await resp.json() as any;
-        if (!resp.ok) { writer.writeError(`创建失败: ${data?.error || resp.status}`); return; }
-        writer.writeText(`✅ **定时任务已创建**\n\n`);
-        writer.writeText(`| 项目 | 内容 |\n|------|------|\n`);
-        writer.writeText(`| 任务名称 | ${job.name} |\n`);
-        writer.writeText(`| 执行内容 | ${job.prompt} |\n`);
-        writer.writeText(`| 计划 | ${job.schedule.display} |\n`);
-        writer.writeText(`| 推送渠道 | ${channelName(normalized.value.channel)} |\n\n`);
-        writer.writeText(`> 可在侧边栏「定时任务」页面管理。\n`);
-      } catch (e: any) { writer.writeError(e?.message || String(e)); return; }
+    const scheduleIntent = {
+      ...intent,
+      channel: intent.channel || (channels.length === 1 ? channels[0].channelId : undefined),
+    };
+    const normalized = normalizeScheduleToolArgs(scheduleIntent, channels.map((channel) => channel.channelId));
+    if (!normalized.ok) {
+      writer.writeText(`⚠️ ${normalized.question}\n`);
       writer.writeEnd();
       return;
     }
-    if (process.env.SCHEDULE_TOOL_V2_ALLOWLIST) {
-      console.warn(`[SCHEDULE-V2] LLM fell back to V1 path for ${adoptId}, intent=`, JSON.stringify(intent).slice(0, 200));
-    }
-
-    const requested = intent.channel ? normalizeChannelId(String(intent.channel)) : undefined;
-    const selected = requested || channels[0]?.channelId;
-    if (!selected) {
-      writer.writeText("⚠️ 还没有可用推送频道。请先在侧边栏「频道」里绑定微信或飞书，再创建定时任务。\n");
-      writer.writeEnd();
-      return;
-    }
-    const bound = findBoundChannel(channels, selected);
-    if (!bound) {
-      writer.writeText(`⚠️ ${channelName(selected)}还未绑定。请先在侧边栏「频道」里绑定后再创建定时任务。\n`);
-      writer.writeEnd();
-      return;
-    }
+    const bound = findBoundChannel(channels, normalized.value.channel);
     const job = {
-      name: String(intent.name || "定时任务"),
-      description: String(intent.task || "").slice(0, 100),
+      name: normalized.value.name,
+      description: normalized.value.prompt.slice(0, 100),
       enabled: true,
-      schedule: {
-        kind: "cron",
-        cronExpr: String(intent.cron_expr || "0 9 * * *"),
-        display: String(intent.cron_expr || "0 9 * * *"),
-      },
-      prompt: String(intent.task || ""),
+      schedule: normalized.value.schedule,
+      prompt: normalized.value.prompt,
       delivery: {
-        targets: [{
-          channelId: selected,
-          channelLabel: channelName(selected),
-          targetLabel: bound.targetLabel,
-        }],
+        targets: normalized.value.delivery.targets.map((target) => ({
+          ...target,
+          targetLabel: bound?.targetLabel || target.targetLabel,
+        })),
       },
       meta: { sessionTarget: "isolated" },
     };
@@ -235,13 +183,12 @@ export async function executePlatformIntent(
       });
       const data = await resp.json() as any;
       if (!resp.ok) { writer.writeError(`创建失败: ${data?.error || resp.status}`); return; }
-      const chName = channelName(selected);
       writer.writeText(`✅ **定时任务已创建**\n\n`);
       writer.writeText(`| 项目 | 内容 |\n|------|------|\n`);
       writer.writeText(`| 任务名称 | ${job.name} |\n`);
-      writer.writeText(`| 执行内容 | ${intent.task} |\n`);
-      writer.writeText(`| cron | \`${intent.cron_expr}\` |\n`);
-      writer.writeText(`| 推送渠道 | ${chName} |\n\n`);
+      writer.writeText(`| 执行内容 | ${job.prompt} |\n`);
+      writer.writeText(`| 计划 | ${job.schedule.display} |\n`);
+      writer.writeText(`| 推送渠道 | ${channelName(normalized.value.channel)} |\n\n`);
       writer.writeText(`> 可在侧边栏「定时任务」页面管理。\n`);
     } catch (e: any) { writer.writeError(e?.message || String(e)); return; }
     writer.writeEnd();
