@@ -445,7 +445,7 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
               <Plus size={14} /> {createOpen ? T.collapseCreate : T.createTask}
             </button>
             <button className="schedule-v2-btn schedule-v2-btn--ghost" onClick={load} disabled={loading}>
-              <RefreshCw size={14} /> {loading ? T.refreshing : T.refresh}
+              <RefreshCw size={14} /> {T.refresh}
             </button>
           </div>
         </div>

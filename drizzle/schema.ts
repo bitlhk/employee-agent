@@ -479,6 +479,24 @@ export type LxCoopSession = typeof lxCoopSessions.$inferSelect;
 export type InsertLxCoopSession = typeof lxCoopSessions.$inferInsert;
 
 /**
+ * 灵虾组织协作 V2 - 用户隐藏的协作 session
+ *
+ * 用于“我参与的协作”列表的个人归档/隐藏，不改变 session 本身的成员和审计记录。
+ */
+export const lxCoopUserHidden = mysqlTable("lx_coop_user_hidden", {
+  userId: int("user_id").notNull(),
+  sessionId: varchar("session_id", { length: 64 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  userSessionUniqueIdx: uniqueIndex("uk_lx_coop_user_hidden_user_session").on(table.userId, table.sessionId),
+  userIdx: index("idx_lx_coop_user_hidden_user").on(table.userId),
+  sessionIdx: index("idx_lx_coop_user_hidden_session").on(table.sessionId),
+}));
+
+export type LxCoopUserHidden = typeof lxCoopUserHidden.$inferSelect;
+export type InsertLxCoopUserHidden = typeof lxCoopUserHidden.$inferInsert;
+
+/**
  * 灵虾组织协作 V2 - 协作事件流（append-only timeline）
  */
 export const lxCoopEvents = mysqlTable("lx_coop_events", {

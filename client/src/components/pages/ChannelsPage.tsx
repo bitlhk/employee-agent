@@ -57,6 +57,7 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
                   <span className="channel-list__title">
                     {channel.label}
                     {bound ? <span className="channel-pill channel-pill--ok">已绑定</span> : null}
+                    {!bound && channel.status === "ready" ? <span className="channel-pill channel-pill--info">未绑定</span> : null}
                     {!bound && channel.status === "notify-ready" ? <span className="channel-pill channel-pill--info">可推送</span> : null}
                     {!bound && channel.status === "soon" ? <span className="channel-pill">即将上线</span> : null}
                   </span>

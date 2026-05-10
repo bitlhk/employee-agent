@@ -577,10 +577,17 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
 
 
   const stopLingxiaStreaming = () => {
+    streamSeqRef.current += 1;
     if (lingxiaStreamAbortRef.current) {
       lingxiaStreamAbortRef.current.abort();
       lingxiaStreamAbortRef.current = null;
     }
+    try { wsClientRef.current?.setRawHandler(null); } catch {}
+    setLingxiaStreaming(false);
+    setConnStatus("connected");
+    setActiveToolName(null);
+    setActiveToolStartMs(null);
+    setActiveToolElapsed(0);
   };
 
   // 工具执行计时器：activeToolStartMs 有值时每秒更新 elapsed

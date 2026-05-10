@@ -1,7 +1,7 @@
 import express from "express";
 import { createHash } from "crypto";
 import { execSync } from "child_process";
-import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, copyFileSync, readdirSync } from "fs";
+import { cpSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, copyFileSync, readdirSync, statSync } from "fs";
 import path from "path";
 import type { SkillSource } from "../../shared/types/skill";
 import {
@@ -32,6 +32,74 @@ function decodeParam(value: unknown): string {
   } catch {
     return String(value || "");
   }
+}
+
+function skillSourceCacheDir(adoptId: string, skillId: string): string {
+  return path.join(APP_ROOT, "data", "generated-skills", adoptId, skillId);
+}
+
+async function discoverGeneratedRuntimeSkills(adoptId: string, runtimeAgentId: string, onlySkillId?: string): Promise<{
+  discovered: number;
+  installed: Array<{ skillId: string; displayName: string }>;
+  skipped: Array<{ skillId: string; reason: string }>;
+}> {
+  const runtimeSkillsRoot = path.join(openClawWorkspaceDir(runtimeAgentId), "skills");
+  if (!existsSync(runtimeSkillsRoot)) return { discovered: 0, installed: [], skipped: [] };
+
+  const listed = await skillRegistry.listSkills(adoptId);
+  const registered = new Set(listed.ok ? listed.value.map((item) => item.id) : []);
+  const installed: Array<{ skillId: string; displayName: string }> = [];
+  const skipped: Array<{ skillId: string; reason: string }> = [];
+
+  for (const entry of readdirSync(runtimeSkillsRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const sourceDir = path.join(runtimeSkillsRoot, entry.name);
+    if (!existsSync(path.join(sourceDir, "SKILL.md"))) continue;
+    if (onlySkillId && entry.name !== onlySkillId) continue;
+
+    try {
+      const parsed = parseSkillSourceDirectory(sourceDir, entry.name);
+      if (onlySkillId && parsed.skillId !== onlySkillId && entry.name !== onlySkillId) continue;
+      if (registered.has(parsed.skillId)) {
+        skipped.push({ skillId: parsed.skillId, reason: "already_registered" });
+        continue;
+      }
+
+      const sourceCache = skillSourceCacheDir(adoptId, parsed.skillId);
+      rmSync(sourceCache, { recursive: true, force: true });
+      mkdirSync(path.dirname(sourceCache), { recursive: true });
+      cpSync(sourceDir, sourceCache, { recursive: true });
+      const st = statSync(sourceCache);
+      if (!st.isDirectory()) {
+        skipped.push({ skillId: parsed.skillId, reason: "source_copy_failed" });
+        continue;
+      }
+
+      const source: SkillSource = {
+        kind: "generated",
+        skillId: parsed.skillId,
+        displayName: parsed.displayName || parsed.skillId,
+        description: parsed.description || "聊天生成的个人技能",
+        sourcePath: sourceCache,
+        version: String(parsed.manifest?.version || ""),
+      };
+      const result = await skillRegistry.install(adoptId, source);
+      if (!result.ok) {
+        skipped.push({ skillId: parsed.skillId, reason: result.error.detail });
+        continue;
+      }
+      await skillRegistry.updateScan(adoptId, parsed.skillId, {
+        warnings: parsed.warnings,
+        scannedAt: new Date().toISOString(),
+      });
+      registered.add(parsed.skillId);
+      installed.push({ skillId: parsed.skillId, displayName: source.displayName });
+    } catch (e: any) {
+      skipped.push({ skillId: entry.name, reason: String(e?.message || e) });
+    }
+  }
+
+  return { discovered: installed.length, installed, skipped };
 }
 
 async function readSkillPackagePayload(req: express.Request): Promise<{
@@ -76,6 +144,8 @@ export function registerSkillRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
+      const runtimeAgentId = await resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
+      await discoverGeneratedRuntimeSkills(adoptId, runtimeAgentId);
       const result = await skillRegistry.listSkills(adoptId);
       if (!result.ok) {
         res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
@@ -99,6 +169,8 @@ export function registerSkillRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
+      const runtimeAgentId = await resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
+      const discovered = await discoverGeneratedRuntimeSkills(adoptId, runtimeAgentId, skillId || undefined);
       const result = await skillRegistry.reconcile(adoptId, skillId ? { skillId } : undefined);
       if (!result.ok) {
         res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
@@ -110,8 +182,9 @@ export function registerSkillRoutes(app: express.Express) {
         scanned: result.value.scanned,
         changed: result.value.changed,
         failed: result.value.failed,
+        discovered: discovered.discovered,
       });
-      res.json({ report: result.value });
+      res.json({ report: result.value, discovered });
     } catch (e) {
       console.error("[skills registry] reconcile failed", e);
       res.status(500).json({ error: "reconcile skills failed" });
