@@ -53,7 +53,7 @@ if [[ -z "$OPENCLAW_BIN" ]]; then
   exit 1
 fi
 
-OPENCLAW_HOME_DIR="${CLAW_OPENCLAW_HOME:-$HOME/.openclaw}"
+OPENCLAW_HOME_DIR="${CLAW_OPENCLAW_HOME:-${CLAW_REMOTE_OPENCLAW_HOME:-$HOME}}"
 # 2026-04-23 fix: CLAW_OPENCLAW_HOME 在 .env 被设为 /root（非 $HOME/.openclaw 默认），
 # 原写法 $OPENCLAW_HOME_DIR/workspace-/$AGENT_ID 产出 /root/workspace-/trial_lgc-X，
 # 与 Node 侧读的 /root/.openclaw/workspace-X 不一致，导致前端看不到文件 + 技能安装失效
