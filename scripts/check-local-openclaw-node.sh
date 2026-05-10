@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/.env"
 
-export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+source "${ROOT_DIR}/scripts/lib/openclaw-bin.sh"
+OPENCLAW_BIN="$(resolve_openclaw_bin || true)"
 
 read_env() {
   local key="$1"
@@ -45,7 +46,7 @@ fail() { printf '[FAIL] %s\n' "$1"; exit 1; }
 
 command -v node >/dev/null 2>&1 && ok "node: $(node --version)" || fail "node is not installed"
 command -v pnpm >/dev/null 2>&1 && ok "pnpm: $(pnpm --version)" || fail "pnpm is not installed"
-command -v openclaw >/dev/null 2>&1 && ok "openclaw: $(openclaw --version 2>/dev/null | head -1)" || fail "openclaw is not installed"
+[[ -n "$OPENCLAW_BIN" ]] && ok "openclaw: $("$OPENCLAW_BIN" --version 2>/dev/null | head -1) (${OPENCLAW_BIN})" || fail "openclaw is not installed"
 
 RAW_HOME="$(read_env CLAW_OPENCLAW_HOME)"
 if [[ -z "$RAW_HOME" ]]; then

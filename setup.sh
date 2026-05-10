@@ -8,6 +8,7 @@ set -euo pipefail
 #   bash setup.sh --auto --host 1.2.3.4 --db-mode mysql-auto
 
 ENV_FILE=".env"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AUTO=false
 YES=false
 OVERWRITE_ENV=false
@@ -25,7 +26,8 @@ DB_USER_VALUE="${LINGXIA_DB_USER:-linggan}"
 DB_PASS_VALUE="${LINGXIA_DB_PASSWORD:-}"
 DB_NAME_VALUE="${LINGXIA_DB_NAME:-linggan}"
 
-export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+source "${SCRIPT_DIR}/scripts/lib/openclaw-bin.sh"
+OPENCLAW_BIN="$(resolve_openclaw_bin || true)"
 
 usage() {
   cat <<'EOF'
@@ -354,9 +356,9 @@ echo "Step 2/4: 检测 OpenClaw"
 
 if [[ "$SKIP_OPENCLAW" == "true" ]]; then
   echo "  已跳过 OpenClaw 配置。"
-elif command -v openclaw >/dev/null 2>&1; then
-  OC_VERSION=$(openclaw --version 2>/dev/null | head -1 || true)
-  echo "  检测到 OpenClaw: ${OC_VERSION:-openclaw}"
+elif [[ -n "$OPENCLAW_BIN" ]]; then
+  OC_VERSION=$("$OPENCLAW_BIN" --version 2>/dev/null | head -1 || true)
+  echo "  检测到 OpenClaw: ${OC_VERSION:-openclaw} (${OPENCLAW_BIN})"
 
   GW_TOKEN=$(grep "^CLAW_GATEWAY_TOKEN=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "")
   CORS_URL=$(grep "^FRONTEND_URL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "")

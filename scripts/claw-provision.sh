@@ -17,13 +17,16 @@ set -euo pipefail
 ACTION="${1:-}"
 shift || true
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/openclaw-bin.sh"
+
 ADOPT_ID=""
 AGENT_ID=""
 USER_ID=""
 PROFILE="plus"
 TTL_DAYS="0"
 
-export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+OPENCLAW_BIN="$(resolve_openclaw_bin || true)"
 
 for arg in "$@"; do
   case "$arg" in
@@ -45,7 +48,7 @@ if [[ -z "$ADOPT_ID" || -z "$AGENT_ID" ]]; then
   exit 1
 fi
 
-if ! command -v openclaw >/dev/null 2>&1; then
+if [[ -z "$OPENCLAW_BIN" ]]; then
   echo "{\"ok\":false,\"error\":\"openclaw command not found\"}"
   exit 1
 fi
@@ -64,7 +67,7 @@ mkdir -p "$WORKSPACE_DIR"
 
 agent_exists="false"
 LIST_JSON="[]"
-if LIST_JSON=$(OPENCLAW_HOME="$OPENCLAW_HOME_DIR" openclaw agents list --json 2>/dev/null); then
+if LIST_JSON=$(OPENCLAW_HOME="$OPENCLAW_HOME_DIR" "$OPENCLAW_BIN" agents list --json 2>/dev/null); then
   if python3 - <<'PY' "$LIST_JSON" "$AGENT_ID" >/dev/null 2>&1
 import json,sys
 raw=sys.argv[1]
@@ -88,7 +91,7 @@ PY
 fi
 
 if [[ "$agent_exists" != "true" ]]; then
-  ADD_CMD=(openclaw agents add "$AGENT_ID" --workspace "$WORKSPACE_DIR" --non-interactive)
+  ADD_CMD=("$OPENCLAW_BIN" agents add "$AGENT_ID" --workspace "$WORKSPACE_DIR" --non-interactive)
   if [[ -n "$AGENT_MODEL" ]]; then
     ADD_CMD+=(--model "$AGENT_MODEL")
   fi
