@@ -4069,6 +4069,7 @@ body[data-admin-light="true"] {
   --destructive-foreground: #ffffff;
   --ring: #dc2626;
   --oc-bg: #f9fafb;
+  --oc-bg-surface: #ffffff;
   --oc-panel: #ffffff;
   --oc-card: #ffffff;
   --oc-border: rgba(17, 24, 39, 0.10);
@@ -4363,6 +4364,39 @@ body[data-admin-light="true"] [data-radix-popper-content-wrapper] [role="option"
 }
 :root[data-theme-mode="dark"] .admin-collaboration-tab .bg-gray-50 {
   background: rgba(255, 255, 255, 0.045) !important;
+}
+body[data-admin-light="true"] .admin-collaboration-card,
+body[data-admin-light="true"] .admin-collaboration-switcher {
+  background: #ffffff !important;
+  border-color: rgba(17, 24, 39, 0.10) !important;
+  color: #111827 !important;
+}
+body[data-admin-light="true"] .admin-collaboration-tab {
+  color: #111827 !important;
+}
+body[data-admin-light="true"] .admin-collaboration-tab .text-muted-foreground,
+body[data-admin-light="true"] .admin-collaboration-tab [data-slot="card-description"] {
+  color: #6b7280 !important;
+}
+body[data-admin-light="true"] .admin-collaboration-space-button {
+  background: #ffffff !important;
+  border-color: rgba(17, 24, 39, 0.10) !important;
+  color: #111827 !important;
+}
+body[data-admin-light="true"] .admin-collaboration-space-button:hover {
+  background: #f9fafb !important;
+  border-color: rgba(17, 24, 39, 0.14) !important;
+}
+body[data-admin-light="true"] .admin-collaboration-space-button[data-active="true"] {
+  background: rgba(220, 38, 38, 0.06) !important;
+  border-color: rgba(220, 38, 38, 0.24) !important;
+}
+body[data-admin-light="true"] .admin-collaboration-tab .bg-gray-50,
+body[data-admin-light="true"] .admin-collaboration-tab .bg-muted\/30 {
+  background: #f9fafb !important;
+}
+body[data-admin-light="true"] .admin-collaboration-tab .divide-y > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(17, 24, 39, 0.10) !important;
 }
 
 /* ── CollabDrawer light theme fixes ── */
