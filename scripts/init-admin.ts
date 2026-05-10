@@ -56,7 +56,7 @@ async function main() {
     loginMethod: "email",
     role: "admin",
     accessLevel: "all",
-    lastSignedIn: null,
+    lastSignedIn: new Date(),
   } as any);
   console.log(`[INIT-ADMIN] created admin: ${email} id=${result[0].insertId}`);
 }
