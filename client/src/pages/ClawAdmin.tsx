@@ -252,6 +252,15 @@ export default function ClawAdmin() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
 
+  useEffect(() => {
+    const previous = document.body.getAttribute("data-admin-light");
+    document.body.setAttribute("data-admin-light", "true");
+    return () => {
+      if (previous === null) document.body.removeAttribute("data-admin-light");
+      else document.body.setAttribute("data-admin-light", previous);
+    };
+  }, []);
+
   // ── 实例管理 ──
   const { data: listData, isLoading: listLoading, refetch: refetchList } = trpc.claw.adminList.useQuery(
     { keyword: keyword || undefined, status: statusFilter as any },

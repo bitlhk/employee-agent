@@ -4039,6 +4039,44 @@ html:has(:root[data-theme-mode="light"]) body {
 }
 
 /* ClawAdmin shell visual standardization */
+body[data-admin-light="true"] {
+  color-scheme: light;
+  --bg: #f9fafb;
+  --bg-elevated: #ffffff;
+  --panel: #ffffff;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --input: #ffffff;
+  --text: #111827;
+  --text-strong: #111827;
+  --muted: #6b7280;
+  --faint: #9ca3af;
+  --border: rgba(17, 24, 39, 0.10);
+  --border-strong: rgba(17, 24, 39, 0.14);
+  --border-hover: rgba(17, 24, 39, 0.20);
+  --background: oklch(0.99 0 0);
+  --foreground: oklch(0.2 0.01 65);
+  --card-foreground: oklch(0.2 0.01 65);
+  --popover-foreground: oklch(0.2 0.01 65);
+  --secondary: oklch(0.97 0.001 286);
+  --secondary-foreground: oklch(0.35 0.01 65);
+  --muted-foreground: oklch(0.5 0.01 286);
+  --accent: oklch(0.96 0.001 286);
+  --accent-foreground: oklch(0.2 0.005 286);
+  --primary: #dc2626;
+  --primary-foreground: #ffffff;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --ring: #dc2626;
+  --oc-bg: #f9fafb;
+  --oc-panel: #ffffff;
+  --oc-card: #ffffff;
+  --oc-border: rgba(17, 24, 39, 0.10);
+  --oc-text-primary: #111827;
+  --oc-text-secondary: #6b7280;
+  --oc-text-tertiary: #9ca3af;
+}
+
 .claw-admin-shell {
   --admin-red: #dc2626;
   --admin-red-hover: #b91c1c;
@@ -4051,6 +4089,26 @@ html:has(:root[data-theme-mode="light"]) body {
   font-family: var(--oc-font-ui, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif);
   color: var(--admin-ink);
   letter-spacing: 0;
+}
+body[data-admin-light="true"] [data-radix-popper-content-wrapper] [data-slot="select-content"],
+body[data-admin-light="true"] [data-radix-popper-content-wrapper] [role="listbox"],
+body[data-admin-light="true"] [data-radix-popper-content-wrapper] .bg-popover,
+body[data-admin-light="true"] [data-slot="alert-dialog-content"],
+body[data-admin-light="true"] [data-slot="dialog-content"] {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border-color: rgba(17, 24, 39, 0.10) !important;
+}
+body[data-admin-light="true"] [data-radix-popper-content-wrapper] [data-slot="select-item"],
+body[data-admin-light="true"] [data-radix-popper-content-wrapper] [role="option"] {
+  color: #374151 !important;
+}
+body[data-admin-light="true"] [data-radix-popper-content-wrapper] [data-slot="select-item"]:hover,
+body[data-admin-light="true"] [data-radix-popper-content-wrapper] [data-slot="select-item"][data-highlighted],
+body[data-admin-light="true"] [data-radix-popper-content-wrapper] [role="option"]:hover,
+body[data-admin-light="true"] [data-radix-popper-content-wrapper] [role="option"][data-highlighted] {
+  background: #f9fafb !important;
+  color: #111827 !important;
 }
 .claw-admin-shell * {
   letter-spacing: 0;
