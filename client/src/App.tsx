@@ -16,7 +16,6 @@ const CoopNew = lazy(() => import("./pages/CoopNew"));
 const Login = lazy(() => import("./pages/Login"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
-const DebugChatV2 = lazy(() => import("./pages/DebugChatV2"));
 const TaskWorkbenchLab = lazy(() => import("./pages/TaskWorkbenchLab"));
 
 // 加载中组件
@@ -54,11 +53,6 @@ function Router() {
         {/* ── 子虾控制台 ── */}
         <Route path={"/claw/:adoptId"}>
           <Home />
-        </Route>
-
-        {/* Internal debug page for the Phase 4 ChatEvent transport pipeline. */}
-        <Route path={"/debug/chat-v2/:adoptId"}>
-          <DebugChatV2 />
         </Route>
 
         {/* Admin-only standalone lab for task workbench validation. Not linked from main nav. */}
