@@ -22,11 +22,13 @@ curl -fsSL -o /tmp/install-lingxia.sh \
 bash /tmp/install-lingxia.sh --host <服务器IP或域名>
 ```
 
+默认安装目录是当前用户的 `~/linggan-claw`，便于和 OpenClaw / Hermes 一样在普通用户目录下运行。
+
 常用参数：
 
 ```bash
 bash /tmp/install-lingxia.sh \
-  --dir /opt/linggan-claw \
+  --dir "$HOME/linggan-claw" \
   --port 5180 \
   --host 111.119.236.165 \
   --db-mode mysql-auto

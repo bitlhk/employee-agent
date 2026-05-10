@@ -7,7 +7,7 @@ set -euo pipefail
 
 REPO_URL="${LINGXIA_REPO_URL:-https://github.com/bitlhk/linggan-claw.git}"
 BRANCH="${LINGXIA_BRANCH:-main}"
-INSTALL_DIR="${LINGXIA_INSTALL_DIR:-/opt/linggan-claw}"
+INSTALL_DIR="${LINGXIA_INSTALL_DIR:-$HOME/linggan-claw}"
 PORT="${LINGXIA_PORT:-5180}"
 HOST="${LINGXIA_HOST:-}"
 DB_MODE="${LINGXIA_DB_MODE:-mysql-auto}"
@@ -23,7 +23,7 @@ Usage: bash bootstrap-install.sh [options]
 Options:
   --repo <url>             Git repository URL.
   --branch <name>          Git branch, default main.
-  --dir <path>             Install directory, default /opt/linggan-claw.
+  --dir <path>             Install directory, default $HOME/linggan-claw.
   --port <port>            App port, default 5180.
   --host <ip-or-host>      Public host/IP for FRONTEND_URL. Auto-detected by default.
   --db-mode <mode>         mysql-auto | existing | compose. Default mysql-auto.
@@ -35,7 +35,7 @@ Options:
 
 Examples:
   bash bootstrap-install.sh
-  bash bootstrap-install.sh --host 111.119.236.165 --dir /opt/linggan-claw
+  bash bootstrap-install.sh --host 111.119.236.165 --dir "$HOME/linggan-claw"
   bash bootstrap-install.sh --db-mode existing --skip-mysql
 EOF
 }
@@ -75,7 +75,7 @@ sudo_cmd() {
   elif command -v sudo >/dev/null 2>&1; then
     sudo "$@"
   else
-    echo "This installer needs sudo for system packages and /opt writes." >&2
+    echo "This installer needs sudo for system packages or protected install paths." >&2
     return 1
   fi
 }

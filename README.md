@@ -88,8 +88,10 @@ curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bo
 ```bash
 curl -fsSL -o /tmp/install-lingxia.sh \
   https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh
-bash /tmp/install-lingxia.sh --host 你的服务器IP --dir /opt/linggan-claw
+bash /tmp/install-lingxia.sh --host 你的服务器IP
 ```
+
+默认会安装到当前用户目录下的 `~/linggan-claw`，与 OpenClaw / Hermes 的本机用户目录习惯保持一致。如需生产固定目录，也可以额外传入 `--dir /opt/linggan-claw`。
 
 ### 方式一：裸机部署（推荐）
 
@@ -156,7 +158,7 @@ pnpm start
 华为云私有仓库 → 脱敏构建 → 新加坡中转仓库 → GitHub main
 ```
 
-如果新加坡服务器只是作为同步中转机，不需要再从 GitHub 克隆一份来覆盖中转目录。如果要把新加坡服务器作为一套新的灵虾运行环境，建议另建部署目录，例如 `/opt/linggan-claw`，从 GitHub 克隆一份干净代码，这样可以真实验证“新机器拉仓库 + 配 OpenClaw token + 启动灵虾”的可移植性。
+如果新加坡服务器只是作为同步中转机，不需要再从 GitHub 克隆一份来覆盖中转目录。如果要把新加坡服务器作为一套新的灵虾运行环境，建议另建部署目录，例如 `~/linggan-claw`，从 GitHub 克隆一份干净代码，这样可以真实验证“新机器拉仓库 + 配 OpenClaw token + 启动灵虾”的可移植性。
 
 ---
 
