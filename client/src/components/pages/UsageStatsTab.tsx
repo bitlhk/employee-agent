@@ -17,6 +17,17 @@ interface UsageData {
   summary: { totalClaws: number; totalChats: number; activeToday: number };
 }
 
+function getRecentDailySeries(raw: Array<{ date: string; count: number }>, days = 14) {
+  const counts = new Map(raw.map((item) => [item.date, item.count]));
+  const today = new Date();
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (days - 1 - index));
+    const key = date.toISOString().slice(0, 10);
+    return { date: key, count: counts.get(key) || 0 };
+  });
+}
+
 export function UsageStatsTab() {
   const [data, setData] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,8 +52,9 @@ export function UsageStatsTab() {
 
   if (!data) return <div className="text-sm text-gray-500 text-center py-8">加载失败</div>;
 
-  const maxDaily = Math.max(...data.daily.map(d => d.count), 1);
-  const hasDailyData = data.daily.some((d) => d.count > 0);
+  const dailySeries = getRecentDailySeries(data.daily || []);
+  const maxDaily = Math.max(...dailySeries.map(d => d.count), 1);
+  const hasDailyData = dailySeries.some((d) => d.count > 0);
   const chartHeightPx = 72;
   const summaryCards = [
     { label: "子虾总数", value: data.summary.totalClaws, icon: Users, tone: "red", hint: "已配置实例" },
@@ -91,11 +103,11 @@ export function UsageStatsTab() {
             </div>
           )}
           <div className="admin-usage-chart flex h-24 items-end gap-1.5">
-            {data.daily.map((d, i) => (
+            {dailySeries.map((d, i) => (
               <div key={i} className="flex-1 flex h-full min-w-0 flex-col items-center justify-end gap-1">
                 <span className="text-[10px] text-gray-500">{d.count}</span>
                 <div
-                  className={`w-full rounded-t transition-all ${d.count > 0 ? "admin-usage-bar" : "admin-usage-bar-empty"}`}
+                  className={`w-full max-w-8 rounded-t transition-all ${d.count > 0 ? "admin-usage-bar" : "admin-usage-bar-empty"}`}
                   style={{ height: `${d.count > 0 ? Math.max((d.count / maxDaily) * chartHeightPx, 5) : 2}px` }}
                   title={`${d.date}: ${d.count} 次`}
                 />
@@ -103,7 +115,7 @@ export function UsageStatsTab() {
             ))}
           </div>
           <div className="mt-2 flex gap-1.5">
-            {data.daily.map((d) => (
+            {dailySeries.map((d) => (
               <span key={d.date} className="flex-1 min-w-0 text-center text-[10px] font-medium leading-none text-gray-600">
                 {d.date.slice(5)}
               </span>
