@@ -120,6 +120,8 @@ backups/
 
 # 数据目录（含用户数据）
 data/
+!client/src/data/
+!client/src/data/**
 !server/_core/agent/data/
 !server/_core/agent/data/agent-manifests.seed.json
 reports/
