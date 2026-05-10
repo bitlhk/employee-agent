@@ -76,7 +76,7 @@ function sourceResearchTemplate(overrides: Partial<TaskTemplate> = {}): TaskTemp
     ...template().stages[0]!,
     id: "source_research",
     stageType: "source_research" as const,
-    displayName: "闻舟检索趋势来源",
+    displayName: "检索员检索趋势来源",
     personaId: "wenzhou",
     agentDefinitionId: "wenzhou-source-research",
     expectedOutputs: ["markdown_report" as const],
@@ -85,7 +85,7 @@ function sourceResearchTemplate(overrides: Partial<TaskTemplate> = {}): TaskTemp
   const reviewStage = {
     ...template().stages[0]!,
     id: "research_review",
-    displayName: "墨衡提炼观点与大纲",
+    displayName: "分析师提炼观点与大纲",
     personaId: "moheng",
     agentDefinitionId: "task-moheng-reviewer",
     inputMapping: { original: true, fromStages: ["source_research"] },
@@ -110,7 +110,7 @@ function pptBlueprintTemplate(overrides: Partial<TaskTemplate> = {}): TaskTempla
   const reviewStage = {
     ...template().stages[0]!,
     id: "research_review",
-    displayName: "墨衡提炼观点与页结构",
+    displayName: "分析师提炼观点与页结构",
     personaId: "moheng",
     agentDefinitionId: "task-moheng-reviewer",
     inputMapping: { original: true },
@@ -119,7 +119,7 @@ function pptBlueprintTemplate(overrides: Partial<TaskTemplate> = {}): TaskTempla
   const pptStage = {
     ...template().stages[0]!,
     id: "ppt_generation",
-    displayName: "简页生成演示文稿",
+    displayName: "写作员生成演示文稿",
     personaId: "jianye",
     agentDefinitionId: "task-ppt",
     inputMapping: { original: true, fromStages: ["research_review"] },
@@ -237,6 +237,25 @@ describe("JsonTaskTemplateRunner", () => {
     if (result.ok) {
       expect(result.value.status).toBe("completed");
       expect(result.value.stages[0]?.status).toBe("success");
+    }
+  });
+
+  it("preserves external orchestration metadata on the task run", async () => {
+    const harnessPlan = {
+      source: "financial_harness",
+      runId: "run-harness-1",
+      templateId: "market-researcher",
+      stages: [{ stageId: "sector_reader", role: "Reader", profile: "market-sector-reader" }],
+    };
+    const result = await runner(new MockClusterRunner([clusterRun()])).runTask({
+      template: template(),
+      userInput: "hello",
+      context: { userId: 1, adoptId: "lgc-test", metadata: { harnessPlan } },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.metadata?.harnessPlan).toEqual(harnessPlan);
     }
   });
 
@@ -423,7 +442,7 @@ describe("JsonTaskTemplateRunner", () => {
           output: [
             "PPT 已生成。",
             "## 蓝图执行情况",
-            "墨衡建议页数：3",
+            "分析师建议页数：3",
             "实际生成页数：3",
             "每页标题：1. AI 从回答走向执行；2. 企业场景影响；3. 金融场景影响",
             "无合并、无删减、无新增。",
@@ -511,7 +530,7 @@ describe("JsonTaskTemplateRunner", () => {
           output: [
             "PPT 已生成。",
             "## 蓝图执行情况",
-            "墨衡建议页数：2",
+            "分析师建议页数：2",
             "实际生成页数：2",
             "每页标题：1. 模型趋势：AI 从回答走向执行；2. 企业建议：优先选择可验证流程",
             "无合并、无删减、无新增。",
@@ -570,7 +589,7 @@ describe("JsonTaskTemplateRunner", () => {
           output: [
             "PPT 已生成。",
             "## 蓝图执行情况",
-            "墨衡建议页数：3",
+            "分析师建议页数：3",
             "实际生成页数：2",
             "合并：企业影响 + 金融影响。",
           ].join("\n"),
@@ -624,7 +643,7 @@ describe("JsonTaskTemplateRunner", () => {
           output: [
             "PPT 已生成。",
             "## 蓝图执行情况",
-            "墨衡建议页数：3",
+            "分析师建议页数：3",
             "实际生成页数：3",
             "每页标题：1. AI 从回答走向执行；2. 企业场景影响；3. 管理层建议",
             "无合并、无删减、无新增。",
@@ -852,7 +871,7 @@ describe("JsonTaskTemplateRunner", () => {
     expect(sourceResearchProvider.research).toHaveBeenCalledWith("Sequoia AI Ascent 2026");
     expect(clusterRunner.runCalls).toHaveLength(1);
     expect(clusterRunner.runCalls[0]?.agentDefinitionIds).toEqual(["task-moheng-reviewer"]);
-    expect(clusterRunner.runCalls[0]?.input).toContain("闻舟来源证据包");
+    expect(clusterRunner.runCalls[0]?.input).toContain("检索员来源证据包");
     expect(clusterRunner.runCalls[0]?.input).toContain("Sequoia AI Ascent notes");
     if (result.ok) {
       expect(result.value.status).toBe("completed");

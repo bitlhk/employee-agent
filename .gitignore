@@ -120,6 +120,11 @@ backups/
 
 # 数据目录（含用户数据）
 data/
+!server/_core/agent/data/
+!server/_core/agent/data/agent-manifests.seed.json
+reports/
+__pycache__/
+*.pyc
 logs/
 
 # 运行时临时脚本

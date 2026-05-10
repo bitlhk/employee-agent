@@ -50,13 +50,35 @@ function cleanMetadata(row: LegacyBusinessAgentRow, provider: AgentProvider): Re
   };
 }
 
-function inferTransportKind(apiUrl: string): "direct" | "ssh-reverse-tunnel" {
+function resolveRef(ref: string | undefined): string | undefined {
+  if (!ref) return undefined;
+  return process.env[ref] || ref;
+}
+
+function resolveEndpointRef(ref: string | undefined): string | undefined {
+  if (!ref) return undefined;
+  if (process.env[ref]) return process.env[ref];
+  return /^https?:\/\//i.test(ref) ? ref : undefined;
+}
+
+function isManagedHermesProfile(definition: AgentDefinition): boolean {
+  return definition.metadata?.managedHermesProfile === true;
+}
+
+function isLocalHermesEndpoint(apiUrl: string): boolean {
   try {
     const url = new URL(apiUrl);
-    if ((url.hostname === "127.0.0.1" || url.hostname === "localhost") && url.port === "8642") {
-      return "ssh-reverse-tunnel";
-    }
+    const port = Number(url.port);
+    return (url.hostname === "127.0.0.1" || url.hostname === "localhost")
+      && Number.isFinite(port)
+      && port >= 8600
+      && port <= 8699;
   } catch {}
+  return false;
+}
+
+function inferTransportKind(apiUrl: string): "direct" | "ssh-reverse-tunnel" {
+  if (isLocalHermesEndpoint(apiUrl)) return "ssh-reverse-tunnel";
   return "direct";
 }
 
@@ -64,21 +86,63 @@ function inferAdapterProtocol(row: LegacyBusinessAgentRow, provider: AgentProvid
   if (row.id === "task-stock") return "stock-analysis-v1-agent-stream";
   if (provider.runtimeFamily === "claude-code") return "openai-chat-completions";
   if (provider.runtimeFamily !== "hermes") return "http-json";
-  try {
-    const url = new URL(row.apiUrl || "");
-    if ((url.hostname === "127.0.0.1" || url.hostname === "localhost") && url.port === "8642") {
-      return "hermes-v1-runs";
-    }
-  } catch {}
+  if (isLocalHermesEndpoint(row.apiUrl || "")) return "hermes-v1-runs";
   return "http-json";
 }
 
 export class LegacyBusinessAgentResolver {
   constructor(private readonly lookup: LegacyBusinessAgentLookup = getBusinessAgent) {}
 
+  private resolveManagedHermesDefinition(
+    definition: AgentDefinition,
+    provider: AgentProvider,
+  ): AgentResult<ProviderResolvedBinding> {
+    if (provider.runtimeFamily !== "hermes") {
+      return validationFailed(`managed Hermes profile requires hermes provider: ${definition.id}`);
+    }
+
+    const metadata = definition.metadata || {};
+    const endpoint = resolveEndpointRef(definition.endpointRef)
+      || (typeof metadata.defaultEndpoint === "string" ? metadata.defaultEndpoint : undefined);
+    if (!endpoint) return validationFailed(`managed Hermes profile endpoint is missing: ${definition.id}`);
+
+    const auth = resolveRef(definition.authRef)
+      || process.env.HERMES_HTTP_KEY
+      || process.env.LEGACY_HERMES_AUTH
+      || process.env.LEGACY_BIZ_AGENT_TASK_HERMES_AUTH;
+
+    const systemPrompt = typeof metadata.systemPrompt === "string" ? metadata.systemPrompt : undefined;
+    const profileRef = definition.profileRef || definition.id;
+
+    return {
+      ok: true,
+      value: {
+        endpoint,
+        auth: SecretHandle.of(auth),
+        remoteAgentId: profileRef,
+        localAgentId: profileRef,
+        systemPrompt,
+        healthStatus: definition.healthStatus,
+        transport: { kind: inferTransportKind(endpoint) },
+        metadata: {
+          managedHermesProfile: true,
+          providerKey: provider.providerKey,
+          profileRef,
+          agentRole: metadata.agentRole || null,
+          agentTemplateId: metadata.agentTemplateId || null,
+          adapterProtocol: "hermes-v1-runs",
+          transportKind: inferTransportKind(endpoint),
+        },
+      },
+    };
+  }
+
   async resolve(definition: AgentDefinition, provider: AgentProvider): Promise<AgentResult<ProviderResolvedBinding>> {
     const row = await this.lookup(definition.id);
-    if (!row) return notFound(`legacy business agent not found: ${definition.id}`);
+    if (!row) {
+      if (isManagedHermesProfile(definition)) return this.resolveManagedHermesDefinition(definition, provider);
+      return notFound(`legacy business agent not found: ${definition.id}`);
+    }
     if (!isEnabled(row)) return notFound(`legacy business agent is disabled: ${definition.id}`);
     if (!row.apiUrl) return validationFailed(`legacy business agent endpoint is missing: ${definition.id}`);
 

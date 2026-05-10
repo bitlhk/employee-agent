@@ -27,8 +27,11 @@ rsync -a --exclude-from=- "$SRC_DIR/" "$OUT_DIR/" << 'EXCLUDES'
 node_modules
 dist
 backups
-data
+/data
 logs
+reports
+__pycache__
+*.pyc
 *.bak
 *.bak-*
 *.bak.*

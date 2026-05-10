@@ -25,8 +25,8 @@ describe("LegacyBusinessAgentResolver", () => {
     expect(result.value.transport?.kind).toBe("ssh-reverse-tunnel");
     expect(result.value.metadata?.adapterProtocol).toBe("hermes-v1-runs");
     expect(result.value.metadata?.transportKind).toBe("ssh-reverse-tunnel");
-    expect(result.value.systemPrompt).toContain("墨衡 (AI) · 研究审阅员");
-    expect(result.value.systemPrompt).toContain("输出给简页使用的 PPT 大纲");
+    expect(result.value.systemPrompt).toContain("分析师 (AI)");
+    expect(result.value.systemPrompt).toContain("输出给写作员使用的 PPT 大纲");
     expect(result.value.systemPrompt).not.toContain("个人财富解释助手");
     expect(String(result.value.auth)).toBe("[REDACTED]");
     expect(JSON.stringify(result.value)).not.toContain("hermes-token");
@@ -94,8 +94,8 @@ describe("LegacyBusinessAgentResolver", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.systemPrompt).toContain("墨衡 (AI) · 研究审阅员");
-      expect(result.value.systemPrompt).toContain("输出给简页使用的 PPT 大纲");
+      expect(result.value.systemPrompt).toContain("分析师 (AI)");
+      expect(result.value.systemPrompt).toContain("输出给写作员使用的 PPT 大纲");
       expect(result.value.systemPrompt).toContain("不生成 PPTX、DOCX、Excel 或 HTML 文件");
       expect(result.value.systemPrompt).not.toContain("个人财富解释助手");
     }
@@ -145,5 +145,35 @@ describe("LegacyBusinessAgentResolver", () => {
     await resolver.resolve(definition({ id: "task-from-definition" }), provider());
 
     expect(seenId).toBe("task-from-definition");
+  });
+
+  it("resolves seed-only managed Hermes profiles without a DB row", async () => {
+    const resolver = new LegacyBusinessAgentResolver(async () => null);
+
+    const result = await resolver.resolve(
+      definition({
+        id: "market-sector-reader",
+        profileRef: "market-sector-reader",
+        endpointRef: "http://127.0.0.1:8651",
+        authRef: "managed-token",
+        metadata: {
+          managedHermesProfile: true,
+          agentTemplateId: "market-researcher",
+          agentRole: "Reader",
+          systemPrompt: "Reader prompt",
+        },
+      }),
+      provider(),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.endpoint).toBe("http://127.0.0.1:8651");
+    expect(result.value.remoteAgentId).toBe("market-sector-reader");
+    expect(result.value.localAgentId).toBe("market-sector-reader");
+    expect(result.value.systemPrompt).toBe("Reader prompt");
+    expect(result.value.transport?.kind).toBe("ssh-reverse-tunnel");
+    expect(result.value.metadata?.adapterProtocol).toBe("hermes-v1-runs");
+    expect(result.value.metadata?.managedHermesProfile).toBe(true);
   });
 });

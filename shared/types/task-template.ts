@@ -196,6 +196,7 @@ export interface TaskTemplateRunner {
       userId: number;
       adoptId: string;
       spaceId?: number | null;
+      metadata?: Record<string, unknown>;
     };
   }): Promise<AgentResult<TaskRunResult>>;
 }

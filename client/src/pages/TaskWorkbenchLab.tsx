@@ -19,7 +19,6 @@ import {
   RefreshCw,
   Search,
   Send,
-  ShieldCheck,
   Sparkles,
   Trash2,
   TrendingUp,
@@ -116,6 +115,23 @@ type RouterDecision = {
   userVisiblePlan?: string[];
   clarifyingQuestion?: string;
   reply?: string;
+  harnessPlan?: {
+    source: "financial_harness";
+    runId: string;
+    templateId: string;
+    confidenceScore?: number;
+    reason?: string;
+    riskFlags?: string[];
+    stages: Array<{
+      stageId: string;
+      role: "Reader" | "Analyst" | "Writer";
+      profile: string;
+      inputContract?: string;
+      outputContract?: string;
+      skillRefs?: string[];
+      mcpPolicy?: Record<string, unknown>;
+    }>;
+  };
   router?: Record<string, unknown>;
 };
 
@@ -142,61 +158,81 @@ type BusinessFile = {
 
 const TASK_ICONS: Record<string, typeof FileText> = {
   market_research_brief: BarChart3,
+  meeting_prep_agent: FileText,
   ppt_report_writing: Presentation,
   stock_ppt_report: TrendingUp,
 };
 
+const TASK_DISPLAY_OVERRIDES: Record<string, string> = {
+  market_research_brief: "\u91d1\u878d\u5e02\u573a\u7814\u7a76\u7b80\u62a5",
+  meeting_prep_agent: "\u5ba2\u6237\u4f1a\u8bae\u51c6\u5907 Agent",
+  ai_topic_insight_ppt: "\u70ed\u70b9\u8bdd\u9898 PPT \u751f\u6210",
+};
+
+const TASK_DESCRIPTION_OVERRIDES: Record<string, string> = {
+  market_research_brief: "\u68c0\u7d22\u516c\u5f00\u8d44\u6599\uff0c\u6309 Reader / Analyst / Writer \u94fe\u8def\u751f\u6210\u4e2d\u6587\u7814\u7a76\u7b80\u62a5\u521d\u7a3f\u3002",
+  meeting_prep_agent: "\u9762\u5411\u5ba2\u6237\u62dc\u8bbf\u573a\u666f\uff0c\u751f\u6210\u80cc\u666f\u3001\u4ea4\u6d41\u8bae\u9898\u3001\u95ee\u9898\u6e05\u5355\u548c\u4eba\u5de5\u590d\u6838\u63d0\u793a\u3002",
+  ai_topic_insight_ppt: "\u8f93\u5165 AI \u6216\u91d1\u878d\u79d1\u6280\u4e3b\u9898\uff0c\u68c0\u7d22\u8d44\u6599\u5e76\u6574\u7406\u4e3a\u6c47\u62a5 PPT \u8349\u7a3f\u3002",
+};
+
 const TASK_PLACEHOLDERS: Record<string, string> = {
-  market_research_brief: "输入研究主题，例如：跨境支付行业的最新变化、机会和风险",
-  ai_topic_insight_ppt: "输入你想研究的热点话题，例如：Sequoia Ascent 2026 的最新观点",
-  ppt_report_writing: "输入要做成 PPT 的主题、受众和风格...",
-  stock_ppt_report: "输入要研究的股票、报告用途和关注维度...",
+  market_research_brief: "输入金融市场、行业、公司或监管主题，例如：跨境支付最近有什么新的动态？",
+  meeting_prep_agent: "输入客户、机构、会议目标和关注方向，例如：准备拜访某银行科技部的会议问题。",
+  ai_topic_insight_ppt: "输入 AI、金融科技或技术趋势主题，例如：把企业智能体落地趋势整理成汇报 PPT。",
+  ppt_report_writing: "输入汇报主题、受众和风格要求。",
+  stock_ppt_report: "输入股票、报告用途和关注维度。",
 };
 
 const PERSONA_LABELS: Record<string, string> = {
-  wenzhou: "闻舟 (AI) · 趋势洞察师",
-  moheng: "墨衡 (AI) · 研究分析师",
-  jianye: "简页 (AI) · 材料写作师",
-  hengyue: "衡岳 (AI) · 股票数据研究员",
-  qingzhan: "青栈 (AI) · 代码工程师",
+  reader: "检索员 (AI)",
+  analyst: "分析师 (AI)",
+  writer: "写作员 (AI)",
+  hengyue: "衡研 (AI) · 数据研究",
+  qingzhan: "青栈 (AI) · 代码工程",
+};
+
+const PERSONA_DISPLAY_ALIASES: Record<string, string> = {
+  wenzhou: "reader",
+  moheng: "analyst",
+  jianye: "writer",
 };
 
 const PERSONA_INITIALS: Record<string, string> = {
-  wenzhou: "闻",
-  moheng: "墨",
-  jianye: "简",
+  reader: "检",
+  analyst: "析",
+  writer: "写",
   hengyue: "衡",
   qingzhan: "青",
 };
 
 const PERSONA_STEPS: Record<string, string[]> = {
-  wenzhou: ["理解研究主题", "规划搜索路径", "筛选可信来源", "整理证据包"],
-  moheng: ["阅读证据包", "提炼核心洞察", "标注引用来源", "复核合规边界"],
-  jianye: ["理解任务与材料", "整理结构大纲", "生成研究材料", "准备交付说明"],
-  hengyue: ["读取股票数据", "分析走势与风险", "生成研究结论"],
-  qingzhan: ["理解代码需求", "规划实现路径", "生成代码建议"],
+  reader: ["理解任务范围", "检索公开资料", "筛选可信来源", "输出结构化证据"],
+  analyst: ["读取上游证据", "拆解业务逻辑", "形成分析判断", "标注不确定性"],
+  writer: ["吸收上游材料", "组织交付结构", "生成可读内容", "整理交付说明"],
+  hengyue: ["读取数据", "分析走势与风险", "生成研究结论"],
+  qingzhan: ["理解代码需求", "规划实现路径", "生成工程建议"],
 };
 
 const PERSONA_DESCRIPTIONS: Record<string, string> = {
-  wenzhou: "搜索、筛选并组织可信资料，输出结构化证据包。",
-  moheng: "复核证据质量，提炼逻辑线、风险点和引用依据。",
-  jianye: "将研究材料整理成简报、汇报稿或可交付材料。",
-  hengyue: "读取行情与指标，生成股票数据研究和风险提示。",
-  qingzhan: "协助代码分析、改造建议和工程化落地。",
+  reader: "检索、筛选和组织公开资料，输出结构化证据包。",
+  analyst: "分析上游证据，拆解逻辑、形成判断并标注关键不确定性。",
+  writer: "把上游材料整理成简报、会议包或可交付内容。",
+  hengyue: "读取行情与指标，生成数据研究和风险提示。",
+  qingzhan: "协助代码分析、改造建议和工程落地。",
 };
 
 const PERSONA_COLORS: Record<string, { fg: string; bg: string; soft: string }> = {
-  wenzhou: { fg: "#1d4ed8", bg: "#2563eb", soft: "rgba(37,99,235,0.10)" },
-  moheng: { fg: "#047857", bg: "#059669", soft: "rgba(5,150,105,0.10)" },
-  jianye: { fg: "#6d28d9", bg: "#7c3aed", soft: "rgba(124,58,237,0.10)" },
+  reader: { fg: "#1d4ed8", bg: "#2563eb", soft: "rgba(37,99,235,0.10)" },
+  analyst: { fg: "#047857", bg: "#059669", soft: "rgba(5,150,105,0.10)" },
+  writer: { fg: "#6d28d9", bg: "#7c3aed", soft: "rgba(124,58,237,0.10)" },
   hengyue: { fg: "#be123c", bg: "#e11d48", soft: "rgba(225,29,72,0.10)" },
   qingzhan: { fg: "#0f766e", bg: "#0d9488", soft: "rgba(13,148,136,0.10)" },
 };
 
 const PERSONA_ICONS: Record<string, typeof Bot> = {
-  wenzhou: Search,
-  moheng: ShieldCheck,
-  jianye: Presentation,
+  reader: Search,
+  analyst: BarChart3,
+  writer: FileText,
   hengyue: BarChart3,
   qingzhan: Code2,
 };
@@ -205,25 +241,33 @@ const DISCLAIMER_LABELS: Record<string, string> = {
   ai_generated_label: "AI 生成标识",
   investment_advisory: "非投资建议",
   code_review_required: "代码需人工 Review",
-  fact_check_required: "事实需核查",
+  fact_check_required: "事实需人工核查",
 };
+
+function taskDisplayName(template: Pick<TaskTemplate, "id" | "displayName"> | null | undefined) {
+  if (!template) return "\u4efb\u52a1\u6267\u884c";
+  return TASK_DISPLAY_OVERRIDES[template.id] || template.displayName;
+}
+
+function taskDescription(template: Pick<TaskTemplate, "id" | "shortDescription">) {
+  return TASK_DESCRIPTION_OVERRIDES[template.id] || template.shortDescription;
+}
 
 function formatDuration(ms?: number) {
   if (!ms && ms !== 0) return "";
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms / 60_000)} 分钟`;
+  return `${Math.round(ms / 60_000)} \u5206\u949f`;
 }
 
 function statusMeta(status: string) {
-  if (status === "completed" || status === "success") return { label: "已完成", icon: CheckCircle2, color: "#15803d" };
-  if (status === "failed" || status === "timeout") return { label: status === "timeout" ? "已超时" : "失败", icon: XCircle, color: "#b91c1c" };
-  if (status === "partial_success") return { label: "部分完成", icon: AlertTriangle, color: "#b45309" };
-  if (status === "running") return { label: "运行中", icon: Loader2, color: "var(--oc-accent)" };
-  if (status === "waiting") return { label: "等待中", icon: Clock3, color: "var(--oc-text-tertiary)" };
+  if (status === "completed" || status === "success") return { label: "\u5df2\u5b8c\u6210", icon: CheckCircle2, color: "#15803d" };
+  if (status === "failed" || status === "timeout") return { label: status === "timeout" ? "\u5df2\u8d85\u65f6" : "\u5931\u8d25", icon: XCircle, color: "#b91c1c" };
+  if (status === "partial_success") return { label: "\u90e8\u5206\u5b8c\u6210", icon: AlertTriangle, color: "#b45309" };
+  if (status === "running") return { label: "\u8fd0\u884c\u4e2d", icon: Loader2, color: "var(--oc-accent)" };
+  if (status === "waiting") return { label: "\u7b49\u5f85\u4e2d", icon: Clock3, color: "var(--oc-text-tertiary)" };
   return { label: status, icon: Clock3, color: "var(--oc-text-secondary)" };
 }
-
 function formatSize(bytes?: number) {
   if (!bytes) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -241,6 +285,68 @@ function cleanText(text: string) {
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/```[\s\S]*?```/g, "")
     .trim();
+}
+
+function stripCodeFence(text: string) {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^```(?:json|markdown|md)?\s*([\s\S]*?)\s*```$/i);
+  return match ? match[1].trim() : trimmed;
+}
+
+function parseJsonObject(text: string) {
+  const normalized = stripCodeFence(text);
+  const candidates = [
+    normalized,
+    normalized.slice(normalized.indexOf("{"), normalized.lastIndexOf("}") + 1),
+  ].filter((item) => item && item.startsWith("{") && item.endsWith("}"));
+  for (const candidate of candidates) {
+    try {
+      const value = JSON.parse(candidate);
+      if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+    } catch {
+      // Keep trying the next shape.
+    }
+  }
+  return null;
+}
+
+function displayStageRole(personaId?: string, agentDefinitionId?: string, metadata?: Record<string, unknown>) {
+  const fromMetadata = String(metadata?.role || "").toLowerCase();
+  const normalizedPersona = displayPersonaId(personaId || "");
+  const profile = String(agentDefinitionId || "").toLowerCase();
+  if (fromMetadata.includes("reader") || normalizedPersona === "reader" || profile.includes("reader")) return "reader";
+  if (fromMetadata.includes("analyst") || normalizedPersona === "analyst" || profile.includes("analyst")) return "analyst";
+  if (fromMetadata.includes("writer") || normalizedPersona === "writer" || profile.includes("writer")) return "writer";
+  return normalizedPersona || "agent";
+}
+
+function workflowStepLabel(role: string) {
+  if (role === "reader") return "检索资料";
+  if (role === "analyst") return "综合分析";
+  if (role === "writer") return "生成材料";
+  return personaShortLabel(role);
+}
+
+function stageOutputMode(role: string) {
+  if (role === "reader") return "evidence";
+  if (role === "analyst") return "analysis";
+  if (role === "writer") return "final";
+  return "default";
+}
+
+function stringList(value: unknown, limit = 4) {
+  const rows = asArray(value)
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object") {
+        const object = item as Record<string, unknown>;
+        return String(object.claim || object.finding || object.title || object.summary || object.point || "");
+      }
+      return "";
+    })
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return rows.slice(0, limit);
 }
 
 function renderInline(text: string) {
@@ -375,6 +481,7 @@ function MarkdownContent({ text }: { text: string }) {
 
     if (/^[-*]\s+/.test(trimmed) || /^\d+\.\s+/.test(trimmed)) {
       const ordered = /^\d+\.\s+/.test(trimmed);
+      const firstNumber = ordered ? Number(trimmed.match(/^(\d+)\.\s+/)?.[1] || 1) : undefined;
       const items: string[] = [];
       const pattern = ordered ? /^\d+\.\s+/ : /^[-*]\s+/;
       while (i < lines.length && pattern.test(lines[i].trim())) {
@@ -383,7 +490,7 @@ function MarkdownContent({ text }: { text: string }) {
       }
       const ListTag = ordered ? "ol" : "ul";
       blocks.push(
-        <ListTag key={`list-${i}`} className={`space-y-2 pl-5 text-[15px] leading-7 ${ordered ? "list-decimal" : "list-disc"}`}>
+        <ListTag key={`list-${i}`} start={ordered ? firstNumber : undefined} className={`space-y-2 pl-5 text-[15px] leading-7 ${ordered ? "list-decimal" : "list-disc"}`}>
           {items.map((item, index) => (
             <li key={`${item}-${index}`}>{renderInline(item)}</li>
           ))}
@@ -418,90 +525,45 @@ function normalizeProgressMessage(message: string) {
   const text = cleanText(String(message || "")).replace(/\s+/g, " ").trim();
   if (!text) return "";
   const lower = text.toLowerCase();
-  if (lower.includes("__files") || lower.includes("files ready")) return "整理交付文件";
-  if (lower.includes("ppt") || lower.includes("slide") || lower.includes("ppt-insight")) return "调用 PPT 生成技能";
-  if (/^\$?\s*node\b/.test(text) || lower.includes("/home/ubuntu") || lower.includes(".claude/skills")) return "准备 Agent 执行环境";
-  if (text.includes("处理中") || lower.includes("processing")) return "正在生成内容";
+  if (lower.includes("__files") || lower.includes("files ready")) return "\u6574\u7406\u4ea4\u4ed8\u6587\u4ef6";
+  if (lower.includes("ppt") || lower.includes("slide") || lower.includes("ppt-insight")) return "\u8c03\u7528 PPT \u751f\u6210\u6280\u80fd";
+  if (/^\$?\s*node\b/.test(text) || lower.includes("/home/ubuntu") || lower.includes(".claude/skills")) return "\u51c6\u5907 Agent \u6267\u884c\u73af\u5883";
+  if (text.includes("\u5904\u7406\u4e2d") || lower.includes("processing")) return "\u6b63\u5728\u751f\u6210\u5185\u5bb9";
   if (text.length > 80) return `${text.slice(0, 80)}...`;
   return text;
 }
-
 function personaLabel(stage: Pick<TaskStageResult, "personaId"> | { personaId: string }) {
-  return PERSONA_LABELS[stage.personaId] || `${stage.personaId} (AI)`;
+  const personaId = displayPersonaId(stage.personaId);
+  return PERSONA_LABELS[personaId] || `${personaId} (AI)`;
 }
 
 function personaShortLabel(personaId: string) {
-  return personaLabel({ personaId }).replace(/\s*\(AI\)\s*·\s*/, " · ");
+  return personaLabel({ personaId }).replace(/\s*\(AI\)\s*[·|-]\s*/, " · ");
 }
 
 function personaRole(personaId: string) {
-  const parts = personaLabel({ personaId }).split("·");
-  return parts[1]?.trim() || "AI 专员";
+  const parts = personaLabel({ personaId }).split(/[·|-]/);
+  return parts[1]?.trim() || "\u667a\u80fd\u4f53\u4e13\u5458";
 }
 
 function personaInitial(personaId: string) {
-  return PERSONA_INITIALS[personaId] || "AI";
+  return PERSONA_INITIALS[displayPersonaId(personaId)] || "AI";
 }
 
 function personaColor(personaId: string) {
-  return PERSONA_COLORS[personaId] || { fg: "var(--oc-accent)", bg: "var(--oc-accent)", soft: "var(--oc-bg-soft)" };
+  return PERSONA_COLORS[displayPersonaId(personaId)] || { fg: "var(--oc-accent)", bg: "var(--oc-accent)", soft: "var(--oc-bg-soft)" };
 }
 
-function PersonaGlyph({ personaId, stroke }: { personaId: string; stroke: string }) {
-  const marker =
-    personaId === "wenzhou" ? (
-      <g transform="translate(31 31)">
-        <circle cx="0" cy="0" r="5.2" fill="none" stroke={stroke} strokeWidth="2" />
-        <path d="M4 4l5 5" stroke={stroke} strokeWidth="2.2" strokeLinecap="round" />
-      </g>
-    ) : personaId === "moheng" ? (
-      <g transform="translate(30 30)">
-        <path d="M-4 1l3 3 7-8" fill="none" stroke={stroke} strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
-      </g>
-    ) : (
-      <g transform="translate(29 29)">
-        <rect x="-5" y="-4" width="12" height="9" rx="1.6" fill="none" stroke={stroke} strokeWidth="1.9" />
-        <path d="M-2 -1h6M-2 2h3" stroke={stroke} strokeWidth="1.5" strokeLinecap="round" />
-      </g>
-    );
-
-  return (
-    <svg viewBox="0 0 42 42" aria-hidden="true" className="h-full w-full">
-      <circle cx="21" cy="21" r="20.25" fill="white" stroke="rgba(15,23,42,0.10)" />
-      <path d="M9 33c2.5-6.2 6.8-8.8 12.6-8.8 5.3 0 9.2 2.5 11.4 8.8" fill={stroke} opacity="0.12" />
-      <path d="M15.2 25.8c2 2.1 4.5 3.1 7.2 2.9" fill="none" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" opacity="0.45" />
-      <path
-        d="M23.8 9.4c-4.2-.8-8.2 1.6-9.1 5.9-.8 3.9.8 8 4 9.9 2.8 1.7 6.7 1 8.6-1.7 1.2-1.7 1.5-3.6 1-5.8-.5-2.6-1.1-4.4.7-6.1-1.4.3-2.8-.2-5.2-2.2z"
-        fill={stroke}
-        opacity="0.92"
-      />
-      <path d="M17.5 16.2c2.4.4 4.5.1 6.6-1.2" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.55" />
-      <path d="M27.9 18.4c1.8.2 2.6 1 2.3 2.2-.2 1.1-1.1 1.8-2.5 2" fill="none" stroke={stroke} strokeWidth="1.3" strokeLinecap="round" opacity="0.85" />
-      <circle cx="17.9" cy="18.9" r="1" fill="white" opacity="0.85" />
-      {marker}
-    </svg>
-  );
+function displayPersonaId(personaId: string) {
+  return PERSONA_DISPLAY_ALIASES[personaId] || personaId;
 }
 
 function PersonaAvatar({ personaId, size = "md", failed = false }: { personaId: string; size?: "xs" | "sm" | "md" | "lg"; failed?: boolean }) {
-  const Icon = PERSONA_ICONS[personaId] || Bot;
+  const displayId = displayPersonaId(personaId);
+  const Icon = PERSONA_ICONS[displayId] || Bot;
   const color = personaColor(personaId);
   const sizeClass = size === "xs" ? "h-6 w-6 text-[10px]" : size === "sm" ? "h-8 w-8 text-xs" : size === "lg" ? "h-12 w-12 text-base" : "h-10 w-10 text-sm";
   const iconSize = size === "xs" ? 12 : size === "sm" ? 14 : size === "lg" ? 22 : 18;
-  if (["wenzhou", "moheng", "jianye"].includes(personaId)) {
-    return (
-      <span
-        className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-white ${sizeClass}`}
-        style={{
-          boxShadow: `0 10px 24px ${failed ? "rgba(185,28,28,0.18)" : color.soft}`,
-          filter: failed ? "grayscale(0.25) saturate(0.8)" : undefined,
-        }}
-        title={personaLabel({ personaId })}
-      >
-        <PersonaGlyph personaId={personaId} stroke={failed ? "#b91c1c" : color.fg} />
-      </span>
-    );
-  }
   return (
     <span
       className={`inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white ${sizeClass}`}
@@ -1126,23 +1188,52 @@ function UserTaskCard({ prompt, attachments }: { prompt: string; attachments: st
   );
 }
 
+function harnessTemplateLabel(templateId?: string) {
+  if (templateId === "market-researcher") return "\u91d1\u878d\u5e02\u573a\u7814\u7a76\u7b80\u62a5";
+  if (templateId === "meeting-prep-agent") return "\u5ba2\u6237\u4f1a\u8bae\u51c6\u5907 Agent";
+  if (templateId === "clarify") return "\u9700\u8981\u8865\u5145\u4fe1\u606f";
+  if (templateId === "reject_or_reframe") return "\u9700\u4eba\u5de5\u6539\u5199\u76ee\u6807";
+  return "任务流程";
+}
+
+function harnessConfidenceLabel(score?: number) {
+  if (typeof score !== "number" || !Number.isFinite(score)) return "\u7f6e\u4fe1\u5ea6\u5f85\u8bc4\u4f30";
+  return "\u7f6e\u4fe1\u5ea6 " + Math.round(score * 100) + "%";
+}
+
+function harnessRoleLabel(role?: string) {
+  if (role === "Reader") return "\u68c0\u7d22\u5458";
+  if (role === "Analyst") return "\u5206\u6790\u5e08";
+  if (role === "Writer") return "\u5199\u4f5c\u5458";
+  return role || "\u4e13\u5458";
+}
+
+function harnessRoleDescription(role?: string) {
+  if (role === "Reader") return "\u68c0\u7d22\u516c\u5f00\u8d44\u6599\uff0c\u8f93\u51fa\u7ed3\u6784\u5316\u8bc1\u636e";
+  if (role === "Analyst") return "\u5206\u6790\u4e0a\u6e38\u8bc1\u636e\uff0c\u4e0d\u76f4\u63a5\u5916\u641c";
+  if (role === "Writer") return "\u6574\u7406\u6700\u7ec8\u4ea4\u4ed8\uff0c\u4e0d\u63a5\u5916\u90e8\u641c\u7d22";
+  return "\u6309\u4efb\u52a1\u5206\u5de5\u6267\u884c";
+}
+
 function RouterDecisionCard({ routing, decision }: { routing: boolean; decision: RouterDecision | null }) {
   if (!routing && !decision) return null;
+  const plan = decision?.harnessPlan;
   const isRun = decision?.intent === "run_template";
   const isClarify = decision?.intent === "clarify";
   const isUnsupported = decision?.intent === "unsupported";
   const title = routing
-    ? "正在判断是否启动任务"
+    ? "\u6b63\u5728\u8bc6\u522b\u4efb\u52a1\u7c7b\u578b"
     : isRun
-      ? "已识别为任务请求"
+      ? "\u5df2\u8bc6\u522b\u4e3a\uff1a" + harnessTemplateLabel(plan?.templateId)
       : isClarify
-        ? "需要补充一点信息"
+        ? "\u9700\u8981\u8865\u5145\u4efb\u52a1\u76ee\u6807"
         : isUnsupported
-          ? "这个请求不会自动执行"
-          : "任务工作台";
+          ? "\u8be5\u8bf7\u6c42\u4e0d\u4f1a\u81ea\u52a8\u6267\u884c"
+          : "\u4efb\u52a1\u5de5\u4f5c\u53f0";
   const body = routing
-    ? "我先判断这句话是闲聊、补充信息，还是需要启动专员链路。"
-    : decision?.reply || decision?.clarifyingQuestion || decision?.normalizedGoal || "";
+    ? "正在理解你的目标，并选择合适的任务流程。"
+    : decision?.reply || decision?.clarifyingQuestion || decision?.normalizedGoal || plan?.reason || "";
+  const score = plan?.confidenceScore;
 
   return (
     <div className="mt-5 flex justify-start">
@@ -1150,25 +1241,42 @@ function RouterDecisionCard({ routing, decision }: { routing: boolean; decision:
         className="max-w-3xl rounded-[28px] border bg-white px-5 py-4 shadow-sm"
         style={{ borderColor: isUnsupported ? "rgba(220,38,38,0.22)" : "var(--oc-border)" }}
       >
-        <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: isUnsupported ? "#b91c1c" : "var(--oc-text-primary)" }}>
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold" style={{ color: isUnsupported ? "#b91c1c" : "var(--oc-text-primary)" }}>
           {routing ? <Loader2 className="h-4 w-4 animate-spin" /> : isUnsupported ? <AlertTriangle size={16} /> : <Sparkles size={16} style={{ color: "var(--oc-accent)" }} />}
-          {title}
+          <span>{title}</span>
+          {isRun && typeof score === "number" ? (
+            <span className="rounded-full px-2.5 py-1 text-[11px] font-medium" style={{ background: "var(--oc-bg-soft)", color: "var(--oc-text-secondary)" }}>
+              {harnessConfidenceLabel(score)}
+            </span>
+          ) : null}
         </div>
         {body ? (
           <div className="whitespace-pre-wrap text-sm leading-7" style={{ color: "var(--oc-text-secondary)" }}>
             {body}
           </div>
         ) : null}
-        {isRun && decision?.userVisiblePlan?.length ? (
-          <div className="mt-3 grid gap-2">
-            {decision.userVisiblePlan.map((item, index) => (
-              <div key={`${item}-${index}`} className="flex items-center gap-2 rounded-2xl px-3 py-2 text-xs" style={{ background: "var(--oc-bg-soft)", color: "var(--oc-text-secondary)" }}>
-                <span className="flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: "var(--oc-accent)" }}>
-                  {index + 1}
-                </span>
-                {item}
+
+        {isRun && plan?.stages?.length ? (
+          <div className="mt-4 rounded-2xl border px-3 py-3 text-xs" style={{ borderColor: "var(--oc-border)", background: "var(--oc-bg-soft)", color: "var(--oc-text-secondary)" }}>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="font-semibold" style={{ color: "var(--oc-text-primary)" }}>{"\u6267\u884c\u94fe\u8def"}</div>
+                <div className="mt-1" style={{ color: "var(--oc-text-tertiary)" }}>{"\u68c0\u7d22\u5458 \u2192 \u5206\u6790\u5e08 \u2192 \u5199\u4f5c\u5458"}</div>
               </div>
-            ))}
+              <span className="rounded-full bg-white px-2.5 py-1 font-mono text-[11px]" style={{ color: "var(--oc-text-tertiary)" }}>{plan.templateId}</span>
+            </div>
+            <div className="grid gap-2">
+              {plan.stages.map((stage, index) => (
+                <div key={stage.stageId + "-" + stage.profile} className="flex flex-wrap items-center gap-2 rounded-xl bg-white/75 px-3 py-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: "var(--oc-accent)" }}>
+                    {index + 1}
+                  </span>
+                  <span className="font-semibold" style={{ color: "var(--oc-text-primary)" }}>{harnessRoleLabel(stage.role)}</span>
+                  <span>{harnessRoleDescription(stage.role)}</span>
+                  <span className="font-mono" style={{ color: "var(--oc-text-tertiary)" }}>{stage.profile}</span>
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
       </div>
@@ -1177,20 +1285,21 @@ function RouterDecisionCard({ routing, decision }: { routing: boolean; decision:
 }
 
 function RunningStageCard({ stage, index }: { stage: TaskTemplate["stages"][number]; index: number }) {
-  const steps = PERSONA_STEPS[stage.personaId] || ["理解任务", "执行分析", "整理结果"];
+  const displayPersona = displayPersonaId(stage.personaId);
+  const steps = PERSONA_STEPS[displayPersona] || ["理解任务", "执行分析", "整理结果"];
   const isFirst = index === 0;
   return (
     <div className="relative flex gap-4">
       <div className="flex flex-col items-center">
         <div className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold text-white" style={{ background: isFirst ? "var(--oc-accent)" : "#475569" }}>
-          {personaInitial(stage.personaId)}
+          {personaInitial(displayPersona)}
         </div>
         <div className="mt-2 h-full min-h-14 w-px" style={{ background: "var(--oc-border)" }} />
       </div>
       <div className="mb-4 flex-1 rounded-3xl border p-4" style={{ borderColor: "var(--oc-border)", background: "var(--oc-card)" }}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold">{personaLabel(stage)}</div>
+            <div className="text-sm font-semibold">{personaLabel({ personaId: displayPersona })}</div>
             <div className="mt-1 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
               {stage.displayName}
             </div>
@@ -1292,6 +1401,7 @@ function SourceResearchSummaryCard({ metadata, onOpenDetails }: { metadata?: Rec
   const sources = asArray(sourceResearch.sources);
   const discarded = asArray(sourceResearch.discardedSources);
   const summary = sourceResearch.evidenceSummary || {};
+  const missingInfo = asArray(sourceResearch.missingInformation).map((item) => String(item)).filter(Boolean);
   const normalized = plan.normalizedQuery?.canonicalQuery || sourceResearch?.normalizedQuery?.canonicalQuery;
   const planner = plan.planner || {};
   const plannerLabel = planner.mode === "lingxia-llm"
@@ -1347,9 +1457,269 @@ function SourceResearchSummaryCard({ metadata, onOpenDetails }: { metadata?: Rec
             ))}
           </div>
         ) : null}
+        {missingInfo.length ? (
+          <div className="rounded-xl border px-3 py-2" style={{ borderColor: "rgba(180,83,9,0.24)", background: "rgba(245,158,11,0.08)", color: "#92400e" }}>
+            <div className="font-medium">{"\u8bc1\u636e\u7f3a\u53e3"}</div>
+            <ul className="mt-1 list-disc space-y-1 pl-4">
+              {missingInfo.slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        ) : null}
         {queries.length ? <div style={{ color: "var(--oc-text-tertiary)" }}>已规划 {queries.length} 条检索；完整 query、来源分层和过滤原因请在右侧详情查看。</div> : null}
       </div>
     </div>
+  );
+}
+
+function countSchemaItems(payload: any) {
+  if (!payload || typeof payload !== "object") return 0;
+  if (Array.isArray(payload.facts)) return payload.facts.length;
+  if (Array.isArray(payload.items)) return payload.items.length;
+  if (Array.isArray(payload.news_items)) return payload.news_items.length;
+  return 0;
+}
+
+function HarnessStageSummaryCard({ metadata }: { metadata?: Record<string, unknown> }) {
+  if (!metadata?.remoteHarness) return null;
+  const schemaErrors = asArray(metadata.schemaErrors).map((item) => String(item)).filter(Boolean);
+  const schemaPayload = metadata.schemaPayload as any;
+  const missing = asArray(schemaPayload?.missing_information).map((item) => String(item)).filter(Boolean);
+  const skillRefs = asArray(metadata.skillRefs).map((item) => String(item)).filter(Boolean);
+  const providers = asArray(metadata.searchProviders).map((item) => String(item)).filter(Boolean);
+  const attemptedProviders = asArray(metadata.searchProvidersAttempted).map((item) => String(item)).filter(Boolean);
+  const searchErrors = asArray(metadata.searchErrors).map((item) => String(item)).filter(Boolean);
+  const searchResultCount = typeof metadata.searchResultCount === "number" ? metadata.searchResultCount : 0;
+  const permissionPolicy = (metadata.permissionPolicy || {}) as any;
+  const allowedTools = asArray(permissionPolicy.allowedTools).map((item) => String(item)).filter(Boolean);
+  const allowedMcpServers = asArray(permissionPolicy.allowedMcpServers).map((item) => String(item)).filter(Boolean);
+  const policyWarnings = asArray(permissionPolicy.warnings).map((item) => String(item)).filter(Boolean);
+  const policyErrors = asArray(permissionPolicy.errors).map((item) => String(item)).filter(Boolean);
+  const hasSchema = Boolean(metadata.schemaRef);
+  const schemaPassed = hasSchema && schemaErrors.length === 0;
+  const itemCount = countSchemaItems(schemaPayload);
+  const writeAllowed = Boolean(permissionPolicy.writeAllowed);
+  const searchAllowed = Boolean(permissionPolicy.externalSearchAllowed);
+  const artifactType = typeof metadata.artifactType === "string" ? metadata.artifactType : "";
+
+  if (!hasSchema && !providers.length && !attemptedProviders.length && !skillRefs.length && !allowedTools.length && !allowedMcpServers.length) return null;
+
+  return (
+    <div className="mt-4 rounded-2xl border px-4 py-3" style={{ borderColor: "var(--oc-border)", background: "var(--oc-bg-soft)" }}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold" style={{ color: "var(--oc-text-primary)" }}>{"\u53d7\u63a7\u6267\u884c"}</div>
+          <div className="mt-1 text-[11px]" style={{ color: "var(--oc-text-tertiary)" }}>
+            {searchAllowed ? "\u68c0\u7d22\u5458\u53ef\u641c\u7d22\u516c\u5f00\u6570\u636e" : "\u672c\u9636\u6bb5\u4e0d\u76f4\u63a5\u5916\u641c"}{" \u00b7 "}{writeAllowed ? "\u5141\u8bb8\u5199\u5165\u4ea7\u7269" : "\u7981\u6b62\u5199\u5165"}
+          </div>
+        </div>
+        {hasSchema ? (
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium"
+            style={{
+              background: schemaPassed ? "rgba(22,163,74,0.10)" : "rgba(220,38,38,0.10)",
+              color: schemaPassed ? "#15803d" : "#b91c1c",
+            }}
+          >
+            {schemaPassed ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
+            {schemaPassed ? "\u7ed3\u6784\u5316\u6821\u9a8c\u901a\u8fc7" : "\u7ed3\u6784\u5316\u6821\u9a8c\u5f02\u5e38"}
+          </span>
+        ) : null}
+        {artifactType ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] font-medium" style={{ color: "var(--oc-text-secondary)" }}>
+            {"\u4ea7\u7269 " + artifactType.toUpperCase()}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3" style={{ color: "var(--oc-text-secondary)" }}>
+        <div className="rounded-xl bg-white/70 px-3 py-2">
+          {"\u641c\u7d22\u6765\u6e90 " + searchResultCount}
+          {providers.length ? <span className="ml-1" style={{ color: "var(--oc-text-tertiary)" }}>{"\u00b7 "}{providers.join(" / ")}</span> : null}
+        </div>
+        <div className="rounded-xl bg-white/70 px-3 py-2">{"\u7ed3\u6784\u5316\u6761\u76ee " + itemCount}</div>
+        <div className="rounded-xl bg-white/70 px-3 py-2">{"\u7f3a\u5931\u4fe1\u606f " + missing.length}</div>
+        <div className="rounded-xl bg-white/70 px-3 py-2">{"\u5199\u5165\u6743\u9650 " + (writeAllowed ? "\u5141\u8bb8" : "\u7981\u6b62")}</div>
+        <div className="rounded-xl bg-white/70 px-3 py-2 sm:col-span-2">{"\u5de5\u5177 " + (allowedTools.length ? allowedTools.join(" / ") : "\u672a\u58f0\u660e")}</div>
+      </div>
+
+      {skillRefs.length || allowedMcpServers.length ? (
+        <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]" style={{ color: "var(--oc-text-secondary)" }}>
+          {skillRefs.map((skill) => <span key={skill} className="rounded-full bg-white/70 px-2.5 py-1">skill: {skill}</span>)}
+          {allowedMcpServers.map((server) => <span key={server} className="rounded-full bg-white/70 px-2.5 py-1">mcp: {server}</span>)}
+        </div>
+      ) : null}
+
+      {schemaErrors.length || searchErrors.length || missing.length || policyWarnings.length || policyErrors.length ? (
+        <details className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs" style={{ color: "var(--oc-text-secondary)" }}>
+          <summary className="cursor-pointer select-none font-medium" style={{ color: "var(--oc-text-primary)" }}>{"\u67e5\u770b\u6821\u9a8c\u4e0e\u7f3a\u5931\u4fe1\u606f"}</summary>
+          <div className="mt-2 space-y-1 leading-5">
+            {schemaErrors.map((item) => <div key={"schema-" + item}>schema: {item}</div>)}
+            {searchErrors.map((item) => <div key={"search-" + item}>search: {item}</div>)}
+            {missing.map((item) => <div key={"missing-" + item}>missing: {item}</div>)}
+            {policyWarnings.map((item) => <div key={"policy-warning-" + item}>policy warning: {item}</div>)}
+            {policyErrors.map((item) => <div key={"policy-error-" + item}>policy error: {item}</div>)}
+          </div>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function StageOutputSummaryCard({ role, text, metadata }: { role: string; text: string; metadata?: Record<string, unknown> }) {
+  const mode = stageOutputMode(role);
+  if (mode !== "evidence" && mode !== "analysis") return null;
+
+  const schemaPayload = metadata?.schemaPayload as any;
+  const parsed = parseJsonObject(text);
+  const providers = asArray(metadata?.searchProviders).map((item) => String(item)).filter(Boolean);
+  const attemptedProviders = asArray(metadata?.searchProvidersAttempted).map((item) => String(item)).filter(Boolean);
+  const providerRows = providers.length ? providers : attemptedProviders;
+  const missing = stringList(schemaPayload?.missing_information || parsed?.missing_information, 3);
+  const evidenceRows = asArray(schemaPayload?.facts || schemaPayload?.items || schemaPayload?.news_items)
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const object = item as Record<string, unknown>;
+      return {
+        claim: String(object.claim || object.title || object.summary || "").trim(),
+        source: String(object.source || object.publisher || object.url || "").trim(),
+        confidence: String(object.confidence || object.sourceQuality || "").trim(),
+      };
+    })
+    .filter((item): item is { claim: string; source: string; confidence: string } => Boolean(item?.claim))
+    .slice(0, 3);
+
+  const findingRows = stringList(
+    parsed?.core_findings ||
+    parsed?.findings ||
+    parsed?.key_findings ||
+    parsed?.analysis_points ||
+    parsed?.writer_outline,
+    3
+  );
+  const riskRows = stringList(parsed?.risks || parsed?.risk_flags || parsed?.uncertainties || parsed?.missing_information, 3);
+  const fallbackLines = text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[-*\d.\s]+/, "").trim())
+    .filter((line) => line && !line.startsWith("{") && !line.endsWith("}"))
+    .slice(0, 3);
+
+  const title = mode === "evidence" ? "证据包摘要" : "分析摘要";
+  const detailTitle = mode === "evidence" ? "查看证据包" : "查看分析草稿";
+  const rows = mode === "evidence" ? evidenceRows.map((item) => item.claim) : (findingRows.length ? findingRows : fallbackLines);
+  const rawText = stripCodeFence(text);
+
+  return (
+    <div className="mt-4 rounded-2xl border px-4 py-3" style={{ borderColor: "var(--oc-border)", background: "var(--oc-bg-soft)" }}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold" style={{ color: "var(--oc-text-primary)" }}>{title}</div>
+          <div className="mt-1 text-[11px]" style={{ color: "var(--oc-text-tertiary)" }}>
+            {mode === "evidence"
+              ? `结构化证据 ${countSchemaItems(schemaPayload)} 条${providerRows.length ? ` · ${providerRows.join(" / ")}` : ""}`
+              : `核心判断 ${rows.length} 条 · 风险/缺失 ${riskRows.length + missing.length} 条`}
+          </div>
+        </div>
+        <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium" style={{ color: "var(--oc-text-secondary)" }}>
+          {mode === "evidence" ? "Reader" : "Analyst"}
+        </span>
+      </div>
+
+      {rows.length ? (
+        <div className="mt-3 space-y-2">
+          {rows.map((item, index) => (
+            <div key={`${item}-${index}`} className="rounded-xl bg-white/75 px-3 py-2 text-xs leading-5" style={{ color: "var(--oc-text-secondary)" }}>
+              <span className="mr-2 font-mono text-[10px]" style={{ color: "var(--oc-text-tertiary)" }}>{String(index + 1).padStart(2, "0")}</span>
+              {item}
+              {mode === "evidence" && evidenceRows[index]?.source ? (
+                <span className="ml-2" style={{ color: "var(--oc-text-tertiary)" }}>· {evidenceRows[index].source}</span>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-xl bg-white/75 px-3 py-2 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
+          已完成本阶段，详细输出已折叠保留。
+        </div>
+      )}
+
+      {riskRows.length || missing.length ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {[...riskRows, ...missing].slice(0, 4).map((item) => (
+            <span key={item} className="rounded-full px-2.5 py-1 text-[11px]" style={{ background: "rgba(245,158,11,0.10)", color: "#92400e" }}>
+              {item}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {rawText ? (
+        <details className="mt-3 rounded-xl bg-white/75 px-3 py-2 text-xs" style={{ color: "var(--oc-text-secondary)" }}>
+          <summary className="cursor-pointer select-none font-medium" style={{ color: "var(--oc-text-primary)" }}>{detailTitle}</summary>
+          <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-[11px] leading-5" style={{ background: "var(--oc-card)", color: "var(--oc-text-secondary)" }}>
+            {rawText}
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function ExecutionPlanBar({ selected, decision, liveStages, run }: { selected: TaskTemplate | null; decision: RouterDecision | null; liveStages: LiveStageState[]; run: TaskRun | null }) {
+  const planStages = decision?.harnessPlan?.stages?.length
+    ? decision.harnessPlan.stages.map((stage) => ({
+      key: stage.stageId,
+      label: workflowStepLabel(stage.role.toLowerCase()),
+      role: stage.role,
+      profile: stage.profile,
+    }))
+    : selected?.stages.map((stage) => ({
+      key: stage.id,
+      label: workflowStepLabel(displayStageRole(stage.personaId, stage.agentDefinitionId)),
+      role: personaShortLabel(stage.personaId).split("·")[0].trim(),
+      profile: stage.agentDefinitionId,
+    })) || [];
+
+  if (!planStages.length) return null;
+
+  const statusByStage = new Map<string, string>();
+  liveStages.forEach((stage) => statusByStage.set(stage.stageId, stage.status));
+  run?.stages?.forEach((stage) => statusByStage.set(stage.stageId, stage.status === "success" ? "success" : stage.status));
+
+  return (
+    <section className="mt-6 rounded-[28px] border bg-white p-4 shadow-sm" style={{ borderColor: "var(--oc-border)" }}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold">执行计划</div>
+          <div className="mt-1 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
+            {"\u81ea\u52a8\u7f16\u6392\u4e09\u4e2a\u6267\u884c\u9636\u6bb5"}
+          </div>
+        </div>
+        <span className="rounded-full px-2.5 py-1 text-[11px] font-medium" style={{ background: "var(--oc-bg-soft)", color: "var(--oc-text-secondary)" }}>
+          {taskDisplayName(selected)}
+        </span>
+      </div>
+      <div className="grid gap-2 md:grid-cols-3">
+        {planStages.map((item, index) => {
+          const status = statusByStage.get(item.key) || "waiting";
+          const meta = statusMeta(status);
+          const Icon = meta.icon;
+          return (
+            <div key={item.key} className="rounded-2xl border px-3 py-3" style={{ borderColor: "var(--oc-border)", background: "var(--oc-bg-soft)" }}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: "var(--oc-accent)" }}>
+                  {index + 1}
+                </span>
+                <Icon size={14} style={{ color: meta.color }} className={status === "running" ? "animate-spin" : undefined} />
+              </div>
+              <div className="mt-3 text-sm font-semibold">{item.label}</div>
+              <div className="mt-1 truncate text-[11px]" style={{ color: "var(--oc-text-tertiary)" }}>
+                {item.role} · {item.profile}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -1357,10 +1727,15 @@ function LiveStageCard({ stage, onPreview, onOpenResearch }: { stage: LiveStageS
   const meta = statusMeta(stage.status);
   const Icon = meta.icon;
   const hasArtifacts = Boolean(stage.artifacts?.length);
-  const text = cleanText(stage.text);
+  const role = displayStageRole(stage.personaId, stage.agentDefinitionId, stage.runResult?.metadata);
+  const outputMode = stageOutputMode(role);
+  const rawText = stage.text || stage.runResult?.output || stage.runResult?.summary || "";
+  const text = cleanText(rawText);
   const hasSourceResearch = Boolean(stage.runResult?.metadata?.sourceResearch);
-  const preview = stage.status === "running" ? text.slice(0, 420) : "";
-  const finalText = stage.status !== "running" && !hasSourceResearch ? text : "";
+  const preview = stage.status === "running" && outputMode !== "evidence" && outputMode !== "analysis" ? text.slice(0, 420) : "";
+  const finalText = stage.status !== "running" && outputMode !== "evidence" && outputMode !== "analysis" && !hasSourceResearch ? text : "";
+  const defaultOpen = stage.status === "running" || outputMode === "final" || stage.status === "failed" || stage.status === "timeout";
+  const [expanded, setExpanded] = useState(defaultOpen);
   return (
     <div className="relative flex gap-4">
       <div className="flex flex-col items-center">
@@ -1368,75 +1743,84 @@ function LiveStageCard({ stage, onPreview, onOpenResearch }: { stage: LiveStageS
         <div className="mt-2 h-full min-h-14 w-px" style={{ background: "var(--oc-border)" }} />
       </div>
       <div className="mb-6 flex-1">
-        <div className="rounded-3xl border p-5" style={{ borderColor: "var(--oc-border)", background: "var(--oc-card)" }}>
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <details className="group rounded-3xl border p-5" style={{ borderColor: "var(--oc-border)", background: "var(--oc-card)" }} open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+          <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
             <div>
-              <div className="text-sm font-semibold">{personaLabel(stage)}</div>
+              <div className="text-sm font-semibold">{workflowStepLabel(role)} · {personaLabel(stage)}</div>
               <div className="mt-1 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
                 {stage.displayName || stage.agentDefinitionId} {stage.durationMs ? `· ${formatDuration(stage.durationMs)}` : ""}
               </div>
             </div>
-            <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs" style={{ background: "var(--oc-muted)", color: meta.color }}>
-              <Icon size={14} className={stage.status === "running" ? "animate-spin" : undefined} />
-              {meta.label}
-            </span>
-          </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs" style={{ background: "var(--oc-muted)", color: meta.color }}>
+                <Icon size={14} className={stage.status === "running" ? "animate-spin" : undefined} />
+                {meta.label}
+              </span>
+              <ChevronDown size={16} className="transition group-open:rotate-180" style={{ color: "var(--oc-text-tertiary)" }} />
+            </div>
+          </summary>
 
-          {stage.events.length ? (
-            <details className="mt-3 rounded-2xl border px-3 py-2" style={{ borderColor: "var(--oc-border)", background: "var(--oc-bg-soft)" }} open={stage.status === "running"}>
-              <summary className="cursor-pointer select-none text-xs font-medium" style={{ color: "var(--oc-text-secondary)" }}>
-                执行轨迹 · {stage.events.length} 条
-              </summary>
-              <div className="mt-2 space-y-1">
-              {stage.events.map((event, index) => (
-                <div key={`${event}-${index}`} className="flex items-start gap-2 rounded-xl bg-white/70 px-2.5 py-1.5 text-[11px] leading-5" style={{ color: "var(--oc-text-secondary)" }}>
-                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full" style={{ background: stage.status === "running" ? "var(--oc-accent)" : "var(--oc-text-tertiary)" }} />
-                  <span className="min-w-0">{event}</span>
+          <div className="mt-4">
+            {stage.events.length ? (
+              <details className="rounded-2xl border px-3 py-2" style={{ borderColor: "var(--oc-border)", background: "var(--oc-bg-soft)" }} open={stage.status === "running"}>
+                <summary className="cursor-pointer select-none text-xs font-medium" style={{ color: "var(--oc-text-secondary)" }}>
+                  执行轨迹 · {stage.events.length} 条
+                </summary>
+                <div className="mt-2 space-y-1">
+                {stage.events.map((event, index) => (
+                  <div key={`${event}-${index}`} className="flex items-start gap-2 rounded-xl bg-white/70 px-2.5 py-1.5 text-[11px] leading-5" style={{ color: "var(--oc-text-secondary)" }}>
+                    <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full" style={{ background: stage.status === "running" ? "var(--oc-accent)" : "var(--oc-text-tertiary)" }} />
+                    <span className="min-w-0">{event}</span>
+                  </div>
+                ))}
                 </div>
-              ))}
+              </details>
+            ) : (
+              <div className="rounded-2xl px-4 py-3 text-sm" style={{ background: "var(--oc-bg-soft)", color: "var(--oc-text-tertiary)" }}>
+                {stage.status === "waiting" ? "等待上游专员完成..." : "正在启动专员..."}
               </div>
-            </details>
-          ) : (
-            <div className="mt-4 rounded-2xl px-4 py-3 text-sm" style={{ background: "var(--oc-bg-soft)", color: "var(--oc-text-tertiary)" }}>
-              {stage.status === "waiting" ? "等待上游专员完成..." : "正在启动专员..."}
-            </div>
-          )}
+            )}
 
-          <SourceResearchSummaryCard
-            metadata={stage.runResult?.metadata}
-            onOpenDetails={(metadata) => onOpenResearch(personaLabel(stage), metadata)}
-          />
+            <SourceResearchSummaryCard
+              metadata={stage.runResult?.metadata}
+              onOpenDetails={(metadata) => onOpenResearch(personaLabel(stage), metadata)}
+            />
+            <HarnessStageSummaryCard metadata={stage.runResult?.metadata} />
+            {stage.status !== "running" ? (
+              <StageOutputSummaryCard role={role} text={rawText} metadata={stage.runResult?.metadata} />
+            ) : null}
 
-          {preview ? (
-            <div className="mt-4 rounded-2xl border px-4 py-3 text-sm leading-7" style={{ borderColor: "var(--oc-border)", color: "var(--oc-text-secondary)" }}>
-              <div className="whitespace-pre-wrap">{preview}</div>
-            </div>
-          ) : null}
+            {preview ? (
+              <div className="mt-4 rounded-2xl border px-4 py-3 text-sm leading-7" style={{ borderColor: "var(--oc-border)", color: "var(--oc-text-secondary)" }}>
+                <div className="whitespace-pre-wrap">{preview}</div>
+              </div>
+            ) : null}
 
-          {hasArtifacts && stage.status !== "running" ? (
-            <div className="mt-4 rounded-2xl border px-4 py-3 text-sm leading-6" style={{ borderColor: "var(--oc-border)", background: "var(--oc-bg-soft)", color: "var(--oc-text-secondary)" }}>
-              已生成交付文件。点击文件卡的「预览」会在右侧打开，过程区只保留执行轨迹，避免和最终产物重复。
-            </div>
-          ) : null}
+            {hasArtifacts && stage.status !== "running" ? (
+              <div className="mt-4 rounded-2xl border px-4 py-3 text-sm leading-6" style={{ borderColor: "var(--oc-border)", background: "var(--oc-bg-soft)", color: "var(--oc-text-secondary)" }}>
+                已生成交付文件。点击文件卡的「预览」会在右侧打开，过程区只保留执行轨迹，避免和最终产物重复。
+              </div>
+            ) : null}
 
-          {stage.artifacts?.length ? (
-            <div className="mt-3 grid gap-3">
-              {stage.artifacts.map((artifact) => (
-                <CompactArtifactCard key={artifact.id} artifact={artifact} onPreview={onPreview} />
-              ))}
-            </div>
-          ) : null}
+            {stage.artifacts?.length ? (
+              <div className="mt-3 grid gap-3">
+                {stage.artifacts.map((artifact) => (
+                  <CompactArtifactCard key={artifact.id} artifact={artifact} onPreview={onPreview} />
+                ))}
+              </div>
+            ) : null}
 
-          {stage.error ? (
-            <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">{stage.error}</div>
-          ) : null}
-        </div>
+            {stage.error ? (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">{stage.error}</div>
+            ) : null}
 
-        {finalText ? (
-          <article className="mt-6 max-w-none px-1 pb-2">
-            <MarkdownContent text={finalText} />
-          </article>
-        ) : null}
+            {finalText ? (
+              <article className="mt-6 max-w-none px-1 pb-2">
+                <MarkdownContent text={finalText} />
+              </article>
+            ) : null}
+          </div>
+        </details>
       </div>
     </div>
   );
@@ -1446,8 +1830,13 @@ function AgentMessageCard({ stage, artifacts, onPreview, onOpenResearch }: { sta
   const meta = statusMeta(stage.status);
   const Icon = meta.icon;
   const hasSourceResearch = Boolean(stage.runResult?.metadata?.sourceResearch);
-  const output = hasSourceResearch ? "" : cleanText(stage.runResult?.output || stage.runResult?.summary || "");
+  const role = displayStageRole(stage.personaId, stage.agentDefinitionId, stage.runResult?.metadata);
+  const outputMode = stageOutputMode(role);
+  const rawOutput = stage.runResult?.output || stage.runResult?.summary || "";
+  const output = hasSourceResearch || outputMode === "evidence" || outputMode === "analysis" ? "" : cleanText(rawOutput);
   const errorText = stage.runResult?.error?.detail || stage.runResult?.error?.code;
+  const defaultOpen = outputMode === "final" || stage.status !== "success";
+  const [expanded, setExpanded] = useState(defaultOpen);
 
   return (
     <div className="relative flex gap-4">
@@ -1456,57 +1845,64 @@ function AgentMessageCard({ stage, artifacts, onPreview, onOpenResearch }: { sta
         <div className="mt-2 h-full min-h-14 w-px" style={{ background: "var(--oc-border)" }} />
       </div>
       <div className="mb-6 flex-1">
-        <div className="rounded-3xl border p-5" style={{ borderColor: "var(--oc-border)", background: "var(--oc-card)" }}>
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <details className="group rounded-3xl border p-5" style={{ borderColor: "var(--oc-border)", background: "var(--oc-card)" }} open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+          <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
             <div>
-              <div className="text-sm font-semibold">{personaLabel(stage)}</div>
+              <div className="text-sm font-semibold">{workflowStepLabel(role)} · {personaLabel(stage)}</div>
               <div className="mt-1 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
                 {stage.agentDefinitionId} · {formatDuration(stage.durationMs)}
               </div>
             </div>
-            <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs" style={{ background: "var(--oc-muted)", color: meta.color }}>
-              <Icon size={14} className={stage.status === "success" ? "" : undefined} />
-              {meta.label}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs" style={{ background: "var(--oc-muted)", color: meta.color }}>
+                <Icon size={14} />
+                {meta.label}
+              </span>
+              <ChevronDown size={16} className="transition group-open:rotate-180" style={{ color: "var(--oc-text-tertiary)" }} />
+            </div>
+          </summary>
+
+          <div className="mt-4">
+            {!output && errorText ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">{errorText}</div>
+            ) : !output ? (
+              <div className="rounded-2xl px-4 py-3 text-sm" style={{ background: "var(--oc-bg-soft)", color: "var(--oc-text-tertiary)" }}>
+                这个专员没有返回文字说明，但可能已经生成了产物。
+              </div>
+            ) : null}
+
+            {stage.warnings?.length ? (
+              <div className="mt-3 space-y-2">
+                {stage.warnings.map((warning) => (
+                  <div key={warning} className="rounded-2xl border px-4 py-2 text-xs" style={{ borderColor: "rgba(180,83,9,0.28)", background: "rgba(245,158,11,0.08)", color: "#92400e" }}>
+                    {warning}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <SourceResearchSummaryCard
+              metadata={stage.runResult?.metadata}
+              onOpenDetails={(metadata) => onOpenResearch(personaLabel(stage), metadata)}
+            />
+            <HarnessStageSummaryCard metadata={stage.runResult?.metadata} />
+            <StageOutputSummaryCard role={role} text={rawOutput} metadata={stage.runResult?.metadata} />
+
+            {artifacts.length ? (
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {artifacts.map((artifact) => (
+                  <CompactArtifactCard key={artifact.id} artifact={artifact} onPreview={onPreview} />
+                ))}
+              </div>
+            ) : null}
+
+            {output ? (
+              <article className="mt-6 max-w-none px-1 pb-2">
+                <MarkdownContent text={output} />
+              </article>
+            ) : null}
           </div>
-
-          {!output && errorText ? (
-            <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">{errorText}</div>
-          ) : !output ? (
-            <div className="mt-4 rounded-2xl px-4 py-3 text-sm" style={{ background: "var(--oc-bg-soft)", color: "var(--oc-text-tertiary)" }}>
-              这个专员没有返回文字说明，但可能已经生成了产物。
-            </div>
-          ) : null}
-
-          {stage.warnings?.length ? (
-            <div className="mt-3 space-y-2">
-              {stage.warnings.map((warning) => (
-                <div key={warning} className="rounded-2xl border px-4 py-2 text-xs" style={{ borderColor: "rgba(180,83,9,0.28)", background: "rgba(245,158,11,0.08)", color: "#92400e" }}>
-                  {warning}
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          <SourceResearchSummaryCard
-            metadata={stage.runResult?.metadata}
-            onOpenDetails={(metadata) => onOpenResearch(personaLabel(stage), metadata)}
-          />
-
-          {artifacts.length ? (
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {artifacts.map((artifact) => (
-                <CompactArtifactCard key={artifact.id} artifact={artifact} onPreview={onPreview} />
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        {output ? (
-          <article className="mt-6 max-w-none px-1 pb-2">
-            <MarkdownContent text={output} />
-          </article>
-        ) : null}
+        </details>
       </div>
     </div>
   );
@@ -1533,9 +1929,7 @@ function TaskSelector({
   onChoose: (template: TaskTemplate) => void;
   onPreview: (artifact: Artifact) => void;
 }) {
-  const personaIds = Array.from(new Set(templates.flatMap((template) => template.stages.map((stage) => stage.personaId))));
   const [tasksOpen, setTasksOpen] = useState(true);
-  const [personasOpen, setPersonasOpen] = useState(true);
   return (
     <aside className="hidden w-72 shrink-0 border-r px-4 py-5 lg:block" style={{ borderColor: "var(--oc-border)", background: "var(--oc-bg-soft)" }}>
       <div className="mb-5 flex items-center gap-2 px-2">
@@ -1578,20 +1972,21 @@ function TaskSelector({
                     type="button"
                     disabled={running}
                     onClick={() => onChoose(template)}
-                    className="w-full rounded-2xl border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-70"
+                    className="relative w-full overflow-hidden rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70"
                     style={{
-                      borderColor: active ? "color-mix(in oklab, var(--oc-accent) 45%, var(--oc-border))" : "transparent",
-                      background: active ? "var(--oc-card)" : "transparent",
-                      boxShadow: active ? "0 12px 28px rgba(15,23,42,0.08)" : "none",
+                      borderColor: active ? "color-mix(in oklab, var(--oc-accent) 35%, var(--oc-border))" : "var(--oc-border)",
+                      background: "var(--oc-card)",
+                      boxShadow: active ? "0 12px 28px rgba(15,23,42,0.08)" : "0 8px 18px rgba(15,23,42,0.04)",
                     }}
                   >
+                    {active ? <span className="absolute bottom-3 left-0 top-3 w-1 rounded-r-full" style={{ background: "var(--oc-accent)" }} /> : null}
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: active ? "color-mix(in oklab, var(--oc-accent) 12%, transparent)" : "var(--oc-muted)", color: active ? "var(--oc-accent)" : "var(--oc-text-secondary)" }}>
                         <Icon size={18} />
                       </div>
                       <div className="min-w-0">
                         <div className="flex min-w-0 items-center gap-2">
-                          <div className="truncate text-sm font-medium">{template.displayName}</div>
+                          <div className="truncate text-sm font-medium">{taskDisplayName(template)}</div>
                           {active ? (
                             <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium" style={{ background: "color-mix(in oklab, var(--oc-accent) 12%, transparent)", color: "var(--oc-accent)" }}>
                               已选择
@@ -1602,7 +1997,7 @@ function TaskSelector({
                           预计 {formatDuration(template.estimatedDurationMs)}
                         </div>
                         <div className="mt-1 line-clamp-2 text-[11px] leading-5" style={{ color: "var(--oc-text-tertiary)" }}>
-                          {template.shortDescription}
+                          {taskDescription(template)}
                         </div>
                       </div>
                     </div>
@@ -1613,37 +2008,6 @@ function TaskSelector({
           )
         ) : null}
       </section>
-
-      {personaIds.length ? (
-        <section className="mt-6">
-          <button
-            type="button"
-            onClick={() => setPersonasOpen((open) => !open)}
-            className="mb-3 flex w-full items-center justify-between rounded-xl px-2 py-1.5 text-left text-xs font-medium uppercase tracking-[0.18em]"
-            style={{ color: "var(--oc-text-tertiary)" }}
-          >
-            <span>智能体专员</span>
-            <ChevronDown size={14} className={`transition ${personasOpen ? "rotate-0" : "-rotate-90"}`} />
-          </button>
-          {personasOpen ? (
-            <div className="space-y-2">
-              {personaIds.map((personaId) => (
-                <div key={personaId} className="rounded-2xl border p-3" style={{ borderColor: "var(--oc-border)", background: "var(--oc-card)" }}>
-                  <div className="flex items-start gap-3">
-                    <PersonaAvatar personaId={personaId} size="sm" />
-                    <div className="min-w-0">
-                      <div className="truncate text-xs font-semibold">{personaLabel({ personaId })}</div>
-                      <div className="mt-1 text-[11px] leading-5" style={{ color: "var(--oc-text-tertiary)" }}>
-                        {PERSONA_DESCRIPTIONS[personaId] || "参与任务执行的智能体专员。"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
 
     </aside>
   );
@@ -1823,7 +2187,7 @@ export default function TaskWorkbenchLab() {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ taskTemplateId: selected.id, prompt: finalPrompt }),
+        body: JSON.stringify({ taskTemplateId: selected.id, prompt: finalPrompt, harnessPlan: routerDecision?.harnessPlan }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -1884,21 +2248,31 @@ export default function TaskWorkbenchLab() {
       if (taskTemplateId !== selectedId) setSelectedId(taskTemplateId);
       const streamPrompt = decision.normalizedGoal || finalPrompt;
       setRunning(true);
-      setLiveStages(templateToRun.stages.map((stage) => ({
-        stageId: stage.id,
-        personaId: stage.personaId,
-        agentDefinitionId: stage.agentDefinitionId,
-        displayName: stage.displayName,
-        status: "waiting",
-        events: [],
-        text: "",
-      })));
+      setLiveStages(decision.harnessPlan?.stages?.length
+        ? decision.harnessPlan.stages.map((stage) => ({
+          stageId: stage.stageId,
+          personaId: stage.role.toLowerCase(),
+          agentDefinitionId: stage.profile,
+          displayName: `${harnessRoleLabel(stage.role)} · ${stage.profile}`,
+          status: "waiting" as const,
+          events: [],
+          text: "",
+        }))
+        : templateToRun.stages.map((stage) => ({
+          stageId: stage.id,
+          personaId: stage.personaId,
+          agentDefinitionId: stage.agentDefinitionId,
+          displayName: stage.displayName,
+          status: "waiting" as const,
+          events: [],
+          text: "",
+        })));
 
       const response = await fetch("/api/admin/task-workbench-lab/run-stream", {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ taskTemplateId, prompt: streamPrompt }),
+        body: JSON.stringify({ taskTemplateId, prompt: streamPrompt, harnessPlan: decision.harnessPlan }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -2057,16 +2431,11 @@ export default function TaskWorkbenchLab() {
     <div className="pointer-events-auto rounded-[18px] border bg-white/95 px-3 py-2 shadow-[0_18px_48px_rgba(15,23,42,0.14)] backdrop-blur-xl" style={{ borderColor: "var(--oc-border)" }}>
       {selected ? (
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl px-3 py-2" style={{ background: "var(--oc-bg-soft)" }}>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
-              <span className="rounded-full px-2 py-0.5 text-[11px]" style={{ background: "color-mix(in oklab, var(--oc-accent) 12%, transparent)", color: "var(--oc-accent)" }}>
-                已选择任务
-              </span>
-              <span className="truncate" style={{ color: "var(--oc-text-primary)" }}>{selected.displayName}</span>
-            </div>
-            <div className="mt-1 truncate text-[11px]" style={{ color: "var(--oc-text-tertiary)" }}>
-              {selected.stages.map((stage) => personaShortLabel(stage.personaId).split("·")[0].trim()).join(" → ")}
-            </div>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "color-mix(in oklab, var(--oc-accent) 12%, transparent)", color: "var(--oc-accent)" }}>
+              已选任务
+            </span>
+            <span className="truncate text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{taskDisplayName(selected)}</span>
           </div>
           <button
             type="button"
@@ -2103,6 +2472,11 @@ export default function TaskWorkbenchLab() {
           ref={textareaRef}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            if (prompt.trim() && !running && !routing) void runTaskStream();
+          }}
           rows={hasConversation ? 1 : 2}
           spellCheck={false}
           className="max-h-[256px] min-h-10 flex-1 resize-none border-0 bg-transparent px-1 py-2 text-sm leading-6 outline-none ring-0 focus:border-transparent focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
@@ -2172,7 +2546,12 @@ export default function TaskWorkbenchLab() {
                     <div className="text-xs font-medium uppercase tracking-[0.22em]" style={{ color: "var(--oc-text-tertiary)" }}>
                       Task Workbench
                     </div>
-                    <h1 className="mt-1 text-xl font-semibold">{selected?.displayName || "任务执行"}</h1>
+                    <h1 className="mt-1 text-xl font-semibold">{taskDisplayName(selected)}</h1>
+                    {submittedPrompt ? (
+                      <div className="mt-1 max-w-3xl truncate text-sm" style={{ color: "var(--oc-text-tertiary)" }}>
+                        任务目标：{submittedPrompt}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {selected?.outputPolicy.disclaimers.map((item) => (
@@ -2185,12 +2564,15 @@ export default function TaskWorkbenchLab() {
 
                 {submittedPrompt ? <UserTaskCard prompt={submittedPrompt} attachments={submittedAttachments} /> : null}
                 <RouterDecisionCard routing={routing} decision={routerDecision} />
+                {running || liveStages.length || run ? (
+                  <ExecutionPlanBar selected={selected} decision={routerDecision} liveStages={liveStages} run={run} />
+                ) : null}
 
                 {running || liveStages.length || run ? (
                   <section className="mt-8 space-y-1">
                     <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
                       <Sparkles size={16} style={{ color: "var(--oc-accent)" }} />
-                      Agent 执行过程
+                      任务执行过程
                     </div>
 
                     {liveStages.length

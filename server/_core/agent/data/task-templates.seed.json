@@ -1,0 +1,250 @@
+{
+  "templates": [
+    {
+      "id": "market_research_brief",
+      "version": 2,
+      "status": "active",
+      "displayName": "\u91d1\u878d\u5e02\u573a\u7814\u7a76\u7b80\u62a5",
+      "shortDescription": "\u56f4\u7ed5\u884c\u4e1a\u3001\u5e02\u573a\u6216\u516c\u53f8\u4e3b\u9898\uff0c\u81ea\u52a8\u6536\u96c6\u516c\u5f00\u8d44\u6599\u3001\u63d0\u70bc\u5173\u952e\u8d8b\u52bf\uff0c\u5e76\u751f\u6210\u7ed3\u6784\u5316\u7814\u7a76\u7b80\u62a5\u3002",
+      "category": "stock_research",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 600000,
+      "stages": [
+        {
+          "id": "sector_reader",
+          "stageType": "agent",
+          "displayName": "\u68c0\u7d22\u5458\u6536\u96c6\u5e02\u573a\u8bc1\u636e",
+          "personaId": "reader",
+          "agentDefinitionId": "market-sector-reader",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": [
+            "markdown_report"
+          ],
+          "timeoutMs": 180000,
+          "onFailure": "stop"
+        },
+        {
+          "id": "comps_analyst",
+          "stageType": "agent",
+          "displayName": "\u5206\u6790\u5e08\u5f62\u6210\u53ef\u6bd4\u4e0e\u5224\u65ad",
+          "personaId": "analyst",
+          "agentDefinitionId": "market-comps-spreader",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": [
+              "sector_reader"
+            ]
+          },
+          "expectedOutputs": [
+            "markdown_report"
+          ],
+          "timeoutMs": 180000,
+          "onFailure": "retry_once_then_stop"
+        },
+        {
+          "id": "note_writer",
+          "stageType": "agent",
+          "displayName": "\u5199\u4f5c\u5458\u751f\u6210\u7814\u7a76\u7b80\u62a5",
+          "personaId": "writer",
+          "agentDefinitionId": "market-note-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": [
+              "sector_reader",
+              "comps_analyst"
+            ]
+          },
+          "expectedOutputs": [
+            "markdown_report"
+          ],
+          "timeoutMs": 240000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": [
+          "markdown_report",
+          "file_download"
+        ],
+        "disclaimers": [
+          "ai_generated_label",
+          "investment_advisory",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-08T00:00:00.000Z",
+      "updatedAt": "2026-05-08T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "meeting_prep_agent",
+      "version": 1,
+      "status": "active",
+      "displayName": "\u5ba2\u6237\u4f1a\u8bae\u51c6\u5907 Agent",
+      "shortDescription": "\u56f4\u7ed5\u5ba2\u6237\u62dc\u8bbf\u6216\u4f1a\u8bae\u4e3b\u9898\uff0c\u6574\u7406\u5ba2\u6237\u80cc\u666f\u3001\u8fd1\u671f\u52a8\u6001\u3001\u6c9f\u901a\u8bae\u9898\u548c\u5efa\u8bae\u95ee\u9898\u6e05\u5355\u3002",
+      "category": "general",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 600000,
+      "stages": [
+        {
+          "id": "news_reader",
+          "stageType": "agent",
+          "displayName": "\u68c0\u7d22\u5458\u6536\u96c6\u5ba2\u6237\u4e0e\u884c\u4e1a\u4fe1\u606f",
+          "personaId": "reader",
+          "agentDefinitionId": "meeting-news-reader",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": [
+            "markdown_report"
+          ],
+          "timeoutMs": 180000,
+          "onFailure": "stop"
+        },
+        {
+          "id": "profile_analyst",
+          "stageType": "agent",
+          "displayName": "\u5206\u6790\u5e08\u68b3\u7406\u5ba2\u6237\u753b\u50cf\u4e0e\u8bae\u9898",
+          "personaId": "analyst",
+          "agentDefinitionId": "meeting-profiler",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": [
+              "news_reader"
+            ]
+          },
+          "expectedOutputs": [
+            "markdown_report"
+          ],
+          "timeoutMs": 180000,
+          "onFailure": "retry_once_then_stop"
+        },
+        {
+          "id": "pack_writer",
+          "stageType": "agent",
+          "displayName": "\u5199\u4f5c\u5458\u751f\u6210\u4f1a\u524d\u51c6\u5907\u5305",
+          "personaId": "writer",
+          "agentDefinitionId": "meeting-pack-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": [
+              "news_reader",
+              "profile_analyst"
+            ]
+          },
+          "expectedOutputs": [
+            "markdown_report"
+          ],
+          "timeoutMs": 240000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": [
+          "markdown_report",
+          "file_download"
+        ],
+        "disclaimers": [
+          "ai_generated_label",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-08T00:00:00.000Z",
+      "updatedAt": "2026-05-08T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "ai_topic_insight_ppt",
+      "version": 1,
+      "status": "active",
+      "displayName": "\u70ed\u70b9\u8bdd\u9898 PPT \u751f\u6210",
+      "shortDescription": "\u8f93\u5165 AI / \u91d1\u878d\u79d1\u6280\u70ed\u70b9\u4e3b\u9898\uff0c\u81ea\u52a8\u68c0\u7d22\u6700\u65b0\u8d44\u6599\u3001\u63d0\u70bc\u903b\u8f91\u7ebf\uff0c\u5e76\u751f\u6210\u53ef\u9884\u89c8\u3001\u53ef\u4e0b\u8f7d\u7684 PPT\u3002",
+      "category": "presentation",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 600000,
+      "stages": [
+        {
+          "id": "source_research",
+          "stageType": "source_research",
+          "displayName": "\u68c0\u7d22\u5458\u68c0\u7d22\u6700\u65b0\u8d44\u6599",
+          "personaId": "reader",
+          "agentDefinitionId": "wenzhou-source-research",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": [
+            "markdown_report"
+          ],
+          "timeoutMs": 90000,
+          "onFailure": "stop"
+        },
+        {
+          "id": "research_review",
+          "displayName": "\u5206\u6790\u5e08\u63d0\u70bc\u89c2\u70b9\u4e0e\u5927\u7eb2",
+          "personaId": "analyst",
+          "agentDefinitionId": "task-my-wealth",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": [
+              "source_research"
+            ]
+          },
+          "expectedOutputs": [
+            "markdown_report"
+          ],
+          "timeoutMs": 180000,
+          "onFailure": "retry_once_then_stop"
+        },
+        {
+          "id": "ppt_generation",
+          "displayName": "\u5199\u4f5c\u5458\u751f\u6210\u6f14\u793a\u6587\u7a3f",
+          "personaId": "writer",
+          "agentDefinitionId": "task-ppt",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": [
+              "research_review"
+            ]
+          },
+          "expectedOutputs": [
+            "ppt_preview",
+            "markdown_report"
+          ],
+          "timeoutMs": 360000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": [
+          "ppt_preview",
+          "markdown_report",
+          "file_download"
+        ],
+        "disclaimers": [
+          "ai_generated_label",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-04T14:40:00.000Z",
+      "updatedAt": "2026-05-08T00:00:00.000Z",
+      "updatedBy": 2
+    }
+  ]
+}

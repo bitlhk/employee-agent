@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createTaskWorkbenchLabHandlers } from "../../../_routes/task-workbench-lab";
 import type { AgentResult } from "../../../../shared/types/agent";
 import type { TaskRunResult, TaskTemplate, TaskTemplateRunner } from "../../../../shared/types/task-template";
@@ -138,9 +138,10 @@ describe("task workbench lab route", () => {
     expect(res.body.source).toBe("task-workbench-lab");
     expect(res.body.templates.map((template: any) => template.id)).toEqual([
       "market_research_brief",
+      "meeting_prep_agent",
       "ai_topic_insight_ppt",
     ]);
-    expect(loadedIds).toEqual(["market_research_brief", "ai_topic_insight_ppt"]);
+    expect(loadedIds).toEqual(["market_research_brief", "meeting_prep_agent", "ai_topic_insight_ppt"]);
   });
 
   it("runs a task and redacts sensitive fields", async () => {
@@ -217,5 +218,78 @@ describe("task workbench lab route", () => {
 
     expect(res.statusCode).toBe(404);
     expect(res.body.error).toBe("not_found");
+  });
+
+  it("uses the remote harness executor when a harness plan is present and enabled", async () => {
+    const res = mockResponse();
+    const oldEnabled = process.env.TASK_WORKBENCH_HARNESS_EXECUTOR;
+    const oldEndpoint = process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT;
+    const oldToken = process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_TOKEN;
+    process.env.TASK_WORKBENCH_HARNESS_EXECUTOR = "true";
+    process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT = "http://127.0.0.1:18670";
+    process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_TOKEN = "test-token";
+    let localRunnerCalled = false;
+    const fetchMock = vi.spyOn(globalThis, "fetch" as any).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: "completed",
+        stages: [{
+          stageId: "sector_reader",
+          profile: "market-sector-reader",
+          role: "Reader",
+          status: "success",
+          runId: "run-1",
+          durationMs: 12,
+          output: "remote ok",
+          skillRefs: ["sector-overview"],
+        }],
+        finalOutput: "remote ok",
+      }),
+    } as any);
+    const handlers = createTaskWorkbenchLabHandlers({
+      enabled: () => true,
+      authenticateUser: async () => ({ id: 2, role: "admin" }),
+      createRunner: () => ({
+        loadTemplate: async () => ({ ok: true, value: baseTemplate }),
+        runTask: async () => {
+          localRunnerCalled = true;
+          return { ok: true, value: baseRun };
+        },
+      }),
+    });
+
+    await handlers.runTask({
+      body: {
+        taskTemplateId: "market_research_brief",
+        prompt: "market update",
+        harnessPlan: {
+          source: "financial_harness",
+          runId: "harness-run-1",
+          templateId: "market-researcher",
+          stages: [{
+            stageId: "sector_reader",
+            role: "Reader",
+            profile: "market-sector-reader",
+          }],
+        },
+      },
+    } as any, res as any);
+
+    expect(res.statusCode).toBe(200);
+    expect(localRunnerCalled).toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:18670/v1/harness/execute",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ authorization: "Bearer test-token" }),
+      }),
+    );
+    expect(res.body.taskRun.metadata.remoteHarness.enabled).toBe(true);
+    expect(res.body.taskRun.stages[0].runResult.output).toBe("remote ok");
+
+    fetchMock.mockRestore();
+    process.env.TASK_WORKBENCH_HARNESS_EXECUTOR = oldEnabled;
+    process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT = oldEndpoint;
+    process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_TOKEN = oldToken;
   });
 });

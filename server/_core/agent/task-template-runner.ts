@@ -337,11 +337,12 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
   async runTask(input: {
     template: TaskTemplate;
     userInput: string;
-    context: {
-      userId: number;
-      adoptId: string;
-      spaceId?: number | null;
-    };
+      context: {
+        userId: number;
+        adoptId: string;
+        spaceId?: number | null;
+        metadata?: Record<string, unknown>;
+      };
   }): Promise<AgentResult<TaskRunResult>> {
     const parsed = taskTemplateSchema.safeParse(input.template);
     if (!parsed.success) {
@@ -414,6 +415,7 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
         taskTemplateVersion: template.version,
         rawUserPrompt: input.userInput,
         appliedCorrections,
+        ...(input.context.metadata || {}),
       },
       runtimeSnapshotJson: snapshot,
       startedAt,
@@ -796,6 +798,7 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
   }
 
   private buildLlmSynthesisSystemPrompt(stage: TaskStage, template: TaskTemplate, citationIds: string[]): string {
+    const role = this.stageRole(stage);
     const citationRule = citationIds.length
       ? `可引用来源 ID：${citationIds.join(", ")}。所有事实判断、数据、公司观点和行业趋势必须在句末标注至少一个 [src_NNN]。`
       : "当前没有可用来源 ID。必须明确说明证据不足，不要编造事实、数据、公司观点或来源。";
@@ -806,11 +809,11 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
       "不得给出买入、卖出、持有、目标价、收益承诺、仓位比例或替代持牌流程的建议。",
       citationRule,
     ];
-    if (stage.id === "market_analysis") {
+    if (role === "analyst") {
       return [
         ...base,
         "",
-        "你的角色是 reader/analyst：把来源证据包整理成可审阅的市场研究判断。",
+        "你的角色是分析师：把来源证据包整理成可审阅的市场研究判断。",
         "输出 Markdown，固定包含：",
         "## 研究结论",
         "## 关键事实",
@@ -820,11 +823,11 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
         "每条关键事实必须有引用 ID；没有引用的判断只能放进不确定性。",
       ].join("\n");
     }
-    if (stage.id === "brief_writer") {
+    if (role === "writer") {
       return [
         ...base,
         "",
-        "你的角色是 writer：把上游分析写成一份可直接放入企业汇报材料的金融市场研究简报。",
+        "你的角色是写作员：把上游分析写成一份可直接放入企业汇报材料的金融市场研究简报。",
         "输出 Markdown，固定包含：",
         "# 金融市场研究简报",
         "## 一页摘要",
@@ -836,11 +839,11 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
         "写作要求：观点先行，少写空泛背景；每个小节 3-5 条 bullet；资料来源列出引用 ID 和来源标题/URL。",
       ].join("\n");
     }
-    if (stage.id === "risk_review") {
+    if (role === "reviewer") {
       return [
         ...base,
         "",
-        "你的角色是 reviewer/auditor：审阅上游简报是否可追溯、是否越过金融合规边界、是否存在无来源强结论。",
+        "你的角色是审阅员：审阅上游简报是否可追溯、是否越过金融合规边界、是否存在无来源强结论。",
         "输出 Markdown，固定包含：",
         "## 审阅结论",
         "## 通过项",
@@ -874,24 +877,38 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
   private validateLlmSynthesisOutput(stage: TaskStage, output: string, citationIds: string[]): string[] {
     const warnings: string[] = [];
     if (!output.trim()) return ["empty_llm_synthesis_output"];
-    const headings = stage.id === "market_analysis"
+    const role = this.stageRole(stage);
+    const headings = role === "analyst"
       ? ["## 研究结论", "## 关键事实", "## 不确定性"]
-      : stage.id === "brief_writer"
+      : role === "writer"
         ? ["# 金融市场研究简报", "## 一页摘要", "## 资料来源"]
-        : stage.id === "risk_review"
+        : role === "reviewer"
           ? ["## 审阅结论", "## 需人工复核", "## 合规边界提醒"]
           : [];
     for (const heading of headings) {
       if (!output.includes(heading)) warnings.push(`missing_required_heading: ${heading}`);
     }
-    if (citationIds.length && (stage.id === "market_analysis" || stage.id === "brief_writer")) {
+    if (citationIds.length && (role === "analyst" || role === "writer")) {
       const citedIds = new Set([...output.matchAll(/\[?(src_\d{3})\]?/gi)].map((match) => match[1].toLowerCase()));
       if (citedIds.size === 0) warnings.push(`missing_citation_ids: ${stage.id} output must cite sources as [src_NNN]`);
     }
-    if (stage.id !== "risk_review" && this.containsActionableFinancialAdvice(output)) {
+    if (role !== "reviewer" && this.containsActionableFinancialAdvice(output)) {
       warnings.push(`financial_advice_boundary_violation: ${stage.id} output contains prohibited advice wording`);
     }
     return warnings;
+  }
+
+  private stageRole(stage: TaskStage): "analyst" | "writer" | "reviewer" | "other" {
+    if (stage.personaId === "analyst" || stage.id === "market_analysis" || stage.id === "comps_analyst" || stage.id === "profile_analyst") {
+      return "analyst";
+    }
+    if (stage.personaId === "writer" || stage.id === "brief_writer" || stage.id === "note_writer" || stage.id === "pack_writer") {
+      return "writer";
+    }
+    if (stage.personaId === "reviewer" || stage.id === "risk_review" || stage.id === "risk_reviewer" || stage.id === "meeting_reviewer") {
+      return "reviewer";
+    }
+    return "other";
   }
 
   private containsActionableFinancialAdvice(output: string): boolean {
@@ -908,7 +925,7 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
 
   private formatEvidencePackage(evidencePackage: InsightEvidencePackage): string {
     const lines = [
-      `# 闻舟来源证据包`,
+      `# 检索员来源证据包`,
       "",
       `主题：${evidencePackage.topic}`,
       `生成时间：${evidencePackage.generatedAt}`,
@@ -1013,7 +1030,7 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
     const blueprintPages = extractDeckBlueprintPages(value);
     const requestedSlideCount = blueprintPages.length;
     const countLine = requestedSlideCount > 0
-      ? `- 检测到墨衡建议页结构共 ${requestedSlideCount} 页；最终 PPT 必须也是 ${requestedSlideCount} 页。`
+      ? `- 检测到分析师建议页结构共 ${requestedSlideCount} 页；最终 PPT 必须也是 ${requestedSlideCount} 页。`
       : "- 如果上游包含「## 建议页结构」或「第 X 页」列表，必须按该列表作为硬性蓝图执行。";
     const titleLines = blueprintPages.length
       ? [
@@ -1040,18 +1057,18 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
       : [];
 
     return [
-      "# 简页 Deck Blueprint Contract",
+      "# 写作员 Deck Blueprint Contract",
       "",
-      "你将收到用户原始需求与墨衡阶段输出。墨衡输出中的「## 建议页结构」不是参考建议，而是本次 PPT 的硬性蓝图。",
+      "你将收到用户原始需求与分析师阶段输出。分析师输出中的「## 建议页结构」不是参考建议，而是本次 PPT 的硬性蓝图。",
       "",
       "【必须遵守】",
       countLine,
-      "- 必须按墨衡列出的页面顺序生成，不得重排。",
+      "- 必须按分析师列出的页面顺序生成，不得重排。",
       "- 必须保留每一页的核心标题和核心观点；可压缩文字，但不能改变页面语义。",
       "- 不得擅自合并、删除或新增页面。特别是「企业影响」和「金融影响」如果分别列页，必须分别成页。",
-      "- 必须尽量采用墨衡给出的建议图表类型或等价版式。",
-      "- 如果 citationRequired，需要在页内脚注或最后一页合并呈现资料来源；不要为了资料来源额外新增页面，除非墨衡蓝图本身列了资料来源页。",
-      "- 最终回复必须包含「蓝图执行情况」小节，写明：墨衡建议页数、实际生成页数、每页标题列表，以及是否有合并/删减/新增。正常情况必须写「无合并、无删减、无新增」。",
+      "- 必须尽量采用分析师给出的建议图表类型或等价版式。",
+      "- 如果 citationRequired，需要在页内脚注或最后一页合并呈现资料来源；不要为了资料来源额外新增页面，除非分析师蓝图本身列了资料来源页。",
+      "- 最终回复必须包含「蓝图执行情况」小节，写明：分析师建议页数、实际生成页数、每页标题列表，以及是否有合并/删减/新增。正常情况必须写「无合并、无删减、无新增」。",
       ...titleLines,
       ...structuredLines,
       "",
@@ -1063,7 +1080,7 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
       "- 涉及变化、迁移、替代、升级时，优先使用 AS-IS / TO-BE 或左右对比版式。",
       "",
       "【失败条件】",
-      "- 如果最终页数与墨衡建议页数不一致，会被系统视为蓝图漂移。",
+      "- 如果最终页数与分析师建议页数不一致，会被系统视为蓝图漂移。",
       "- 如果最终回复没有「蓝图执行情况」，会被系统视为不可审计。",
       "",
       "# 上游输入",
