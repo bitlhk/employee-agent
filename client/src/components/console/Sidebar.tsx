@@ -32,7 +32,7 @@ export function Sidebar({
           const Icon = it.icon;
           const active = activePage === it.key;
           return (
-            <button key={it.key} title={it.label} onClick={() => setActivePage(it.key)} className={`w-full flex items-center gap-2 px-3 py-2.5 text-left sidebar-item relative ${active ? "active" : ""}`} style={{ border: "none", background: "transparent" }}>
+            <button key={it.key} title={it.label} onClick={() => setActivePage(it.key)} className={`w-full flex items-center gap-2 px-3 py-2.5 text-left sidebar-item relative ${active ? "active" : ""}`}>
               {active && <span className="sidebar-item-indicator" />}
               <Icon size={16} className="sidebar-item-icon" style={{ color: active ? "var(--oc-accent)" : "var(--oc-text-secondary)" }} />
               {!collapsed && <span className="text-sm sidebar-item-label" style={{ color: active ? "var(--oc-accent)" : "var(--oc-text-secondary)" }}>{it.label}</span>}

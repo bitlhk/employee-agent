@@ -1378,30 +1378,30 @@
 
 /* 保留底层原始变量（兼容旧组件渐进迁移）*/
 :root {
-  --bg: #0a0c10;
-  --panel: #0f1114;
-  --card: #181c24;
-  --card-2: #181c24;
-  --border: rgba(255, 255, 255, 0.08);
-  --text: #e5e7eb;
-  --text-strong: #f0f1f3;
-  --muted: #9ca3af;
-  --popover: #151820;
+  --bg: #0b0d12;
+  --panel: #11141b;
+  --card: #171b24;
+  --card-2: #1b202a;
+  --border: rgba(148, 163, 184, 0.13);
+  --text: #e7e9ee;
+  --text-strong: #f3f4f6;
+  --muted: #9aa3b2;
+  --popover: #171b24;
   --popover-foreground: #e5e7eb;
-  --background: #0a0c10;
+  --background: #0b0d12;
   --foreground: #e5e7eb;
   --card-foreground: #e5e7eb;
-  --secondary: #1e2230;
-  --secondary-foreground: #c0c4cc;
-  --accent: #ff5c5c;
-  --accent-hover: #ff7070;
-  --accent-subtle: rgba(255, 92, 92, 0.10);
-  --accent-glow: rgba(255, 92, 92, 0.20);
+  --secondary: #1d2330;
+  --secondary-foreground: #c7ccd6;
+  --accent: #f15b66;
+  --accent-hover: #ff727b;
+  --accent-subtle: rgba(241, 91, 102, 0.10);
+  --accent-glow: rgba(241, 91, 102, 0.18);
   --focus-ring: rgba(255, 92, 92, 0.38);
   --focus-glow: rgba(255, 92, 92, 0.18);
-  --input: rgba(255,255,255,0.03);
-  --border-strong: rgba(255,255,255,0.14);
-  --ring: #ff5c5c;
+  --input: rgba(255,255,255,0.045);
+  --border-strong: rgba(148,163,184,0.22);
+  --ring: #f15b66;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1707,32 +1707,34 @@
   padding: 0 16px;
   gap: 10px;
   border: 1px solid transparent;
+  background: transparent;
   font-size: 14px;
   font-weight: 600;
-  transition: all .16s ease;
+  color: var(--oc-text-secondary);
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
 }
 .sidebar-item .sidebar-item-label { font-weight: 600; letter-spacing: .1px; }
 .sidebar-item.active {
-  background: linear-gradient(180deg, rgba(158,24,34,.40), rgba(158,24,34,.28));
-  border-color: rgba(255, 92, 92, 0.58);
-  box-shadow: 0 0 0 1px rgba(255,92,92,0.26) inset, 0 0 18px rgba(255,92,92,0.14);
+  background: color-mix(in oklab, var(--oc-accent) 14%, var(--oc-bg-surface));
+  border-color: color-mix(in oklab, var(--oc-accent) 34%, var(--oc-border));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
 }
 .sidebar-item.active .sidebar-item-label {
-  color: #ffe8ea !important;
-  font-weight: 700;
+  color: var(--oc-text-primary) !important;
+  font-weight: 650;
 }
 .sidebar-item.active .sidebar-item-icon {
-  color: #ffd2d7 !important;
+  color: var(--oc-accent) !important;
 }
 .sidebar-item:hover {
-  background: rgba(255,255,255,0.07) !important;
-  border-color: rgba(255,255,255,.12);
+  background: color-mix(in oklab, var(--oc-bg-surface) 76%, white 2%) !important;
+  border-color: var(--oc-border-strong);
 }
 .sidebar-item-indicator {
   width: 3px;
   height: 22px;
   border-radius: 999px;
-  background: #ff6b75;
+  background: var(--oc-accent);
 }
 
 
@@ -2559,27 +2561,27 @@ select.settings-input {
 
 /* ── Bubble Final ── */
 .lingxia-bubble-user {
-  background: rgba(160,130,135,0.18);
-  border: 1px solid rgba(180,145,150,0.16);
-  color: #e8dfe0;
+  background: color-mix(in oklab, var(--oc-accent) 12%, var(--oc-bg-surface));
+  border: 1px solid color-mix(in oklab, var(--oc-accent) 24%, var(--oc-border));
+  color: var(--oc-text-primary);
   transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 .lingxia-bubble-user:hover {
-  background: rgba(160,130,135,0.26);
-  border-color: rgba(180,145,150,0.24);
+  background: color-mix(in oklab, var(--oc-accent) 16%, var(--oc-bg-surface));
+  border-color: color-mix(in oklab, var(--oc-accent) 34%, var(--oc-border));
   box-shadow: 0 5px 16px rgba(0,0,0,0.14);
 }
 .lingxia-bubble-ai {
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.035);
+  background: color-mix(in oklab, var(--oc-bg-surface) 72%, transparent);
+  border: 1px solid var(--oc-border);
   color: var(--oc-text-primary);
   transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
   overflow: hidden;
   min-width: 0;
 }
 .lingxia-bubble-ai:hover {
-  background: rgba(255,255,255,0.068);
-  border-color: rgba(255,255,255,0.055);
+  background: color-mix(in oklab, var(--oc-bg-surface) 84%, transparent);
+  border-color: var(--oc-border-strong);
   box-shadow: 0 5px 16px rgba(0,0,0,0.16);
 }
 
@@ -3687,8 +3689,8 @@ html:has(:root[data-theme-mode="light"]) body {
 
 /* AI 头像容器 */
 .lingxia-avatar-ai {
-  background: rgba(190,30,40,0.2);
-  border: 1px solid rgba(190,30,40,0.3);
+  background: color-mix(in oklab, var(--oc-accent) 13%, var(--oc-bg-surface));
+  border: 1px solid color-mix(in oklab, var(--oc-accent) 30%, var(--oc-border));
 }
 :root[data-theme-mode="light"] .lingxia-avatar-ai {
   background: #FFF1F2 !important;
@@ -3700,8 +3702,14 @@ html:has(:root[data-theme-mode="light"]) body {
    ============================================================ */
 
 /* 深色：消息区背景 */
+.lingxia-shell {
+  background:
+    radial-gradient(circle at 22% -8%, color-mix(in oklab, var(--oc-accent) 6%, transparent), transparent 30%),
+    linear-gradient(180deg, var(--oc-bg) 0%, #0d1016 100%);
+}
+
 .lingxia-shell main {
-  background: var(--oc-bg);
+  background: transparent;
 }
 
 /* 浅色：shell + 消息区背景统一浅灰 */
@@ -3789,19 +3797,21 @@ html:has(:root[data-theme-mode="light"]) body {
 
 /* 顶栏按钮通用 */
 .lingxia-topbar-btn {
-  background: rgba(255,255,255,0.04);
+  background: color-mix(in oklab, var(--oc-bg-surface) 78%, transparent);
   border: 1px solid var(--oc-border);
   color: var(--oc-text-secondary);
   cursor: pointer;
   font-size: 12px;
 }
 .lingxia-topbar-btn:hover {
-  background: rgba(255,255,255,0.08);
+  background: color-mix(in oklab, var(--oc-bg-surface) 92%, white 2%);
+  border-color: var(--oc-border-strong);
+  color: var(--oc-text-primary);
 }
 .lingxia-topbar-btn.is-active {
-  background: var(--oc-accent) !important;
-  border-color: var(--oc-accent) !important;
-  color: #fff !important;
+  background: color-mix(in oklab, var(--oc-accent) 16%, var(--oc-bg-surface)) !important;
+  border-color: color-mix(in oklab, var(--oc-accent) 38%, var(--oc-border)) !important;
+  color: var(--oc-text-primary) !important;
 }
 
 /* 浅色：顶栏 */
@@ -3909,7 +3919,7 @@ html:has(:root[data-theme-mode="light"]) body {
   align-items: center;
   height: 52px;
   padding: 0 24px;
-  background: var(--oc-bg);
+  background: color-mix(in oklab, var(--oc-bg) 86%, var(--oc-panel));
   border-bottom: 1px solid var(--oc-border);
 }
 .lingxia-topbar__left {
@@ -3921,7 +3931,7 @@ html:has(:root[data-theme-mode="light"]) body {
 .lingxia-topbar__brand {
   font-size: 13px;
   color: var(--oc-text-primary);
-  opacity: 0.75;
+  opacity: 0.68;
 }
 .lingxia-topbar__sep {
   font-size: 13px;
@@ -3931,7 +3941,7 @@ html:has(:root[data-theme-mode="light"]) body {
 .lingxia-topbar__page {
   font-size: 14px;
   font-weight: 700;
-  color: var(--oc-accent);
+  color: var(--oc-text-primary);
 }
 .lingxia-topbar__center {
   display: flex;
