@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import hmac
 import os
 import re
 import time
@@ -25,7 +26,9 @@ from typing import Any
 
 HOST = os.getenv("FIN_HARNESS_EXECUTOR_HOST", "127.0.0.1")
 PORT = int(os.getenv("FIN_HARNESS_EXECUTOR_PORT", "8670"))
-AUTH_TOKEN = os.getenv("FIN_HARNESS_EXECUTOR_KEY") or os.getenv("HERMES_HTTP_KEY") or ""
+AUTH_TOKEN = os.getenv("FIN_HARNESS_EXECUTOR_KEY") or os.getenv("HERMES_HTTP_KEY")
+if not AUTH_TOKEN:
+    raise RuntimeError("FIN_HARNESS_EXECUTOR_KEY or HERMES_HTTP_KEY must be set; refusing to start")
 HERMES_KEY = os.getenv("HERMES_HTTP_KEY") or AUTH_TOKEN
 PLANNER_ENDPOINT = os.getenv("FIN_HARNESS_PLANNER_ENDPOINT", "http://127.0.0.1:8650").rstrip("/")
 SKILL_ROOT = Path(os.getenv(
@@ -228,9 +231,14 @@ def read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 
 def auth_ok(handler: BaseHTTPRequestHandler) -> bool:
-    if not AUTH_TOKEN:
-        return True
-    return handler.headers.get("authorization", "") == f"Bearer {AUTH_TOKEN}"
+    auth_header = handler.headers.get("authorization", "")
+    prefix = "Bearer "
+    if not auth_header.startswith(prefix):
+        return False
+    presented_token = auth_header[len(prefix):]
+    if not presented_token:
+        return False
+    return hmac.compare_digest(presented_token, AUTH_TOKEN)
 
 
 def truncate(value: str, limit: int = 16000) -> str:

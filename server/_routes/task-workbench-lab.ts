@@ -79,9 +79,9 @@ const routeBodySchema = z.object({
 });
 
 function isTaskWorkbenchLabEnabled() {
+  const legacyKillFile = process.env.AGENT_CLUSTER_LAB_KILL_FILE || "/tmp/lingxia-agent-cluster-lab.disabled";
   const killFile = process.env.TASK_WORKBENCH_LAB_KILL_FILE
-    || process.env.AGENT_CLUSTER_LAB_KILL_FILE
-    || "/tmp/lingxia-agent-cluster-lab.disabled";
+    || (existsSync(legacyKillFile) ? legacyKillFile : "/tmp/lingxia-task-workbench-lab.disabled");
   if (existsSync(killFile)) {
     const now = Date.now();
     if (now - lastKillSwitchLogMs > 60_000) {
@@ -123,7 +123,7 @@ function createDefaultRunner(user: LabUser, callbacks: RunnerCallbacks = {}): Ta
   });
   const clusterRunner = new AdapterAgentClusterRunner({
     userId: user.id,
-    maxAgents: Number(process.env.AGENT_CLUSTER_LAB_MAX_AGENTS || 3),
+    maxAgents: Number(process.env.TASK_WORKBENCH_LAB_MAX_AGENTS || process.env.AGENT_CLUSTER_LAB_MAX_AGENTS || 3),
     registry,
     onProviderEvent: callbacks.onProviderEvent,
     createAdapter: (provider) => {

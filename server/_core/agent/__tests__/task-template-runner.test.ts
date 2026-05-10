@@ -1058,6 +1058,31 @@ describe("JsonTaskTemplateRunner", () => {
     expect(warnings).toContain("financial_advice_boundary_violation: risk_review output contains prohibited advice wording");
   });
 
+  it("separates soft formatting findings from hard synthesis failures", () => {
+    const r = runner(new MockClusterRunner([clusterRun()]));
+    const analystStage = {
+      ...template().stages[0]!,
+      id: "market_analysis",
+      personaId: "analyst",
+      displayName: "分析师提炼观点",
+      stageType: "llm_synthesis" as const,
+    };
+
+    const findings = (r as any).validateLlmSynthesisOutputFindings(
+      analystStage,
+      [
+        "## 研究结论",
+        "跨境支付行业关注度提升。[src_001]",
+        "## 关键事实",
+        "- 公开资料显示相关政策和市场讨论持续增加。[src_001]",
+      ].join("\n"),
+      ["src_001"],
+    );
+
+    expect(findings).toContainEqual({ severity: "soft", message: "missing_required_heading: ## 不确定性" });
+    expect(findings.some((finding: any) => finding.severity === "hard")).toBe(false);
+  });
+
   it("records task template snapshot in runtimeSnapshotJson", async () => {
     const result = await runner(new MockClusterRunner([clusterRun()])).runTask({
       template: template(),

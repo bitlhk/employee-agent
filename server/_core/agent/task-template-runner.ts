@@ -51,6 +51,13 @@ export type TaskTemplateRunnerEvent =
     stage: TaskStageRunResult;
   };
 
+type ValidationSeverity = "hard" | "soft" | "info";
+
+type ValidationFinding = {
+  severity: ValidationSeverity;
+  message: string;
+};
+
 function defaultSeedPath() {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
   return path.join(dirname, "data", "task-templates.seed.json");
@@ -681,8 +688,10 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
         ],
       });
       const output = llm.content.trim();
-      const warnings = this.validateLlmSynthesisOutput(stage, output, availableCitationIds);
-      const status: TaskStageRunResult["status"] = output && warnings.length === 0 ? "success" : "failed";
+      const findings = this.validateLlmSynthesisOutputFindings(stage, output, availableCitationIds);
+      const warnings = findings.map((finding) => finding.message);
+      const hardFailures = findings.filter((finding) => finding.severity === "hard");
+      const status: TaskStageRunResult["status"] = output && hardFailures.length === 0 ? "success" : "failed";
       const runResult: AgentRunResult = withTaskRunMetadata(
         {
           id: `${stage.id}-llm-synthesis-${Date.now()}`,
@@ -692,7 +701,7 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
           summary: status === "success" ? `${stage.displayName} 已完成。` : `${stage.displayName} 未通过结构化校验。`,
           output,
           artifacts: [],
-          error: status === "success" ? undefined : { code: "llm_synthesis_validation_failed", detail: warnings.join("; ") || "empty output" },
+          error: status === "success" ? undefined : { code: "llm_synthesis_validation_failed", detail: hardFailures.map((finding) => finding.message).join("; ") || "empty output" },
           producedAt: this.now().toISOString(),
         },
         {
@@ -875,8 +884,12 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
   }
 
   private validateLlmSynthesisOutput(stage: TaskStage, output: string, citationIds: string[]): string[] {
-    const warnings: string[] = [];
-    if (!output.trim()) return ["empty_llm_synthesis_output"];
+    return this.validateLlmSynthesisOutputFindings(stage, output, citationIds).map((finding) => finding.message);
+  }
+
+  private validateLlmSynthesisOutputFindings(stage: TaskStage, output: string, citationIds: string[]): ValidationFinding[] {
+    const findings: ValidationFinding[] = [];
+    if (!output.trim()) return [{ severity: "hard", message: "empty_llm_synthesis_output" }];
     const role = this.stageRole(stage);
     const headings = role === "analyst"
       ? ["## 研究结论", "## 关键事实", "## 不确定性"]
@@ -886,16 +899,16 @@ export class JsonTaskTemplateRunner implements TaskTemplateRunner {
           ? ["## 审阅结论", "## 需人工复核", "## 合规边界提醒"]
           : [];
     for (const heading of headings) {
-      if (!output.includes(heading)) warnings.push(`missing_required_heading: ${heading}`);
+      if (!output.includes(heading)) findings.push({ severity: "soft", message: `missing_required_heading: ${heading}` });
     }
     if (citationIds.length && (role === "analyst" || role === "writer")) {
       const citedIds = new Set([...output.matchAll(/\[?(src_\d{3})\]?/gi)].map((match) => match[1].toLowerCase()));
-      if (citedIds.size === 0) warnings.push(`missing_citation_ids: ${stage.id} output must cite sources as [src_NNN]`);
+      if (citedIds.size === 0) findings.push({ severity: "hard", message: `missing_citation_ids: ${stage.id} output must cite sources as [src_NNN]` });
     }
     if (this.containsActionableFinancialAdvice(output)) {
-      warnings.push(`financial_advice_boundary_violation: ${stage.id} output contains prohibited advice wording`);
+      findings.push({ severity: "hard", message: `financial_advice_boundary_violation: ${stage.id} output contains prohibited advice wording` });
     }
-    return warnings;
+    return findings;
   }
 
   private stageRole(stage: TaskStage): "analyst" | "writer" | "reviewer" | "other" {
