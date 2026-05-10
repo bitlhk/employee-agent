@@ -484,14 +484,14 @@
 }
 
 .coop-empty-state__title {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: var(--oc-weight-semibold);
   color: var(--banking-text);
 }
 
 .coop-empty-state__desc {
   max-width: 420px;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--oc-text-secondary);
   line-height: 1.6;
 }
@@ -506,21 +506,21 @@
 .coop-summary-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 76px;
-  padding: 14px;
+  gap: 10px;
+  min-height: 70px;
+  padding: 12px;
   border: 1px solid var(--oc-border);
-  border-radius: var(--banking-radius-lg);
+  border-radius: 12px;
   background: color-mix(in oklab, var(--oc-card) 78%, transparent);
 }
 
 .coop-summary-item__icon {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: 10px;
   color: var(--oc-text-secondary);
   background: color-mix(in oklab, var(--oc-text-secondary) 8%, transparent);
 }
@@ -541,14 +541,14 @@
 }
 
 .coop-summary-item__value {
-  font-size: 20px;
-  line-height: 1;
-  font-weight: 800;
+  font-size: 18px;
+  line-height: 1.1;
+  font-weight: 700;
   color: var(--banking-text);
 }
 
 .coop-summary-item__label {
-  margin-top: 5px;
+  margin-top: 4px;
   font-size: 12px;
   color: var(--oc-text-secondary);
 }
@@ -572,13 +572,13 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 0 11px;
-  border-radius: var(--banking-radius-md);
+  padding: 0 10px;
+  border-radius: 999px;
   border: 1px solid var(--oc-border);
   background: transparent;
   color: var(--oc-text-secondary);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   transition: background .15s, border-color .15s, color .15s;
 }
 
@@ -602,7 +602,7 @@
 
 .coop-task-table {
   border: 1px solid var(--oc-border);
-  border-radius: var(--banking-radius-lg);
+  border-radius: 12px;
   overflow: visible;
   background: color-mix(in oklab, var(--oc-card) 74%, transparent);
 }
@@ -616,12 +616,12 @@
 }
 
 .coop-task-table__head {
-  min-height: 40px;
+  min-height: 38px;
   padding: 0 14px;
   border-bottom: 1px solid var(--oc-border);
   color: var(--oc-text-secondary);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .coop-task-table__body {
@@ -677,7 +677,8 @@
   white-space: nowrap;
   color: var(--banking-text);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--oc-weight-semibold);
+  line-height: 1.35;
 }
 
 .coop-task-row__meta,
@@ -686,6 +687,7 @@
 .coop-task-row__role {
   color: var(--oc-text-secondary);
   font-size: 12px;
+  line-height: 1.45;
 }
 
 .coop-task-row__meta {
