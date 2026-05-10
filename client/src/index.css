@@ -438,6 +438,381 @@
   box-shadow: 0 3px 10px color-mix(in oklab, var(--banking-brand-red) 30%, transparent);
 }
 
+/* ── 协作工作台 ───────────────────────────────────────── */
+.coop-workbench {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.coop-workbench__create-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.coop-workbench__loading,
+.coop-empty-state {
+  display: flex;
+  min-height: 260px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 1px dashed var(--oc-border);
+  border-radius: var(--banking-radius-lg);
+  background: color-mix(in oklab, var(--oc-card) 58%, transparent);
+  color: var(--oc-text-secondary);
+  text-align: center;
+}
+
+.coop-empty-state--compact {
+  min-height: 180px;
+}
+
+.coop-empty-state__icon {
+  width: 46px;
+  height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  color: var(--banking-brand-red);
+  background: var(--banking-brand-red-subtle);
+  border: 1px solid color-mix(in oklab, var(--banking-brand-red) 18%, transparent);
+}
+
+.coop-empty-state__title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--banking-text);
+}
+
+.coop-empty-state__desc {
+  max-width: 420px;
+  font-size: 13px;
+  color: var(--oc-text-secondary);
+  line-height: 1.6;
+}
+
+.coop-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.coop-summary-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 76px;
+  padding: 14px;
+  border: 1px solid var(--oc-border);
+  border-radius: var(--banking-radius-lg);
+  background: color-mix(in oklab, var(--oc-card) 78%, transparent);
+}
+
+.coop-summary-item__icon {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: var(--oc-text-secondary);
+  background: color-mix(in oklab, var(--oc-text-secondary) 8%, transparent);
+}
+
+.coop-summary-item[data-tone="warning"] .coop-summary-item__icon {
+  color: var(--oc-warning);
+  background: color-mix(in oklab, var(--oc-warning) 14%, transparent);
+}
+
+.coop-summary-item[data-tone="info"] .coop-summary-item__icon {
+  color: var(--oc-info);
+  background: color-mix(in oklab, var(--oc-info) 12%, transparent);
+}
+
+.coop-summary-item[data-tone="accent"] .coop-summary-item__icon {
+  color: var(--banking-brand-red);
+  background: var(--banking-brand-red-subtle);
+}
+
+.coop-summary-item__value {
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--banking-text);
+}
+
+.coop-summary-item__label {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--oc-text-secondary);
+}
+
+.coop-workbench__list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.coop-filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.coop-filter-tab {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border-radius: var(--banking-radius-md);
+  border: 1px solid var(--oc-border);
+  background: transparent;
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background .15s, border-color .15s, color .15s;
+}
+
+.coop-filter-tab:hover,
+.coop-filter-tab[data-active="true"] {
+  border-color: color-mix(in oklab, var(--banking-brand-red) 24%, transparent);
+  background: var(--banking-brand-red-subtle);
+  color: var(--banking-brand-red);
+}
+
+.coop-filter-tab span {
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in oklab, currentColor 10%, transparent);
+  font-size: 11px;
+}
+
+.coop-task-table {
+  border: 1px solid var(--oc-border);
+  border-radius: var(--banking-radius-lg);
+  overflow: visible;
+  background: color-mix(in oklab, var(--oc-card) 74%, transparent);
+}
+
+.coop-task-table__head,
+.coop-task-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.6fr) 128px 130px minmax(180px, 1fr) 104px 144px;
+  gap: 14px;
+  align-items: center;
+}
+
+.coop-task-table__head {
+  min-height: 40px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--oc-border);
+  color: var(--oc-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.coop-task-table__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.coop-task-row {
+  position: relative;
+  min-height: 74px;
+  padding: 13px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid color-mix(in oklab, var(--oc-border) 72%, transparent);
+  transition: background .15s, box-shadow .15s;
+}
+
+.coop-task-row:last-child {
+  border-bottom: 0;
+}
+
+.coop-task-row:hover {
+  background: color-mix(in oklab, var(--oc-accent) 4%, transparent);
+}
+
+.coop-task-row[data-action="true"] {
+  background: color-mix(in oklab, var(--banking-brand-red) 4%, transparent);
+}
+
+.coop-task-row__title-cell {
+  min-width: 0;
+}
+
+.coop-task-row__title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.coop-task-row__dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--banking-brand-red);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--banking-brand-red) 12%, transparent);
+}
+
+.coop-task-row__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--banking-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.coop-task-row__meta,
+.coop-task-row__date,
+.coop-task-row__progress-label,
+.coop-task-row__role {
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+}
+
+.coop-task-row__meta {
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coop-task-row__role {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.coop-task-row__progress {
+  min-width: 0;
+}
+
+.coop-progress-bar {
+  height: 5px;
+  margin-top: 7px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--oc-text-secondary) 12%, transparent);
+}
+
+.coop-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--banking-brand-red);
+}
+
+.coop-task-row__actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.coop-task-row__more {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--oc-border);
+  border-radius: var(--banking-radius-md);
+  background: transparent;
+  color: var(--oc-text-secondary);
+}
+
+.coop-task-row__more:hover {
+  background: color-mix(in oklab, var(--oc-text-secondary) 8%, transparent);
+  color: var(--banking-text);
+}
+
+.coop-row-menu {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  z-index: 50;
+  min-width: 164px;
+  padding: 5px;
+  border: 1px solid var(--oc-border);
+  border-radius: var(--banking-radius-md);
+  background: var(--oc-bg);
+  box-shadow: 0 14px 34px rgba(0,0,0,.18);
+}
+
+.coop-row-menu__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--banking-text);
+  font-size: 12px;
+  text-align: left;
+}
+
+.coop-row-menu__item:hover {
+  background: color-mix(in oklab, var(--oc-text-secondary) 8%, transparent);
+}
+
+.coop-row-menu__item--danger {
+  color: var(--oc-danger);
+}
+
+.coop-row-menu__item--danger:hover {
+  background: color-mix(in oklab, var(--oc-danger) 10%, transparent);
+}
+
+@media (max-width: 1100px) {
+  .coop-task-table__head {
+    display: none;
+  }
+  .coop-task-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    align-items: stretch;
+  }
+  .coop-task-row__actions {
+    justify-content: flex-start;
+  }
+  .coop-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .coop-workbench__list-head,
+  .coop-workbench__create-head,
+  .page-section-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .coop-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-page-panel {
   max-width: 620px;
 }
