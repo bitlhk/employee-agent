@@ -62,6 +62,14 @@ _OC_DOTDIR="${OPENCLAW_HOME_DIR%/.openclaw}/.openclaw"
 WORKSPACE_ROOT="${CLAW_WORKSPACE_ROOT:-$_OC_DOTDIR/workspace}"
 WORKSPACE_DIR="$WORKSPACE_ROOT-$AGENT_ID"
 AGENT_MODEL="${CLAW_AGENT_MODEL:-}"
+DEFAULT_OPENCLAW_MODEL="$AGENT_MODEL"
+if [[ -z "$DEFAULT_OPENCLAW_MODEL" ]]; then
+  DEFAULT_OPENCLAW_MODEL="$(
+    OPENCLAW_HOME="$OPENCLAW_HOME_DIR" "$OPENCLAW_BIN" models status --json 2>/dev/null \
+      | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("resolvedDefault") or data.get("defaultModel") or "")' 2>/dev/null \
+      || true
+  )"
+fi
 
 mkdir -p "$WORKSPACE_DIR"
 
@@ -195,11 +203,11 @@ fi
 OPENCLAW_JSON="${_OC_DOTDIR}/openclaw.json"
 if [[ -f "$OPENCLAW_JSON" ]]; then
   # || echo: 写失败只警告不中断 provision（openclaw.json 被并发改动的极端情况）
-  python3 - "$OPENCLAW_JSON" "$AGENT_ID" "$PROFILE" <<'PY' || echo "[WARN] tools profile write failed for $AGENT_ID" >&2
+  python3 - "$OPENCLAW_JSON" "$AGENT_ID" "$PROFILE" "$DEFAULT_OPENCLAW_MODEL" <<'PY' || echo "[WARN] tools profile write failed for $AGENT_ID" >&2
 import json, sys
-path, agent_id, profile = sys.argv[1], sys.argv[2], sys.argv[3]
+path, agent_id, profile, default_model = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
-DEFAULT_MODEL = "glm5/glm-5.1"  # 2026-04-27: 升级到当前生产版本，glm5/glm-5 已废弃
+DEFAULT_MODEL = (default_model or "").strip()
 
 enterprise_tools = {
     "profile": "coding",
@@ -211,25 +219,23 @@ enterprise_tools = {
 profile_map = {
     # 企业角色由灵虾层管理；OpenClaw 侧统一使用 coding profile，并叠加隔离限制。
     "plus": {
-        "tools": enterprise_tools,
-        "model": DEFAULT_MODEL
+        "tools": enterprise_tools
     },
     "internal": {
-        "tools": enterprise_tools,
-        "model": DEFAULT_MODEL
+        "tools": enterprise_tools
     },
     # 向后兼容历史值，避免旧配置落到无约束 profile。
     "starter": {
-        "tools": enterprise_tools,
-        "model": DEFAULT_MODEL
+        "tools": enterprise_tools
     },
     "trial": {
-        "tools": enterprise_tools,
-        "model": DEFAULT_MODEL
+        "tools": enterprise_tools
     }
 }
 
 cfg = profile_map.get(profile, profile_map["plus"])
+if DEFAULT_MODEL:
+    cfg = {**cfg, "model": DEFAULT_MODEL}
 
 with open(path) as f:
     d = json.load(f)
