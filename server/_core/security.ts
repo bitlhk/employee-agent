@@ -12,6 +12,10 @@ import { validationResult } from "express-validator";
  * 配置安全 HTTP 头
  */
 export function setupSecurityHeaders(app: Express) {
+  const frontendUrl = process.env.FRONTEND_URL || "";
+  const forceHttpsHeaders = process.env.LINGXIA_FORCE_HTTPS_HEADERS === "true";
+  const httpsHeadersEnabled = forceHttpsHeaders || frontendUrl.startsWith("https://");
+
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -25,13 +29,13 @@ export function setupSecurityHeaders(app: Express) {
           objectSrc: ["'none'"],
           mediaSrc: ["'self'"],
           frameSrc: ["'self'", ...(process.env.CSP_FRAME_ALLOW ? process.env.CSP_FRAME_ALLOW.split(",").map(s => s.trim()) : [])],
-          upgradeInsecureRequests: process.env.NODE_ENV === "production" ? [] : null, // 生产环境自动升级 HTTP→HTTPS
+          upgradeInsecureRequests: httpsHeadersEnabled ? [] : null,
         },
       },
       crossOriginEmbedderPolicy: false, // 允许 iframe 嵌入
       crossOriginOpenerPolicy: false, // 开发环境允许跨域 opener
       crossOriginResourcePolicy: { policy: "cross-origin" },
-      hsts: { maxAge: 31536000, includeSubDomains: true }, // 强制 HTTPS 1 年
+      hsts: httpsHeadersEnabled ? { maxAge: 31536000, includeSubDomains: true } : false,
     })
   );
 }
