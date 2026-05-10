@@ -4210,6 +4210,71 @@ body[data-home-light="true"] .claw-home-shell .bg-primary\/10 {
   background: rgba(220, 38, 38, 0.08) !important;
   color: #dc2626 !important;
 }
+/* Login/register keeps the public product palette even when the app theme is dark. */
+body[data-auth-light="true"] {
+  color-scheme: light;
+  --background: 0 0% 100%;
+  --foreground: 222.2 47.4% 11.2%;
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 47.4% 11.2%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 47.4% 11.2%;
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 0 72% 51%;
+}
+body[data-auth-light="true"] .login-shell {
+  background: linear-gradient(135deg, #f9fafb 0%, #ffffff 50%, #f9fafb 100%) !important;
+  color: #111827 !important;
+}
+body[data-auth-light="true"] .login-shell [data-slot="card"] {
+  background: rgba(255, 255, 255, 0.94) !important;
+  border-color: #e5e7eb !important;
+  color: #111827 !important;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.10) !important;
+}
+body[data-auth-light="true"] .login-shell [data-slot="card-title"],
+body[data-auth-light="true"] .login-shell label {
+  color: #111827 !important;
+}
+body[data-auth-light="true"] .login-shell [data-slot="card-description"] {
+  color: #6b7280 !important;
+}
+body[data-auth-light="true"] .login-shell input,
+body[data-auth-light="true"] .login-shell button[role="combobox"] {
+  background: #ffffff !important;
+  border-color: #e5e7eb !important;
+  color: #111827 !important;
+}
+body[data-auth-light="true"] .login-shell input::placeholder {
+  color: #9ca3af !important;
+}
+body[data-auth-light="true"] .login-shell [role="tablist"] {
+  background: #f3f4f6 !important;
+  border-color: #e5e7eb !important;
+}
+body[data-auth-light="true"] .login-shell [role="tab"] {
+  color: #64748b !important;
+}
+body[data-auth-light="true"] .login-shell [role="tab"][data-state="active"] {
+  background: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+body[data-auth-light="true"] [data-radix-popper-content-wrapper] [data-slot="select-content"],
+body[data-auth-light="true"] [data-radix-popper-content-wrapper] [role="listbox"],
+body[data-auth-light="true"] [data-radix-popper-content-wrapper] [role="option"] {
+  background: #ffffff !important;
+  border-color: #e5e7eb !important;
+  color: #111827 !important;
+}
+body[data-auth-light="true"] [data-radix-popper-content-wrapper] [role="option"]:hover,
+body[data-auth-light="true"] [data-radix-popper-content-wrapper] [role="option"][data-highlighted] {
+  background: #f9fafb !important;
+  color: #111827 !important;
+}
 .claw-admin-header {
   background: rgba(255, 255, 255, 0.92) !important;
   border-color: var(--admin-border) !important;

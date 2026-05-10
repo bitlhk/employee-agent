@@ -3,7 +3,7 @@
  * 支持邮箱密码登录和注册
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -47,6 +47,18 @@ export default function Login() {
   const [activeTab, setActiveTab] = useState<"login" | "register">("login");
   const [error, setError] = useState<string | null>(null);
   const { refresh } = useAuth();
+
+  useEffect(() => {
+    const previous = document.body.getAttribute("data-auth-light");
+    document.body.setAttribute("data-auth-light", "true");
+    return () => {
+      if (previous === null) {
+        document.body.removeAttribute("data-auth-light");
+      } else {
+        document.body.setAttribute("data-auth-light", previous);
+      }
+    };
+  }, []);
 
   const loginMutation = trpc.auth.login.useMutation({
     retry: false, // 登录失败不重试
@@ -104,7 +116,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 flex items-center justify-center p-4">
+    <div className="login-shell min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 flex items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -335,4 +347,3 @@ export default function Login() {
     </div>
   );
 }
-
