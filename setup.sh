@@ -1,94 +1,280 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# LingganClaw 一键配置脚本
-# 用法: bash setup.sh
-
-echo ""
-echo "  🦐 LingganClaw 灵虾 — 初始化配置"
-echo "  ─────────────────────────────────"
-echo ""
+# LingganClaw setup script.
+# Interactive:
+#   bash setup.sh
+# Non-interactive:
+#   bash setup.sh --auto --host 1.2.3.4 --db-mode mysql-auto
 
 ENV_FILE=".env"
-SKIP_ENV=""
+AUTO=false
+YES=false
+OVERWRITE_ENV=false
+SKIP_INSTALL=false
+SKIP_DB_PUSH=false
+SKIP_OPENCLAW=false
+PORT_VALUE="${LINGXIA_PORT:-5180}"
+HOST_VALUE="${LINGXIA_HOST:-}"
+DOMAIN_VALUE="${LINGXIA_DOMAIN:-}"
+FRONTEND_URL_VALUE="${LINGXIA_FRONTEND_URL:-}"
+DB_MODE_VALUE="${LINGXIA_DB_MODE:-}"
+DB_HOST_VALUE="${LINGXIA_DB_HOST:-localhost}"
+DB_PORT_VALUE="${LINGXIA_DB_PORT:-3306}"
+DB_USER_VALUE="${LINGXIA_DB_USER:-linggan}"
+DB_PASS_VALUE="${LINGXIA_DB_PASSWORD:-}"
+DB_NAME_VALUE="${LINGXIA_DB_NAME:-linggan}"
 
-if [[ -f "$ENV_FILE" ]]; then
-  echo "⚠️  检测到已有 .env 文件。"
-  read -rp "覆盖？(y/N) " overwrite
-  if [[ "$overwrite" != "y" && "$overwrite" != "Y" ]]; then
-    echo "跳过 .env 生成，继续后续步骤..."
-    SKIP_ENV=true
-  fi
-fi
+usage() {
+  cat <<'EOF'
+Usage: bash setup.sh [options]
+
+Options:
+  --auto                         Run without prompts.
+  --yes                          Accept defaults for non-dangerous prompts.
+  --overwrite-env                Replace existing .env.
+  --port <port>                  App port, default 5180.
+  --host <ip-or-host>            HTTP host, e.g. 111.119.236.165.
+  --domain <domain>              HTTPS domain, e.g. ai.company.com.
+  --frontend-url <url>           Full frontend URL. Overrides --host/--domain.
+  --db-mode <mode>               compose | existing | mysql-auto. Default: compose interactive, mysql-auto auto.
+  --db-host <host>               Existing MySQL host.
+  --db-port <port>               Existing MySQL port.
+  --db-user <user>               Existing MySQL user.
+  --db-password <password>       Existing MySQL password.
+  --db-name <name>               Existing MySQL database.
+  --skip-install                 Do not install pnpm dependencies.
+  --skip-db-push                 Do not run database migrations.
+  --skip-openclaw                Do not touch ~/.openclaw/openclaw.json.
+  -h, --help                     Show this help.
+
+Environment variables mirror the options with LINGXIA_ prefix, for example:
+  LINGXIA_HOST=1.2.3.4 LINGXIA_DB_MODE=mysql-auto bash setup.sh --auto
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --auto) AUTO=true; shift ;;
+    --yes|-y) YES=true; shift ;;
+    --overwrite-env) OVERWRITE_ENV=true; shift ;;
+    --port) PORT_VALUE="${2:?missing --port value}"; shift 2 ;;
+    --host) HOST_VALUE="${2:?missing --host value}"; shift 2 ;;
+    --domain) DOMAIN_VALUE="${2:?missing --domain value}"; shift 2 ;;
+    --frontend-url) FRONTEND_URL_VALUE="${2:?missing --frontend-url value}"; shift 2 ;;
+    --db-mode) DB_MODE_VALUE="${2:?missing --db-mode value}"; shift 2 ;;
+    --db-host) DB_HOST_VALUE="${2:?missing --db-host value}"; shift 2 ;;
+    --db-port) DB_PORT_VALUE="${2:?missing --db-port value}"; shift 2 ;;
+    --db-user) DB_USER_VALUE="${2:?missing --db-user value}"; shift 2 ;;
+    --db-password) DB_PASS_VALUE="${2:?missing --db-password value}"; shift 2 ;;
+    --db-name) DB_NAME_VALUE="${2:?missing --db-name value}"; shift 2 ;;
+    --skip-install) SKIP_INSTALL=true; shift ;;
+    --skip-db-push) SKIP_DB_PUSH=true; shift ;;
+    --skip-openclaw) SKIP_OPENCLAW=true; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+echo ""
+echo "  LingganClaw 灵虾 — 初始化配置"
+echo "  ─────────────────────────────────"
+echo ""
 
 gen_secret() { openssl rand -base64 32 2>/dev/null || head -c 32 /dev/urandom | base64; }
 gen_hex() { openssl rand -hex "$1" 2>/dev/null || head -c "$1" /dev/urandom | xxd -p; }
 
-# ── Step 1: 生成 .env ──────────────────────────────────────────────
+pnpm_cmd() {
+  if command -v pnpm >/dev/null 2>&1; then
+    pnpm "$@"
+  elif command -v corepack >/dev/null 2>&1; then
+    corepack pnpm "$@"
+  else
+    echo "pnpm not found. Install it with: corepack enable && corepack prepare pnpm@10.4.1 --activate" >&2
+    return 127
+  fi
+}
+
+ask() {
+  local prompt="$1"
+  local default="$2"
+  local answer=""
+  if [[ "$AUTO" == "true" ]]; then
+    echo "$default"
+    return
+  fi
+  read -rp "$prompt" answer
+  echo "${answer:-$default}"
+}
+
+ask_secret() {
+  local prompt="$1"
+  local default="$2"
+  local answer=""
+  if [[ "$AUTO" == "true" ]]; then
+    echo "$default"
+    return
+  fi
+  read -rsp "$prompt" answer
+  echo "" >&2
+  echo "${answer:-$default}"
+}
+
+detect_ip() {
+  if [[ -n "$HOST_VALUE" ]]; then
+    echo "$HOST_VALUE"
+    return
+  fi
+  local detected=""
+  detected=$(curl -fsS --max-time 4 https://api.ipify.org 2>/dev/null || true)
+  if [[ -z "$detected" ]]; then
+    detected=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  fi
+  echo "${detected:-localhost}"
+}
+
+mysql_root_exec() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    mysql "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo mysql "$@"
+  else
+    mysql "$@"
+  fi
+}
+
+mysql_quote() {
+  printf "%s" "$1" | sed "s/'/''/g"
+}
+
+SKIP_ENV=false
+if [[ -f "$ENV_FILE" && "$OVERWRITE_ENV" != "true" ]]; then
+  if [[ "$AUTO" == "true" || "$YES" == "true" ]]; then
+    echo "检测到已有 .env，保持不覆盖。可用 --overwrite-env 强制重写。"
+    SKIP_ENV=true
+  else
+    echo "检测到已有 .env 文件。"
+    overwrite=$(ask "覆盖？(y/N) " "N")
+    if [[ "$overwrite" != "y" && "$overwrite" != "Y" ]]; then
+      echo "跳过 .env 生成，继续后续步骤..."
+      SKIP_ENV=true
+    fi
+  fi
+fi
+
 if [[ "$SKIP_ENV" != "true" ]]; then
-  echo "📝 Step 1/4: 配置环境变量"
+  echo "Step 1/4: 配置环境变量"
   echo ""
 
-  read -rp "  应用端口 [5180]: " PORT
-  PORT=${PORT:-5180}
+  PORT_VALUE=$(ask "  应用端口 [$PORT_VALUE]: " "$PORT_VALUE")
 
-  echo ""
-  echo "  访问方式:"
-  echo "    1. 本机访问 (localhost)"
-  echo "    2. 内网 IP 访问"
-  echo "    3. 域名访问"
-  read -rp "  选择 [1]: " ACCESS_MODE
-  ACCESS_MODE=${ACCESS_MODE:-1}
+  ACCESS_MODE="1"
+  if [[ -n "$FRONTEND_URL_VALUE" ]]; then
+    ACCESS_MODE="custom"
+  elif [[ -n "$DOMAIN_VALUE" ]]; then
+    ACCESS_MODE="3"
+  elif [[ -n "$HOST_VALUE" || "$AUTO" == "true" ]]; then
+    ACCESS_MODE="2"
+  elif [[ "$AUTO" != "true" ]]; then
+    echo ""
+    echo "  访问方式:"
+    echo "    1. 本机访问 (localhost)"
+    echo "    2. IP 访问"
+    echo "    3. 域名访问"
+    ACCESS_MODE=$(ask "  选择 [1]: " "1")
+  fi
 
-  case $ACCESS_MODE in
+  case "$ACCESS_MODE" in
+    custom)
+      FRONTEND_URL="$FRONTEND_URL_VALUE"
+      CORS_ORIGIN="$FRONTEND_URL_VALUE"
+      COOKIE_DOMAIN=""
+      DEMO_DOMAIN=""
+      ;;
     2)
-      read -rp "  内网 IP: " LAN_IP
-      FRONTEND_URL="http://${LAN_IP}:${PORT}"
-      CORS_ORIGIN="http://${LAN_IP}:${PORT}"
+      LAN_IP=$(detect_ip)
+      if [[ "$AUTO" != "true" && -z "$HOST_VALUE" ]]; then
+        LAN_IP=$(ask "  IP [$LAN_IP]: " "$LAN_IP")
+      fi
+      FRONTEND_URL="http://${LAN_IP}:${PORT_VALUE}"
+      CORS_ORIGIN="$FRONTEND_URL"
       COOKIE_DOMAIN=""
       DEMO_DOMAIN=""
       ;;
     3)
-      read -rp "  域名 (如 ai.company.com): " DOMAIN
-      FRONTEND_URL="https://${DOMAIN}"
-      CORS_ORIGIN="https://${DOMAIN}"
-      COOKIE_DOMAIN=".${DOMAIN}"
-      DEMO_DOMAIN="demo.${DOMAIN}"
+      if [[ -z "$DOMAIN_VALUE" ]]; then
+        DOMAIN_VALUE=$(ask "  域名 (如 ai.company.com): " "")
+      fi
+      FRONTEND_URL="https://${DOMAIN_VALUE}"
+      CORS_ORIGIN="$FRONTEND_URL"
+      COOKIE_DOMAIN=".${DOMAIN_VALUE}"
+      DEMO_DOMAIN="demo.${DOMAIN_VALUE}"
       ;;
     *)
-      FRONTEND_URL="http://localhost:${PORT}"
-      CORS_ORIGIN="http://localhost:${PORT}"
+      FRONTEND_URL="http://localhost:${PORT_VALUE}"
+      CORS_ORIGIN="$FRONTEND_URL"
       COOKIE_DOMAIN=""
       DEMO_DOMAIN=""
       ;;
   esac
 
   echo ""
-  echo "  数据库:"
-  echo "    1. Docker Compose 自带 MySQL"
-  echo "    2. 使用已有的 MySQL"
-  read -rp "  选择 [1]: " DB_MODE
-  DB_MODE=${DB_MODE:-1}
+  if [[ -z "$DB_MODE_VALUE" ]]; then
+    if [[ "$AUTO" == "true" ]]; then
+      DB_MODE_VALUE="mysql-auto"
+    else
+      echo "  数据库:"
+      echo "    1. Docker Compose 自带 MySQL"
+      echo "    2. 使用已有的 MySQL"
+      echo "    3. 本机 MySQL 自动创建数据库和用户"
+      db_choice=$(ask "  选择 [1]: " "1")
+      case "$db_choice" in
+        2) DB_MODE_VALUE="existing" ;;
+        3) DB_MODE_VALUE="mysql-auto" ;;
+        *) DB_MODE_VALUE="compose" ;;
+      esac
+    fi
+  fi
 
   MYSQL_ROOT_PASSWORD=""
-  if [[ "$DB_MODE" == "2" ]]; then
-    read -rp "  MySQL 地址 [localhost]: " DB_HOST
-    DB_HOST=${DB_HOST:-localhost}
-    read -rp "  MySQL 端口 [3306]: " DB_PORT
-    DB_PORT=${DB_PORT:-3306}
-    read -rp "  MySQL 用户 [linggan]: " DB_USER
-    DB_USER=${DB_USER:-linggan}
-    read -rsp "  MySQL 密码: " DB_PASS
-    echo ""
-    read -rp "  数据库名 [linggan]: " DB_NAME
-    DB_NAME=${DB_NAME:-linggan}
-    DATABASE_URL="mysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
-  else
-    DEFAULT_PWD=$(gen_hex 12)
-    MYSQL_ROOT_PASSWORD="$DEFAULT_PWD"
-    DATABASE_URL="mysql://root:${DEFAULT_PWD}@db:3306/linggan"
-    echo "  MySQL 密码已自动生成"
-  fi
+  case "$DB_MODE_VALUE" in
+    existing)
+      DB_HOST_VALUE=$(ask "  MySQL 地址 [$DB_HOST_VALUE]: " "$DB_HOST_VALUE")
+      DB_PORT_VALUE=$(ask "  MySQL 端口 [$DB_PORT_VALUE]: " "$DB_PORT_VALUE")
+      DB_USER_VALUE=$(ask "  MySQL 用户 [$DB_USER_VALUE]: " "$DB_USER_VALUE")
+      DB_PASS_VALUE=$(ask_secret "  MySQL 密码: " "$DB_PASS_VALUE")
+      DB_NAME_VALUE=$(ask "  数据库名 [$DB_NAME_VALUE]: " "$DB_NAME_VALUE")
+      DATABASE_URL="mysql://${DB_USER_VALUE}:${DB_PASS_VALUE}@${DB_HOST_VALUE}:${DB_PORT_VALUE}/${DB_NAME_VALUE}"
+      ;;
+    mysql-auto)
+      DB_PASS_VALUE="${DB_PASS_VALUE:-$(gen_hex 16)}"
+      DATABASE_URL="mysql://${DB_USER_VALUE}:${DB_PASS_VALUE}@localhost:${DB_PORT_VALUE}/${DB_NAME_VALUE}"
+      if command -v mysql >/dev/null 2>&1; then
+        echo "  正在准备本机 MySQL 数据库和用户..."
+        if mysql_root_exec <<SQL
+CREATE DATABASE IF NOT EXISTS \`${DB_NAME_VALUE}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${DB_USER_VALUE}'@'localhost' IDENTIFIED BY '$(mysql_quote "$DB_PASS_VALUE")';
+ALTER USER '${DB_USER_VALUE}'@'localhost' IDENTIFIED BY '$(mysql_quote "$DB_PASS_VALUE")';
+GRANT ALL PRIVILEGES ON \`${DB_NAME_VALUE}\`.* TO '${DB_USER_VALUE}'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+        then
+          echo "  MySQL 数据库已准备。"
+        else
+          echo "  MySQL 自动创建失败。请确认 mysql-server 已安装，并手工创建 DATABASE_URL 对应账号。"
+        fi
+      fi
+      ;;
+    compose)
+      MYSQL_ROOT_PASSWORD=$(gen_hex 12)
+      DATABASE_URL="mysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/linggan"
+      echo "  Docker Compose MySQL 密码已自动生成。"
+      ;;
+    *)
+      echo "Unsupported --db-mode: $DB_MODE_VALUE" >&2
+      exit 2
+      ;;
+  esac
 
   JWT_SECRET=$(gen_secret)
   TENANT_SECRET=$(gen_hex 32)
@@ -97,7 +283,7 @@ if [[ "$SKIP_ENV" != "true" ]]; then
 
   {
     echo "# ── LingganClaw 配置（由 setup.sh 生成）──"
-    echo "PORT=$PORT"
+    echo "PORT=$PORT_VALUE"
     echo "NODE_ENV=production"
     echo ""
     echo "# 访问"
@@ -113,7 +299,6 @@ if [[ "$SKIP_ENV" != "true" ]]; then
     echo "JWT_SECRET=$JWT_SECRET"
     echo "TENANT_SECRET=$TENANT_SECRET"
     echo "INTERNAL_API_KEY=$INTERNAL_API_KEY"
-    echo "# 独立部署默认关闭注册邮箱验证码；配置 SMTP 后可改为 true"
     echo "EMAIL_VERIFICATION_REQUIRED=false"
     echo ""
     echo "# OpenClaw"
@@ -125,12 +310,20 @@ if [[ "$SKIP_ENV" != "true" ]]; then
     echo "CLAW_GATEWAY_TOKEN=$GW_TOKEN"
     echo "CLAW_REMOTE_HOST=127.0.0.1"
     echo "HERMES_HOME=$HOME/.hermes"
-    echo "LINGXIA_INTERNAL_BASE_URL=http://127.0.0.1:$PORT"
+    echo "LINGXIA_INTERNAL_BASE_URL=http://127.0.0.1:$PORT_VALUE"
     echo ""
     echo "# 灵虾路由"
     [[ -n "$DEMO_DOMAIN" ]] && echo "LINGGAN_CLAW_BASE_DOMAIN=$DEMO_DOMAIN"
     [[ -n "$DEMO_DOMAIN" ]] && echo "DEMO_ROUTE_DOMAIN=$DEMO_DOMAIN"
     [[ -n "$COOKIE_DOMAIN" ]] && echo "LINGGAN_CLAW_ENTRY_SCHEME=https" || echo "LINGGAN_CLAW_ENTRY_SCHEME=http"
+    echo ""
+    echo "# 业务 Agent 预置默认关闭，新环境可在后台自行配置"
+    echo "ENABLE_BUILTIN_BUSINESS_AGENT_PRESETS=false"
+    echo ""
+    echo "# 实验工作台默认关闭"
+    echo "TASK_WORKBENCH_LAB_ENABLED=false"
+    echo "TASK_WORKBENCH_LAB_ALLOW_USER_IDS="
+    echo "TASK_WORKBENCH_LAB_MAX_AGENTS=3"
     echo ""
     echo "# 平台记忆（需要 DEEPSEEK_API_KEY）"
     echo "MEMORY_ENABLED=true"
@@ -149,35 +342,34 @@ if [[ "$SKIP_ENV" != "true" ]]; then
     echo "SANDBOX_MAX_PER_USER=2"
   } > "$ENV_FILE"
 
+  chmod 600 "$ENV_FILE" 2>/dev/null || true
   echo ""
-  echo "  ✅ .env 已生成"
+  echo "  .env 已生成。"
 fi
 
-# ── Step 2: 检测 OpenClaw ─────────────────────────────────────────
 echo ""
-echo "📝 Step 2/4: 检测 OpenClaw"
+echo "Step 2/4: 检测 OpenClaw"
 
-if command -v openclaw >/dev/null 2>&1; then
-  OC_VERSION=$(openclaw --version 2>/dev/null | head -1)
-  echo "  ✅ 检测到 OpenClaw: $OC_VERSION"
+if [[ "$SKIP_OPENCLAW" == "true" ]]; then
+  echo "  已跳过 OpenClaw 配置。"
+elif command -v openclaw >/dev/null 2>&1; then
+  OC_VERSION=$(openclaw --version 2>/dev/null | head -1 || true)
+  echo "  检测到 OpenClaw: ${OC_VERSION:-openclaw}"
 
-  GW_TOKEN=$(grep "^CLAW_GATEWAY_TOKEN=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "")
-  CORS_URL=$(grep "^FRONTEND_URL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "")
+  GW_TOKEN=$(grep "^CLAW_GATEWAY_TOKEN=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "")
+  CORS_URL=$(grep "^FRONTEND_URL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "")
   OC_HOME="${HOME}/.openclaw"
   OC_CONFIG="$OC_HOME/openclaw.json"
 
   if [[ -f "$OC_CONFIG" && -n "$GW_TOKEN" ]]; then
     echo "  正在同步灵虾配置到 OpenClaw..."
-
     python3 << PYEOF
-import json, sys
+import json
+from pathlib import Path
+path = Path("$OC_CONFIG")
 try:
-    with open("$OC_CONFIG") as f:
-        cfg = json.load(f)
-
+    cfg = json.loads(path.read_text())
     changed = False
-
-    # Token
     gw = cfg.setdefault("gateway", {})
     auth = gw.setdefault("auth", {})
     if auth.get("token") != "$GW_TOKEN":
@@ -185,90 +377,75 @@ try:
         auth["mode"] = "token"
         changed = True
         print("    - Gateway Token: 已同步")
-
-    # Bind
     if gw.get("bind") != "lan":
         gw["bind"] = "lan"
         changed = True
         print("    - bind: 已设为 lan")
-
-    # AllowedOrigins
     origins = gw.setdefault("controlUi", {}).setdefault("allowedOrigins", [])
-    for url in ["$CORS_URL", "http://localhost:5180", "http://127.0.0.1:5180"]:
+    for url in ["$CORS_URL", "http://localhost:$PORT_VALUE", "http://127.0.0.1:$PORT_VALUE"]:
         if url and url not in origins:
             origins.append(url)
             changed = True
             print(f"    - allowedOrigins: 添加 {url}")
-
     if changed:
-        with open("$OC_CONFIG", "w") as f:
-            json.dump(cfg, f, indent=2)
-        print("  ✅ OpenClaw 配置已更新")
+        path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+        print("  OpenClaw 配置已更新")
     else:
-        print("  ✅ OpenClaw 配置已是最新")
-except Exception as e:
-    print(f"  ⚠️  配置同步失败: {e}")
+        print("  OpenClaw 配置已是最新")
+except Exception as exc:
+    print(f"  OpenClaw 配置同步失败: {exc}")
 PYEOF
   elif [[ ! -f "$OC_CONFIG" ]]; then
-    echo "  未找到配置文件，请先运行: openclaw setup"
-    echo "  然后重新运行本脚本"
+    echo "  未找到 $OC_CONFIG。请先运行: openclaw setup"
   fi
 else
-  echo "  ❌ 未检测到 OpenClaw"
-  echo ""
-  echo "  灵虾的主聊天功能依赖 OpenClaw，请先安装:"
-  echo "    npm install -g openclaw"
-  echo "    openclaw setup"
-  echo ""
-  echo "  安装后重新运行本脚本，将自动配置。"
-  echo "  详见: docs/DEPLOY.md"
+  echo "  未检测到 OpenClaw。主聊天依赖 OpenClaw，请先安装并运行 openclaw setup。"
 fi
 
-# ── Step 3: 安装依赖 ──────────────────────────────────────────────
 echo ""
-echo "📝 Step 3/4: 安装依赖"
-
-if command -v pnpm >/dev/null 2>&1; then
-  pnpm install --frozen-lockfile 2>/dev/null || pnpm install
-  echo "  ✅ 依赖已安装"
+echo "Step 3/4: 安装依赖"
+if [[ "$SKIP_INSTALL" == "true" ]]; then
+  echo "  已跳过依赖安装。"
 else
-  echo "  ⚠️  未检测到 pnpm: npm install -g pnpm"
+  if pnpm_cmd install --frozen-lockfile 2>/dev/null || pnpm_cmd install; then
+    echo "  依赖已安装。"
+  else
+    echo "  依赖安装失败，请检查 Node.js / pnpm。"
+    exit 1
+  fi
 fi
 
 if [[ ! -f "ecosystem.config.cjs" && -f "ecosystem.config.cjs.example" ]]; then
   cp ecosystem.config.cjs.example ecosystem.config.cjs
-  echo "  ✅ 已生成 PM2 配置 ecosystem.config.cjs"
+  echo "  已生成 PM2 配置 ecosystem.config.cjs"
 fi
 
-# ── Step 4: 数据库迁移 ────────────────────────────────────────────
 echo ""
-echo "📝 Step 4/4: 数据库迁移"
-
-DB_URL=$(grep "^DATABASE_URL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "")
-if [[ "$DB_URL" == *"@db:"* ]]; then
+echo "Step 4/4: 数据库迁移"
+DB_URL=$(grep "^DATABASE_URL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "")
+if [[ "$SKIP_DB_PUSH" == "true" ]]; then
+  echo "  已跳过数据库迁移。"
+elif [[ "$DB_URL" == *"@db:"* ]]; then
   echo "  Docker Compose 数据库，请先: docker compose up -d db"
   echo "  然后运行: pnpm db:push"
 else
-  if command -v pnpm >/dev/null 2>&1; then
-    if pnpm db:push 2>/dev/null; then
-      echo "  ✅ 数据库迁移完成"
-    else
-      echo "  ⚠️  迁移失败，请检查 DATABASE_URL"
-    fi
+  if pnpm_cmd db:push 2>/dev/null; then
+    echo "  数据库迁移完成。"
+  else
+    echo "  迁移失败，请检查 DATABASE_URL。"
   fi
 fi
 
-# ── 完成 ──────────────────────────────────────────────────────────
 echo ""
 echo "  ─────────────────────────────────"
-echo "  🦐 灵虾初始化完成！"
+echo "  灵虾初始化完成！"
 echo "  ─────────────────────────────────"
 echo ""
 echo "  启动方式："
-echo "    Docker:  docker compose up -d"
-echo "    手动:    pnpm build && pnpm start"
-echo "    PM2:     pm2 start ecosystem.config.cjs"
+echo "    pnpm build && pnpm start"
+echo "    pm2 start ecosystem.config.cjs"
 echo ""
-echo "  访问: $(grep '^FRONTEND_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo 'http://localhost:5180')"
-echo "  创建首个管理员: pnpm tsx scripts/init-admin.ts --email=admin@example.com --password='请换成强密码' --name='Admin'"
+echo "  访问: $(grep '^FRONTEND_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo 'http://localhost:5180')"
+echo "  创建首个管理员:"
+echo "    pnpm tsx scripts/init-admin.ts --email=admin@example.com --password='请换成强密码' --name='Admin'"
 echo ""

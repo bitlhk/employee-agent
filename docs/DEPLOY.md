@@ -12,6 +12,30 @@
 
 ## 方式一：裸机部署（推荐，适合灵虾 + OpenClaw 同机）
 
+### 一条命令引导安装
+
+全新 Ubuntu 服务器可以先用 bootstrap 脚本完成依赖安装、代码拉取、`.env` 生成、MySQL 初始化、构建和 PM2 启动：
+
+```bash
+curl -fsSL -o /tmp/install-lingxia.sh \
+  https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh
+bash /tmp/install-lingxia.sh --host <服务器IP或域名>
+```
+
+常用参数：
+
+```bash
+bash /tmp/install-lingxia.sh \
+  --dir /opt/linggan-claw \
+  --port 5180 \
+  --host 111.119.236.165 \
+  --db-mode mysql-auto
+```
+
+`bootstrap-install.sh` 只负责系统环境和仓库拉取；仓库内配置仍由 `setup.sh --auto` 完成。
+
+### 手动裸机部署
+
 这是当前推荐的独立部署方式，尤其适合 `ubuntu` / 普通用户运行：
 
 ```bash

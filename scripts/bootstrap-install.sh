@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Bootstrap installer for LingganClaw.
+# Intended usage:
+#   curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh | bash
+
+REPO_URL="${LINGXIA_REPO_URL:-https://github.com/bitlhk/linggan-claw.git}"
+BRANCH="${LINGXIA_BRANCH:-main}"
+INSTALL_DIR="${LINGXIA_INSTALL_DIR:-/opt/linggan-claw}"
+PORT="${LINGXIA_PORT:-5180}"
+HOST="${LINGXIA_HOST:-}"
+DB_MODE="${LINGXIA_DB_MODE:-mysql-auto}"
+START_SERVICE=true
+INSTALL_MYSQL=true
+DRY_RUN=false
+OVERWRITE_ENV=false
+
+usage() {
+  cat <<'EOF'
+Usage: bash bootstrap-install.sh [options]
+
+Options:
+  --repo <url>             Git repository URL.
+  --branch <name>          Git branch, default main.
+  --dir <path>             Install directory, default /opt/linggan-claw.
+  --port <port>            App port, default 5180.
+  --host <ip-or-host>      Public host/IP for FRONTEND_URL. Auto-detected by default.
+  --db-mode <mode>         mysql-auto | existing | compose. Default mysql-auto.
+  --skip-mysql             Do not install mysql-server.
+  --skip-start             Do not build/start PM2 service.
+  --overwrite-env          Regenerate .env if it already exists.
+  --dry-run                Print actions without changing the system.
+  -h, --help               Show this help.
+
+Examples:
+  bash bootstrap-install.sh
+  bash bootstrap-install.sh --host 111.119.236.165 --dir /opt/linggan-claw
+  bash bootstrap-install.sh --db-mode existing --skip-mysql
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo) REPO_URL="${2:?missing --repo value}"; shift 2 ;;
+    --branch) BRANCH="${2:?missing --branch value}"; shift 2 ;;
+    --dir) INSTALL_DIR="${2:?missing --dir value}"; shift 2 ;;
+    --port) PORT="${2:?missing --port value}"; shift 2 ;;
+    --host) HOST="${2:?missing --host value}"; shift 2 ;;
+    --db-mode) DB_MODE="${2:?missing --db-mode value}"; shift 2 ;;
+    --skip-mysql) INSTALL_MYSQL=false; shift ;;
+    --skip-start) START_SERVICE=false; shift ;;
+    --overwrite-env) OVERWRITE_ENV=true; shift ;;
+    --dry-run) DRY_RUN=true; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+log() { printf "\n==> %s\n" "$*"; }
+run() {
+  if [[ "$DRY_RUN" == "true" ]]; then
+    printf "[dry-run] %q" "$1"
+    shift || true
+    for arg in "$@"; do printf " %q" "$arg"; done
+    printf "\n"
+  else
+    "$@"
+  fi
+}
+
+sudo_cmd() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    echo "This installer needs sudo for system packages and /opt writes." >&2
+    return 1
+  fi
+}
+
+detect_host() {
+  if [[ -n "$HOST" ]]; then
+    echo "$HOST"
+    return
+  fi
+  local detected=""
+  detected=$(curl -fsS --max-time 4 https://api.ipify.org 2>/dev/null || true)
+  if [[ -z "$detected" ]]; then
+    detected=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  fi
+  echo "${detected:-localhost}"
+}
+
+need_cmd() {
+  ! command -v "$1" >/dev/null 2>&1
+}
+
+ensure_base_packages() {
+  if [[ -f /etc/debian_version ]]; then
+    log "Installing base packages"
+    run sudo_cmd apt-get update
+    run sudo_cmd apt-get install -y git curl ca-certificates openssl python3 build-essential
+    if [[ "$INSTALL_MYSQL" == "true" && "$DB_MODE" == "mysql-auto" ]]; then
+      run sudo_cmd apt-get install -y mysql-server
+    fi
+  else
+    log "Non-Debian system detected; please ensure git/curl/openssl/python3 are installed"
+  fi
+}
+
+ensure_node() {
+  local major=""
+  if command -v node >/dev/null 2>&1; then
+    major=$(node -v | sed -E 's/^v([0-9]+).*/\1/')
+  fi
+  if [[ -n "$major" && "$major" -ge 22 ]]; then
+    log "Node.js $(node -v) detected"
+    return
+  fi
+  if [[ ! -f /etc/debian_version ]]; then
+    echo "Node.js 22+ is required. Please install it manually." >&2
+    exit 1
+  fi
+  log "Installing Node.js 22"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[dry-run] curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"
+  else
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  fi
+  run sudo_cmd apt-get install -y nodejs
+}
+
+ensure_node_tools() {
+  log "Preparing pnpm and pm2"
+  run corepack enable
+  run corepack prepare pnpm@10.4.1 --activate
+  if need_cmd pm2; then
+    run sudo_cmd npm install -g pm2
+  fi
+}
+
+checkout_repo() {
+  log "Checking out LingganClaw"
+  local parent owner
+  parent=$(dirname "$INSTALL_DIR")
+  owner="${SUDO_USER:-${USER:-$(id -un)}}"
+  run sudo_cmd mkdir -p "$parent"
+
+  if [[ -d "$INSTALL_DIR/.git" ]]; then
+    run git -C "$INSTALL_DIR" fetch origin "$BRANCH"
+    run git -C "$INSTALL_DIR" checkout "$BRANCH"
+    run git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH"
+  elif [[ -e "$INSTALL_DIR" ]]; then
+    if [[ -z "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | head -1)" ]]; then
+      run sudo_cmd chown "$owner":"$owner" "$INSTALL_DIR"
+      run git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+    else
+      echo "$INSTALL_DIR exists but is not an empty directory or a git repository." >&2
+      exit 1
+    fi
+  else
+    run sudo_cmd mkdir -p "$INSTALL_DIR"
+    run sudo_cmd chown "$owner":"$owner" "$INSTALL_DIR"
+    run git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+  fi
+}
+
+run_setup() {
+  log "Running LingganClaw setup"
+  local host_arg
+  host_arg=$(detect_host)
+  local setup_args=(
+    "--auto"
+    "--yes"
+    "--port" "$PORT"
+    "--host" "$host_arg"
+    "--db-mode" "$DB_MODE"
+  )
+  if [[ "$OVERWRITE_ENV" == "true" ]]; then
+    setup_args+=("--overwrite-env")
+  fi
+  run bash "$INSTALL_DIR/setup.sh" "${setup_args[@]}"
+}
+
+start_app() {
+  if [[ "$START_SERVICE" != "true" ]]; then
+    log "Skipping build and PM2 start"
+    return
+  fi
+  log "Building and starting LingganClaw"
+  run bash -lc "cd '$INSTALL_DIR' && corepack pnpm check"
+  run bash -lc "cd '$INSTALL_DIR' && corepack pnpm build"
+  if [[ -f "$INSTALL_DIR/ecosystem.config.cjs" ]]; then
+    run bash -lc "cd '$INSTALL_DIR' && pm2 start ecosystem.config.cjs --update-env || pm2 restart ecosystem.config.cjs --update-env"
+    run pm2 save
+  else
+    echo "ecosystem.config.cjs was not generated." >&2
+    exit 1
+  fi
+}
+
+print_summary() {
+  local url="http://$(detect_host):${PORT}"
+  if [[ -f "$INSTALL_DIR/.env" ]]; then
+    url=$(grep '^FRONTEND_URL=' "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2- || echo "$url")
+  fi
+  cat <<EOF
+
+─────────────────────────────────
+LingganClaw bootstrap completed.
+─────────────────────────────────
+
+Install dir:
+  $INSTALL_DIR
+
+Open:
+  $url
+
+Create the first admin:
+  cd $INSTALL_DIR
+  corepack pnpm tsx scripts/init-admin.ts --email=admin@example.com --password='CHANGE_ME' --name='Admin'
+
+Health checks:
+  curl http://127.0.0.1:${PORT}/health
+  bash scripts/check-local-openclaw-node.sh
+
+EOF
+}
+
+main() {
+  log "LingganClaw bootstrap installer"
+  ensure_base_packages
+  ensure_node
+  ensure_node_tools
+  checkout_repo
+  run_setup
+  start_app
+  print_summary
+}
+
+main

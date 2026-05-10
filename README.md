@@ -75,6 +75,22 @@ LingganClaw 是一个基于 [OpenClaw](https://github.com/nicepkg/openclaw) 的 
 
 ## 快速开始
 
+### 一条命令部署（Ubuntu 裸机）
+
+适合全新服务器验证。脚本会安装基础依赖、拉取 GitHub 仓库、生成 `.env`、准备本机 MySQL、构建并用 PM2 启动灵虾。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh | bash
+```
+
+更可审计的方式：
+
+```bash
+curl -fsSL -o /tmp/install-lingxia.sh \
+  https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh
+bash /tmp/install-lingxia.sh --host 你的服务器IP --dir /opt/linggan-claw
+```
+
 ### 方式一：裸机部署（推荐）
 
 推荐将灵虾平台、OpenClaw Gateway、Docker 沙箱部署在同一台 Ubuntu 服务器上。这样路径、权限、沙箱文件和运行时 token 都由本机配置控制，最适合验证一套干净、可迁移的企业部署。
