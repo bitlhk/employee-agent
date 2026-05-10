@@ -4455,6 +4455,16 @@ html:has(:root[data-theme-mode="light"]) body {
 
 .coop-session-back {
   color: var(--oc-text-secondary);
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background .15s, border-color .15s, color .15s;
+}
+
+.coop-session-back:hover,
+.coop-session-back:focus-visible {
+  border-color: color-mix(in oklab, var(--banking-brand-red) 18%, transparent);
+  background: var(--banking-brand-red-subtle);
+  color: var(--banking-brand-red);
 }
 
 .coop-session-title-row {
