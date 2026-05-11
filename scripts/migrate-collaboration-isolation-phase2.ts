@@ -14,8 +14,10 @@ const seedSpaces = [
 console.log(`[COLLAB-MIGRATE] Phase 2 collaboration isolation schema ${apply ? 'apply' : 'dry-run'}`);
 console.log('---');
 console.log('ALTER TABLE lx_coop_sessions ADD COLUMN space_id INT NULL AFTER creator_user_id (if missing)');
+console.log('ALTER TABLE lx_coop_sessions ADD COLUMN deleted_at TIMESTAMP NULL AFTER closed_at (if missing)');
 console.log('---');
 console.log('CREATE INDEX idx_lx_coop_sessions_space_id ON lx_coop_sessions(space_id) (if missing)');
+console.log('CREATE INDEX idx_lx_coop_sessions_deleted_at ON lx_coop_sessions(deleted_at) (if missing)');
 console.log('---');
 console.log('Seed initial collaboration spaces if missing:');
 for (const space of seedSpaces) {
@@ -48,6 +50,17 @@ try {
     console.log('[COLLAB-MIGRATE] lx_coop_sessions.space_id already exists');
   }
 
+  const [deletedAtRows] = await conn.query<any[]>(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'lx_coop_sessions' AND COLUMN_NAME = 'deleted_at'`,
+    [dbName],
+  );
+  if (deletedAtRows.length === 0) {
+    await conn.query('ALTER TABLE lx_coop_sessions ADD COLUMN deleted_at TIMESTAMP NULL AFTER closed_at');
+    console.log('[COLLAB-MIGRATE] added lx_coop_sessions.deleted_at');
+  } else {
+    console.log('[COLLAB-MIGRATE] lx_coop_sessions.deleted_at already exists');
+  }
+
   const [indexRows] = await conn.query<any[]>(
     `SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'lx_coop_sessions' AND INDEX_NAME = 'idx_lx_coop_sessions_space_id'`,
     [dbName],
@@ -57,6 +70,17 @@ try {
     console.log('[COLLAB-MIGRATE] created idx_lx_coop_sessions_space_id');
   } else {
     console.log('[COLLAB-MIGRATE] idx_lx_coop_sessions_space_id already exists');
+  }
+
+  const [deletedAtIndexRows] = await conn.query<any[]>(
+    `SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'lx_coop_sessions' AND INDEX_NAME = 'idx_lx_coop_sessions_deleted_at'`,
+    [dbName],
+  );
+  if (deletedAtIndexRows.length === 0) {
+    await conn.query('CREATE INDEX idx_lx_coop_sessions_deleted_at ON lx_coop_sessions(deleted_at)');
+    console.log('[COLLAB-MIGRATE] created idx_lx_coop_sessions_deleted_at');
+  } else {
+    console.log('[COLLAB-MIGRATE] idx_lx_coop_sessions_deleted_at already exists');
   }
 
   for (const space of seedSpaces) {

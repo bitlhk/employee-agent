@@ -237,8 +237,6 @@ export async function countPendingCoop(userId: number) {
 
   try {
     // 2026-04-17: pendingCount 也要过滤掉 deleted_at + 我隐藏的，否则红点跟列表不一致
-    // 注意：drizzle/schema.ts 的 lxCoopSessions 还没加 deletedAt 字段（只 ALTER 了 db），
-    // 所以这里用 raw SQL 引 lx_coop_sessions.deleted_at
     const [pendingApproval] = await db
       .select({ c: sql<number>`count(*)` })
       .from(clawCollabRequests)

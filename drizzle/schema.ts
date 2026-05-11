@@ -473,6 +473,7 @@ export const lxCoopSessions = mysqlTable("lx_coop_sessions", {
   createdAt: timestamp("created_at").defaultNow(),
   publishedAt: timestamp("published_at"),
   closedAt: timestamp("closed_at"),
+  deletedAt: timestamp("deleted_at"),
 });
 
 export type LxCoopSession = typeof lxCoopSessions.$inferSelect;
