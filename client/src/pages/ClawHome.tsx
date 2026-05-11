@@ -294,7 +294,7 @@ export default function ClawHome() {
 
             <motion.h1 variants={fadeInUp} className="text-3xl md:text-5xl font-bold leading-tight mb-4">
               <span className="text-gray-900">申请一个</span>
-              <span className="bg-gradient-to-r from-primary via-rose-500 to-primary bg-clip-text text-transparent">员工智能体</span>
+              <span className="text-primary">员工智能体</span>
             </motion.h1>
 
             <motion.p variants={fadeInUp} className="text-base text-muted-foreground mb-2 max-w-lg">
