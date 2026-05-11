@@ -18,7 +18,7 @@ export interface BrandConfig {
   slogan: string;
   /** 主题色 hex，如 "#9e1822" */
   accentColor: string;
-  /** Logo 路径，如 "/images/lingxia.svg" */
+  /** Logo 路径，如 "/images/employee-agent.svg" */
   logo: string;
   /** Favicon 路径 */
   favicon: string;
@@ -40,7 +40,7 @@ export const DEFAULT_BRAND: BrandConfig = {
   platformEn: "Employee Agent",
   slogan: "企业 AI 员工平台",
   accentColor: "#9e1822",
-  logo: "/images/lingxia.svg",
+  logo: "/images/employee-agent.svg",
   favicon: "/favicon.png",
   systemPrompt:
     "You are Employee Agent, an enterprise AI assistant on the Employee Agent platform.",
@@ -101,7 +101,7 @@ export interface BrandPreset {
 export const BRAND_PRESETS: BrandPreset[] = [
   // ── 默认 ──
   {
-    id: "lingxia",
+    id: "employee-agent",
     label: "员工智能体 (默认)",
     description: "员工智能体默认品牌",
     config: { ...DEFAULT_BRAND },

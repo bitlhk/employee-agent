@@ -57,7 +57,7 @@ export function buildRuntimeUserMessage(message: string) {
 // ── 平台级安全 system prompt（服务端注入，不可被 Agent 覆盖）──────────
 function buildPlatformSecurityPrompt(brandSystemPrompt?: string) {
   return [
-  brandSystemPrompt || "You are Enterprise Agent, an enterprise AI assistant on the Linggan platform.",
+  brandSystemPrompt || "You are Employee Agent, an enterprise AI assistant on the Employee Agent platform.",
   "",
   "## Response Language Rules",
   "",

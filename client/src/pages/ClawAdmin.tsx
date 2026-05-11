@@ -84,7 +84,7 @@ function BrandSettingsPanel() {
   });
   const [saving, setSaving] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState(() => {
-    return brand.nameEn === DEFAULT_BRAND.nameEn ? "lingxia" : "custom";
+    return brand.nameEn === DEFAULT_BRAND.nameEn ? "employee-agent" : "custom";
   });
 
   const applyPreset = (presetId: string) => {
@@ -109,7 +109,7 @@ function BrandSettingsPanel() {
         githubUrl: brand.githubUrl,
         pageTitle: brand.pageTitle,
     });
-    setSelectedPreset(brand.nameEn === DEFAULT_BRAND.nameEn ? "lingxia" : "custom");
+    setSelectedPreset(brand.nameEn === DEFAULT_BRAND.nameEn ? "employee-agent" : "custom");
   }, [brand]);
 
   const setBrandMutation = trpc.claw.adminSetBrand.useMutation({
@@ -165,11 +165,11 @@ function BrandSettingsPanel() {
         <p className="text-xs text-muted-foreground mb-4">默认使用员工智能体品牌；需要企业白标时再切换为自定义。</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <button
-            onClick={() => applyPreset("lingxia")}
+            onClick={() => applyPreset("employee-agent")}
             className="text-left rounded-xl border p-4 transition-all hover:bg-gray-50"
             style={{
-              borderColor: selectedPreset === "lingxia" ? DEFAULT_BRAND.accentColor : "rgba(0,0,0,0.08)",
-              boxShadow: selectedPreset === "lingxia" ? `0 0 0 2px ${DEFAULT_BRAND.accentColor}20` : "none",
+              borderColor: selectedPreset === "employee-agent" ? DEFAULT_BRAND.accentColor : "rgba(0,0,0,0.08)",
+              boxShadow: selectedPreset === "employee-agent" ? `0 0 0 2px ${DEFAULT_BRAND.accentColor}20` : "none",
             }}
           >
             <div className="flex items-center gap-2">
@@ -232,7 +232,7 @@ function BrandSettingsPanel() {
               />
             </div>
           </div>
-          {field("logo", "Logo 路径", { placeholder: "/images/lingxia.svg" })}
+          {field("logo", "Logo 路径", { placeholder: "/images/employee-agent.svg" })}
         </div>
         {field("favicon", "Favicon 路径", { placeholder: "/favicon.png" })}
       </Card>

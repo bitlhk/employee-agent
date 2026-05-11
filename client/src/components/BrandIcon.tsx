@@ -1,13 +1,13 @@
 /**
  * BrandIcon — 品牌图标组件
  *
- * 有自定义 logo 时显示 <img>，默认（灵虾）时显示 LingxiaIcon 动画 SVG。
+ * 有自定义 logo 时显示 <img>，默认品牌时显示 Employee Agent 动画 SVG。
  */
 
 import { useBrand } from "@/lib/useBrand";
 import { LingxiaIcon } from "@/components/LingxiaIcon";
 
-const DEFAULT_LOGO = "/images/lingxia.svg";
+const DEFAULT_LOGO = "/images/employee-agent.svg";
 
 export function BrandIcon({
   size = 26,

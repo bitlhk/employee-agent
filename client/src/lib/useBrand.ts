@@ -2,7 +2,7 @@
  * 前端品牌配置 hook
  *
  * 从 /api/brand 加载品牌配置，全局缓存。
- * 未加载完成前返回默认值（灵虾），保证零闪烁。
+ * 未加载完成前返回默认品牌值，保证零闪烁。
  */
 
 import { useEffect, useState } from "react";
