@@ -1,247 +1,215 @@
-# LingganClaw 灵虾
+# 企业智能体平台
 
-> 开源的 AI Agent 编排平台 —— 多智能体协议路由 + 策展式记忆 + 安全沙箱，让每个用户拥有专属 AI 灵虾。
+> 一个面向企业探索场景的 Agent Client / Agent Platform：统一创建智能体实例、接入 OpenClaw / Hermes 等运行时、管理技能与任务、承载组织协作、安全隔离和审计。
 
 <p align="center">
-  <img src="client/public/images/lingxia.svg" width="120" alt="灵虾 Logo" />
+  <img src="client/public/images/lingxia.svg" width="120" alt="企业智能体 Logo" />
 </p>
 
 ## 它是什么
 
-LingganClaw 是一个基于 [OpenClaw](https://github.com/nicepkg/openclaw) 的 **多用户 AI Agent 平台**。用户注册后可以「领养」一只专属灵虾（AI Agent），灵虾运行在隔离的 Docker 沙箱中，支持：
+本项目是灵感平台下的 **企业智能体**模块。它不是单一聊天机器人，而是企业侧使用和管理智能体的入口层：
 
-- 自然语言对话（WebSocket / SSE 流式输出）
-- 多智能体路由（支持 OpenClaw / Hermes / 自定义 HTTP 协议）
-- 在沙箱中执行代码（Docker 隔离, seccomp 加固）
-- 生成并下载文件（PPT、HTML 幻灯片、代码等）
-- 策展式记忆（Hermes 风格, 自动提取用户偏好, 跨 Agent 共享）
-- 技能市场（安装 / 管理 / 分享技能）
-- 多渠道通知（微信 / 企业微信 / 飞书 / Webhook）
-- 定时任务（Cron 调度 + 自动推送）
+- **员工智能体**：每个用户可申请一个隔离的智能体实例。
+- **智能体工作台**：对话、技能、记忆、文件、频道、定时任务、协作统一入口。
+- **运行时接入**：默认对接本机 OpenClaw，也可接入 Hermes、Claude Code、Codex 或自定义 HTTP Agent。
+- **组织能力**：组织协作、渠道通知、任务工作台、技能广场、审计和权限治理。
+
+推荐默认部署形态：
+
+```text
+企业智能体平台 (Node.js / React)
+  -> 本机 OpenClaw Gateway
+  -> 本机工作空间 / 沙箱 / 文件
+  -> MySQL
+```
+
+也就是说，新机器上只要先准备或安装本机 OpenClaw，再用本仓库的一键脚本拉代码、初始化数据库和启动服务，就能跑一套干净环境。
 
 ## 页面结构
 
-```
-/              → ClawHome    领养首页（登录、一键领养、进入控制台）
-/claw/:adoptId → 子虾控制台   对话、技能、记忆、设定
-/admin         → ClawAdmin   管理后台（实例管理、系统配置）
-/login         → 登录/注册
-```
-
-无需泛域名、无需通配符证书，单机路径模式即可部署。
-
-## 架构
-
-```
-浏览器 ──HTTPS──▶ Nginx ──▶ LingganClaw (Node.js :5180)
-                                │
-                                ├── React SPA (主聊天 + 业务 Agent + 技能市场)
-                                ├── Agent Router (4 种协议路由)
-                                ├── 平台记忆 (Hermes 式策展记忆)
-                                ├── 租户隔离层 (TIL)
-                                │
-                                ├──WebSocket──▶ OpenClaw Gateway (:18789)
-                                │                  ├── per-user Agent
-                                │                  └── Docker 沙箱
-                                │
-                                └──HTTP──▶ 业务 Agent (可选)
-                                               ├── Hermes Agent (:8642)
-                                               ├── TradingAgents (:8189)
-                                               └── 自定义 Agent (任意 HTTP)
+```text
+/              -> 企业智能体首页：登录、申请员工智能体、进入工作台
+/claw/:adoptId -> 智能体工作台：聊天、技能、频道、记忆、协作、工作空间、定时任务
+/admin         -> 智能体管理：实例、组织协作、技能广场、系统设置、使用统计
+/login         -> 登录 / 注册
 ```
 
 ## 技术栈
 
 | 层级 | 技术 |
-|------|------|
-| 前端 | React 19, Vite, TailwindCSS 4, Radix UI, tRPC, Framer Motion |
+|---|---|
+| 前端 | React 19, Vite, TailwindCSS 4, Radix UI, tRPC |
 | 后端 | Node.js 22, Express, tRPC, tsx |
-| 数据库 | MySQL 8.0 (Drizzle ORM) |
-| AI 运行时 | OpenClaw Gateway |
-| 沙箱 | Docker (per-agent 隔离, seccomp, 无网络) |
+| 数据库 | MySQL 8.0, Drizzle ORM |
+| 运行时 | OpenClaw Gateway, Hermes / HTTP Adapter 可选 |
+| 进程管理 | PM2 |
 
 ## 环境要求
 
-| 依赖 | 版本 |
-|------|------|
-| Node.js | 22.x |
-| pnpm | 9.x+ |
-| MySQL | 8.0+ |
-| Docker | 24+ |
-| OpenClaw | 最新版 |
-| OS | Ubuntu 22.04+ (推荐) |
+推荐系统：Ubuntu 22.04+ / 24.04。
+
+一键脚本会自动准备：
+
+- git / curl / ca-certificates / openssl / python3 / build-essential
+- Node.js 22
+- pnpm 10.4.1
+- pm2
+- MySQL Server（默认 `mysql-auto` 模式）
+- `.env`
+- PM2 配置
+
+OpenClaw 运行时建议提前在同一台机器装好并启动；脚本完成后可用 `scripts/check-local-openclaw-node.sh` 检查。
 
 ---
 
-## 快速开始
+## 一键部署
 
-### 一条命令部署（Ubuntu 裸机）
+### 最简方式
 
-适合全新服务器验证。脚本会安装基础依赖、拉取 GitHub 仓库、生成 `.env`、准备本机 MySQL、构建并用 PM2 启动灵虾。
+在全新 Ubuntu 服务器上，以当前登录用户执行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh | bash
 ```
 
-更可审计的方式：
+脚本默认行为：
+
+- 从 GitHub 拉取 `bitlhk/linggan-claw`
+- 安装到当前用户目录：`~/linggan-claw`
+- 自动探测公网 IP，生成 `FRONTEND_URL`
+- 准备 MySQL 和数据库配置
+- 执行 `setup.sh --auto --yes`
+- 执行 `pnpm check`
+- 执行 `pnpm build`
+- 用 PM2 启动 `linggan-claw`
+
+安装完成后，脚本会输出访问地址和管理员初始化命令。
+
+### 可审计方式
 
 ```bash
-curl -fsSL -o /tmp/install-lingxia.sh \
+curl -fsSL -o /tmp/bootstrap-install.sh \
   https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh
-bash /tmp/install-lingxia.sh --host 你的服务器IP
+
+bash /tmp/bootstrap-install.sh --host 你的服务器IP
 ```
 
-默认会安装到当前用户目录下的 `~/linggan-claw`，与 OpenClaw / Hermes 的本机用户目录习惯保持一致。如需生产固定目录，也可以额外传入 `--dir /opt/linggan-claw`。
-
-### 方式一：裸机部署（推荐）
-
-推荐将灵虾平台、OpenClaw Gateway、Docker 沙箱部署在同一台 Ubuntu 服务器上。这样路径、权限、沙箱文件和运行时 token 都由本机配置控制，最适合验证一套干净、可迁移的企业部署。
+### 常用参数
 
 ```bash
-git clone https://github.com/bitlhk/linggan-claw.git
-cd linggan-claw
+bash /tmp/bootstrap-install.sh \
+  --repo https://github.com/bitlhk/linggan-claw.git \
+  --branch main \
+  --dir "$HOME/linggan-claw" \
+  --host 111.119.236.165 \
+  --port 5180
+```
 
-# 交互式配置：生成 .env、初始化数据库、生成本机 PM2 配置
-bash setup.sh
+参数说明：
 
-# 构建并启动
+| 参数 | 说明 |
+|---|---|
+| `--repo <url>` | Git 仓库地址，默认 GitHub main 仓库 |
+| `--branch <name>` | 分支，默认 `main` |
+| `--dir <path>` | 安装目录，默认 `$HOME/linggan-claw` |
+| `--port <port>` | 服务端口，默认 `5180` |
+| `--host <ip-or-host>` | 用于生成 `FRONTEND_URL`，不传则自动探测 |
+| `--db-mode <mode>` | `mysql-auto` / `existing` / `compose`，默认 `mysql-auto` |
+| `--skip-mysql` | 不安装 MySQL，适合使用外部数据库 |
+| `--skip-start` | 只拉代码和初始化，不构建/启动 |
+| `--overwrite-env` | 已存在 `.env` 时强制重建 |
+| `--dry-run` | 只打印将执行的动作 |
+
+### 初始化管理员
+
+脚本不会替你写死管理员密码。首次部署后执行：
+
+```bash
+cd ~/linggan-claw
+corepack pnpm tsx scripts/init-admin.ts \
+  --email=admin@example.com \
+  --password='换成强密码' \
+  --name='Admin'
+```
+
+然后浏览器打开：
+
+```text
+http://服务器IP:5180
+```
+
+## 后续升级
+
+同一个目录下可以重复执行一键脚本。脚本发现 `$HOME/linggan-claw` 已经是 Git 仓库时，会执行：
+
+```text
+git fetch
+git checkout main
+git pull --ff-only
+setup.sh --auto --yes
+pnpm check
 pnpm build
-pm2 start ecosystem.config.cjs
+pm2 start/restart
+```
 
-# 检查本机 OpenClaw、token、Gateway、CORS 和健康状态
+推荐升级命令：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh | bash
+```
+
+如果需要保留现有 `.env`，不要传 `--overwrite-env`。如果需要重新生成 `.env`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh | bash -s -- --overwrite-env
+```
+
+## 手动部署
+
+如果不使用一键脚本：
+
+```bash
+git clone https://github.com/bitlhk/linggan-claw.git ~/linggan-claw
+cd ~/linggan-claw
+corepack enable
+corepack prepare pnpm@10.4.1 --activate
+pnpm install
+bash setup.sh
+pnpm check
+pnpm build
+pm2 start ecosystem.config.cjs --update-env
+pm2 save
+```
+
+## OpenClaw 检查
+
+企业智能体平台默认按“平台与 OpenClaw 同机”设计。部署后检查：
+
+```bash
+cd ~/linggan-claw
 bash scripts/check-local-openclaw-node.sh
 ```
 
-首次部署可创建管理员账号：
+常见需要确认的项：
+
+- OpenClaw Gateway 是否启动
+- `.env` 中 `CLAW_GATEWAY_URL` 是否指向本机
+- `.env` 中 `CLAW_GATEWAY_TOKEN` 是否与 OpenClaw 配置一致
+- CORS / FRONTEND_URL 是否匹配
+
+## PM2 运维
 
 ```bash
-pnpm tsx scripts/init-admin.ts --email=admin@example.com --password='换成强密码' --name='Admin'
-```
-
-浏览器打开 `http://服务器IP:5180`，进入灵虾首页即可登录使用。
-
-### 方式二：Docker Compose（基础平台/数据库）
-
-Docker Compose 适合快速拉起 MySQL 和灵虾平台，但默认不包含宿主机 OpenClaw 环境。主聊天如果要使用本机 OpenClaw，优先选择裸机部署。
-
-```bash
-git clone https://github.com/bitlhk/linggan-claw.git
-cd linggan-claw
-bash setup.sh
-docker compose up -d
-```
-
-### 方式三：手动部署（自备 MySQL）
-
-```bash
-git clone https://github.com/bitlhk/linggan-claw.git
-cd linggan-claw
-pnpm install
-
-# 配置
-cp .env.example .env
-# 编辑 .env，填写 DATABASE_URL, JWT_SECRET, CLAW_GATEWAY_TOKEN 等
-
-# 建表 & 构建 & 启动
-pnpm db:push
-pnpm build
-pnpm start
-```
-
-> 完整配置说明见 [.env.example](.env.example)，生产部署细节见 [docs/DEPLOY.md](docs/DEPLOY.md)。
-
-## 代码同步与部署来源
-
-当前仓库是脱敏后的开源/部署镜像，适合在新机器上直接克隆并验证独立部署。生产私有环境的同步链路是：
-
-```text
-华为云私有仓库 → 脱敏构建 → 新加坡中转仓库 → GitHub main
-```
-
-如果新加坡服务器只是作为同步中转机，不需要再从 GitHub 克隆一份来覆盖中转目录。如果要把新加坡服务器作为一套新的灵虾运行环境，建议另建部署目录，例如 `~/linggan-claw`，从 GitHub 克隆一份干净代码，这样可以真实验证“新机器拉仓库 + 配 OpenClaw token + 启动灵虾”的可移植性。
-
----
-
-## OpenClaw 配置
-
-灵虾的 AI 能力依赖 OpenClaw Gateway。
-
-### 安装
-
-```bash
-npm install -g openclaw
-```
-
-### 配置 Gateway
-
-编辑 `~/.openclaw/openclaw.json`：
-
-```json
-{
-  "gateway": {
-    "port": 18789,
-    "mode": "local",
-    "bind": "lan",
-    "auth": {
-      "mode": "token",
-      "token": "<和 .env 中 CLAW_GATEWAY_TOKEN 一致>"
-    },
-    "http": {
-      "endpoints": {
-        "chatCompletions": { "enabled": true }
-      }
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": {
-        "primary": "你的模型ID"
-      },
-      "sandbox": {
-        "mode": "all",
-        "scope": "agent",
-        "workspaceAccess": "rw",
-        "docker": {
-          "image": "openclaw-sandbox:bookworm-slim",
-          "network": "none",
-          "readOnlyRoot": true,
-          "memory": "256m",
-          "cpus": 0.5,
-          "pidsLimit": 50
-        }
-      },
-      "tools": { "profile": "coding" }
-    }
-  }
-}
-```
-
-### 构建沙箱镜像 & 启动
-
-```bash
-OPENCLAW_HOME=~/.openclaw openclaw-sandbox-setup
-openclaw gateway start
-```
-
----
-
-## 生产部署
-
-### PM2 服务（推荐）
-
-```bash
-# setup.sh 会从 ecosystem.config.cjs.example 生成本机私有配置
-pm2 start ecosystem.config.cjs
-pm2 save
-
-# 查看状态和日志
 pm2 status linggan-claw
 pm2 logs linggan-claw
+pm2 restart linggan-claw
+pm2 save
 ```
 
-`ecosystem.config.cjs` 不进入 Git，由每台机器按当前目录和当前用户生成，避免把 `/root`、`/home/ubuntu`、绝对 Node 路径等环境差异写死。
+PM2 配置文件 `ecosystem.config.cjs` 由 `setup.sh` 按当前机器生成，不进入 Git，避免把 `/root`、`/home/ubuntu`、Node 绝对路径等环境差异写死。
 
-### Nginx 反代
+## Nginx 反代
 
 ```nginx
 server {
@@ -260,8 +228,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-
-        # SSE 流式输出
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 300s;
@@ -269,93 +235,36 @@ server {
 }
 ```
 
----
-
-## 套餐说明
-
-| | Starter（默认） | Plus | Internal |
-|------|------|------|------|
-| 对话 | 50 轮/天 | 无限制 | 无限制 |
-| 记忆 | 有 | 有 | 有 |
-| 技能 | 系统预置 | + 自定义技能 | 完整 |
-| 沙箱执行 | 有 | 有 | 有 |
-| 协作广场 | 可见，需升级 | 完整使用 | 完整 |
-| 模型切换 | 默认模型 | 多模型切换 | 完整 |
-| 有效期 | 30天（不活跃15天自动回收） | 无限期 | 无限期 |
-
-套餐由管理员在 `/admin` 页面调整。
-
-**环境变量可调参数：**
-- `CLAW_STARTER_DAILY_LIMIT` — Starter 每日对话上限（默认 50）
-- `CLAW_STARTER_INACTIVE_DAYS` — 不活跃回收天数（默认 15）
-
 ## 项目结构
 
-```
+```text
 linggan-claw/
-├── client/                  # 前端 (React + Vite)
-│   ├── src/
-│   │   ├── pages/
-│   │   │   ├── ClawHome.tsx     # 领养首页
-│   │   │   ├── ClawAdmin.tsx    # 管理后台
-│   │   │   ├── Home.tsx         # 子虾控制台
-│   │   │   ├── Login.tsx        # 登录/注册
-│   │   │   └── ...
-│   │   ├── components/
-│   │   │   ├── console/         # 控制台组件 (Sidebar, MainPanel)
-│   │   │   ├── pages/           # 功能页 (ChatPage, SkillsPage, ...)
-│   │   │   └── ...
-│   │   └── lib/                 # tRPC client, theme, settings
-│   └── public/                  # 静态资源
-├── server/
-│   ├── _core/
-│   │   ├── index.ts             # Express 入口 + SSE + 定时回收
-│   │   ├── security.ts          # 限速, IP 封禁, helmet
-│   │   ├── sandbox.ts           # Docker 沙箱执行
-│   │   ├── tool_router.ts       # Agent 工具路由
-│   │   └── ...
-│   ├── routers.ts               # tRPC 路由 (用户/Agent/技能/协作/管理)
-│   └── db.ts                    # 数据库操作 (Drizzle)
-├── shared/                      # 前后端共享代码
-├── drizzle/                     # 数据库 schema
+├── client/                  # React 前端
+├── server/                  # Express / tRPC 后端
+├── shared/                  # 前后端共享类型与配置
+├── drizzle/                 # 数据库 schema
 ├── scripts/
-│   ├── claw-provision.sh        # 灵虾 provision 脚本
-│   └── build-oss.sh             # 开源版构建脚本
-├── .env.example                 # 环境变量模板
-├── setup.sh                     # 交互式配置脚本
-├── Dockerfile                   # Docker 构建
-└── docker-compose.yml           # 一键启动 (MySQL + App)
+│   ├── bootstrap-install.sh         # 一键安装 / 升级脚本
+│   ├── check-local-openclaw-node.sh # 本机 OpenClaw 检查
+│   ├── init-admin.ts                # 初始化管理员
+│   └── ...
+├── setup.sh                 # 本机环境初始化
+├── ecosystem.config.cjs.example
+├── .env.example
+└── docker-compose.yml
 ```
-
-## 安全机制
-
-- **沙箱隔离**: 每个灵虾在独立 Docker 容器中执行代码，无网络、只读根文件系统、资源配额限制
-- **IP 自动封禁**: 15 分钟内 30 个 4xx 错误自动封禁 IP
-- **限速**: 多层 rate limiter (通用 / 认证 / 严格 / 聊天)
-- **对话额度**: Starter 套餐每日上限，防止资源滥用
-- **自动回收**: 不活跃实例定时回收，释放服务器资源
-- **SSRF 防护**: 拦截内网地址请求
-- **安全头**: helmet + CSP
 
 ## 故障排查
 
 | 现象 | 排查 |
-|------|------|
-| 子虾无响应 | `systemctl status openclaw-gateway` 检查 Gateway |
-| 沙箱不启动 | `docker images \| grep openclaw-sandbox` 确认镜像存在 |
-| 技能不加载 | 检查 skills 目录软链接是否指向有效路径 |
-| IP 被封禁 | 查 `ip_management` 表，设 `isActive=no` 解封 |
-| 模型切换无效 | 确认模型 ID 在 `openclaw.json` 的 models 白名单中 |
-| 对话提示超限 | Starter 套餐每日限额，升级 Plus 或调整 `CLAW_STARTER_DAILY_LIMIT` |
+|---|---|
+| 首页打不开 | `pm2 status linggan-claw` / `pm2 logs linggan-claw` |
+| 登录后无法申请智能体 | 检查 `.env`、数据库、OpenClaw token、`scripts/check-local-openclaw-node.sh` |
+| 对话无响应 | 检查 OpenClaw Gateway 是否启动、token 是否一致 |
+| 端口冲突 | 重新运行脚本并传 `--port <新端口>` |
+| 数据库连接失败 | 检查 `DATABASE_URL`、MySQL 服务、用户权限 |
+| 前端仍显示旧文案 | 强刷浏览器缓存，确认服务已重新 `pnpm build` 并 PM2 重启 |
 
-## License
+## 许可证
 
 [MIT](LICENSE)
-
-## 文档
-
-| 文档 | 说明 |
-|------|------|
-| [部署指南](docs/DEPLOY.md) | 从零部署灵虾（含 OpenClaw 配置） |
-| [智能体架构](docs/ARCHITECTURE-AGENTS.md) | 4 种协议、12 个 Agent、记忆体系 |
-| [OpenClaw 配置模板](configs/openclaw-lingxia.json.example) | 灵虾所需的 OpenClaw 最小配置 |
