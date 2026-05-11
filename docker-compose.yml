@@ -29,7 +29,7 @@ services:
     networks:
       - linggan-net
 
-  # ── LingganClaw 平台 ──
+  # ── 员工智能体 ──
   app:
     build:
       context: .

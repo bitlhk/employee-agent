@@ -65,7 +65,7 @@ async function getChatInput(tab) {
         };
       },
     });
-  const names = ["Message 员工智能体…", "Message Enterprise Agent…", "Message 智能体…", "Message LingganClaw…", "Message 灵感精灵…", "Message 员工智能体...", "Message Enterprise Agent...", "Message 智能体...", "Message LingganClaw...", "Message 灵感精灵..."];
+  const names = ["Message 员工智能体…", "Message Enterprise Agent…", "Message 智能体…", "Message 员工智能体…", "Message 灵感精灵…", "Message 员工智能体...", "Message Enterprise Agent...", "Message 智能体...", "Message 员工智能体...", "Message 灵感精灵..."];
   for (const name of names) {
     const input = tab.playwright.getByRole("textbox", { name, exact: true });
     if ((await input.count()) === 1) return withSafeFill(input);
@@ -90,7 +90,7 @@ function warn(name, reason, details = {}) {
 function pageFacts(label, snap) {
   if (label === "聊天") {
     return {
-      input: snap.includes("Message 员工智能体") || snap.includes("Message 智能体") || snap.includes("Message Enterprise Agent") || snap.includes("Message LingganClaw"),
+      input: snap.includes("Message 员工智能体") || snap.includes("Message 智能体") || snap.includes("Message Enterprise Agent") || snap.includes("Message Employee Agent"),
       sendButton: snap.includes("button \"发送\"") || snap.includes("button \"停止生成\""),
       modelSelector: snap.includes("deepseek") || snap.includes("combobox"),
     };

@@ -265,12 +265,12 @@ export function restartOpenclawGatewayBestEffort() {
 
 
 /**
- * LingganClaw 实例编排（MVP）
+ * 员工智能体实例编排（MVP）
  *
  * CLAW_PROVISION_MODE=mock         -> 仅占位成功（默认）
  * CLAW_PROVISION_MODE=local-script -> 调用本地脚本真实创建
  */
-export function provisionLingganClawInstance(params: {
+export function provisionEmployeeAgentInstance(params: {
   adoptId: string;
   agentId: string;
   userId: number;

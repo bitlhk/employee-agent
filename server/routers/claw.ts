@@ -44,7 +44,7 @@ import {
   bumpClawSessionEpochBestEffort,
   applyClawSessionModelViaGatewayCommand,
   setAgentModelInOpenclawConfig,
-  provisionLingganClawInstance,
+  provisionEmployeeAgentInstance,
   writeClawExecAudit,
 } from "./helpers";
 import { hermesProfileSkillsDir, resolveRuntimeAgentId } from "../_core/helpers";
@@ -786,7 +786,7 @@ export const clawRouter = router({
 
         try {
           // 编排创建实例（mock/local-script）
-          const provision = provisionLingganClawInstance({
+          const provision = provisionEmployeeAgentInstance({
             adoptId,
             agentId,
             userId,
@@ -827,7 +827,7 @@ export const clawRouter = router({
             operatorId: null,
             detail: msg,
           });
-          throw new Error(`LingganClaw 领养失败：${msg}`);
+          throw new Error(`员工智能体创建失败：${msg}`);
         }
       }),
 
@@ -943,7 +943,7 @@ export const clawRouter = router({
                     encoding: "utf8",
                   });
                 } else {
-                  provisionLingganClawInstance({
+                  provisionEmployeeAgentInstance({
                     adoptId: input.adoptId,
                     agentId: claw.agentId,
                     userId: Number(claw.userId),

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Bootstrap installer for LingganClaw.
+# Bootstrap installer for Employee Agent.
 # Intended usage:
 #   curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh | bash
 
@@ -142,7 +142,7 @@ ensure_node_tools() {
 }
 
 checkout_repo() {
-  log "Checking out LingganClaw"
+  log "Checking out Employee Agent"
   local parent owner
   parent=$(dirname "$INSTALL_DIR")
   owner="${SUDO_USER:-${USER:-$(id -un)}}"
@@ -168,7 +168,7 @@ checkout_repo() {
 }
 
 run_setup() {
-  log "Running LingganClaw setup"
+  log "Running Employee Agent setup"
   local host_arg
   host_arg=$(detect_host)
   local setup_args=(
@@ -195,7 +195,7 @@ start_app() {
     log "Skipping build and PM2 start"
     return
   fi
-  log "Building and starting LingganClaw"
+  log "Building and starting Employee Agent"
   run bash -lc "cd '$INSTALL_DIR' && corepack pnpm check"
   run bash -lc "cd '$INSTALL_DIR' && corepack pnpm build"
   if [[ -f "$INSTALL_DIR/ecosystem.config.cjs" ]]; then
@@ -215,7 +215,7 @@ print_summary() {
   cat <<EOF
 
 ─────────────────────────────────
-LingganClaw bootstrap completed.
+Employee Agent bootstrap completed.
 ─────────────────────────────────
 
 Install dir:
@@ -236,7 +236,7 @@ EOF
 }
 
 main() {
-  log "LingganClaw bootstrap installer"
+  log "Employee Agent bootstrap installer"
   ensure_base_packages
   ensure_node
   ensure_node_tools

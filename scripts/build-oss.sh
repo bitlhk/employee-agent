@@ -82,7 +82,7 @@ if [[ ! -f "$OUT_DIR/LICENSE" ]]; then
 cat > "$OUT_DIR/LICENSE" << 'LICENSE'
 MIT License
 
-Copyright (c) 2026 LingganClaw Contributors
+Copyright (c) 2026 Employee Agent Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -108,7 +108,7 @@ fi
 cd "$OUT_DIR"
 git init
 git add -A
-git commit -m "feat: initial open-source release of LingganClaw platform"
+git commit -m "feat: initial open-source release of Employee Agent platform"
 
 echo ""
 echo "✅ 开源版已生成: $OUT_DIR"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# LingganClaw setup script.
+# Employee Agent setup script.
 # Interactive:
 #   bash setup.sh
 # Non-interactive:
@@ -81,7 +81,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo ""
-echo "  LingganClaw 灵虾 — 初始化配置"
+echo "  员工智能体 — 初始化配置"
 echo "  ─────────────────────────────────"
 echo ""
 
@@ -286,7 +286,7 @@ SQL
   GW_TOKEN=$(gen_hex 24)
 
   {
-    echo "# ── LingganClaw 配置（由 setup.sh 生成）──"
+    echo "# ── 员工智能体配置（由 setup.sh 生成）──"
     echo "PORT=$PORT_VALUE"
     echo "NODE_ENV=production"
     echo ""
