@@ -1,5 +1,5 @@
 /**
- * ClawAdmin — 灵虾管理控制台（独立页面）
+ * ClawAdmin — 企业智能体管理工作台（独立页面）
  * 风格：白色主题，与灵感官网/ClawHome 一致
  * Tab: 实例管理 / 系统设置 / 组织协作
  */
@@ -162,7 +162,7 @@ function BrandSettingsPanel() {
       {/* 模板选择器 */}
       <Card className="p-6 border-border/50 bg-white/80">
         <h3 className="text-sm font-semibold text-gray-900 mb-3">品牌模式</h3>
-        <p className="text-xs text-muted-foreground mb-4">默认使用灵虾品牌；需要企业白标时再切换为自定义。</p>
+        <p className="text-xs text-muted-foreground mb-4">默认使用企业智能体品牌；需要企业白标时再切换为自定义。</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <button
             onClick={() => applyPreset("lingxia")}
@@ -174,9 +174,9 @@ function BrandSettingsPanel() {
           >
             <div className="flex items-center gap-2">
               <div className="h-4 w-4 rounded-full" style={{ background: DEFAULT_BRAND.accentColor }} />
-              <span className="text-sm font-semibold text-gray-900">默认灵虾</span>
+              <span className="text-sm font-semibold text-gray-900">默认企业智能体</span>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">恢复灵虾名称、Logo、主题色和默认身份。</p>
+            <p className="mt-1 text-xs text-muted-foreground">恢复企业智能体名称、Logo、主题色和默认身份。</p>
           </button>
           <button
             onClick={() => setSelectedPreset("custom")}
@@ -198,8 +198,8 @@ function BrandSettingsPanel() {
       <Card className="p-6 space-y-5 border-border/50 bg-white/80">
         <h3 className="text-sm font-semibold text-gray-900">基本信息</h3>
         <div className="grid grid-cols-2 gap-4">
-          {field("name", "产品名称（中文）", { placeholder: "灵虾" })}
-          {field("nameEn", "产品名称（英文）", { placeholder: "LingganClaw" })}
+          {field("name", "产品名称（中文）", { placeholder: "企业智能体" })}
+          {field("nameEn", "产品名称（英文）", { placeholder: "Enterprise Agent" })}
           {field("platform", "平台名称（中文）", { placeholder: "灵感" })}
           {field("platformEn", "平台名称（英文）", { placeholder: "Linggan" })}
         </div>
@@ -294,7 +294,7 @@ export default function ClawAdmin() {
 
   const deleteMutation = trpc.claw.adminDelete.useMutation({
     retry: false,
-    onSuccess: () => { setDeleteTarget(null); refetchList(); toast.success("子虾已删除"); },
+    onSuccess: () => { setDeleteTarget(null); refetchList(); toast.success("智能体实例已删除"); },
     onError: (e: any) => toast.error(e?.message || "删除失败"),
   });
 
@@ -450,11 +450,11 @@ export default function ClawAdmin() {
   };
 
   const navItems = [
-    { value: "instances", label: "实例管理", description: "子虾实例与权限", icon: Users },
+    { value: "instances", label: "实例管理", description: "智能体实例与权限", icon: Users },
     { value: "collaboration", label: "组织协作", description: "空间、成员与准入", icon: Building2 },
     { value: "skills", label: "技能广场", description: "上架、审核与共享", icon: Sparkles },
     { value: "usage", label: "使用统计", description: "访问与使用趋势", icon: BarChart3 },
-    { value: "settings", label: "系统设置", description: "灵虾运行配置", icon: Settings },
+    { value: "settings", label: "系统设置", description: "企业智能体运行配置", icon: Settings },
     { value: "brand", label: "品牌设置", description: "名称、视觉与身份", icon: Sparkles },
     { value: "collab", label: "智能体协作", description: "协作能力管理", icon: Zap },
     { value: "tenant-audit", label: "隔离审计", description: "租户隔离检查", icon: ShieldCheck },
@@ -474,7 +474,7 @@ export default function ClawAdmin() {
             <div className="w-px h-5 bg-border" />
             <div className="flex items-center gap-2">
               <BrandIcon size={24} />
-              <h1 className="claw-admin-title text-base font-semibold text-gray-900">灵虾管理</h1>
+              <h1 className="claw-admin-title text-base font-semibold text-gray-900">企业智能体管理</h1>
             </div>
           </div>
         </div>
@@ -697,13 +697,13 @@ export default function ClawAdmin() {
           {/* ── 系统设置 ── */}
           <TabsContent value="settings" className="space-y-6">
             <Card className="p-6 space-y-5 border-border/50 bg-white/80">
-              <h3 className="text-sm font-semibold text-gray-900">灵虾配置</h3>
+              <h3 className="text-sm font-semibold text-gray-900">企业智能体配置</h3>
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="text-sm text-gray-700">可见性</Label>
-                    <p className="text-xs mt-0.5 text-muted-foreground">public = 所有注册用户可领养，internal = 仅白名单用户</p>
+                    <p className="text-xs mt-0.5 text-muted-foreground">public = 所有注册用户可创建，internal = 仅白名单用户</p>
                   </div>
                   <Select
                     value={configData?.visibility || "internal"}
@@ -747,7 +747,7 @@ export default function ClawAdmin() {
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="text-sm text-gray-700">默认角色</Label>
-                    <p className="text-xs mt-0.5 text-muted-foreground">角色用于灵虾层管理，底层 OpenClaw 统一使用 coding profile 并叠加限制</p>
+                    <p className="text-xs mt-0.5 text-muted-foreground">角色用于企业智能体层管理，底层 OpenClaw 统一使用 coding profile 并叠加限制</p>
                   </div>
                   <Select
                     value={configData?.defaultProfile === "internal" ? "internal" : "plus"}
@@ -951,9 +951,9 @@ export default function ClawAdmin() {
                 <Trash2 className="h-4 w-4" />
               </div>
               <div className="min-w-0">
-                <AlertDialogTitle className="text-base font-semibold text-gray-900">确认删除这个子虾？</AlertDialogTitle>
+                <AlertDialogTitle className="text-base font-semibold text-gray-900">确认删除这个智能体实例？</AlertDialogTitle>
                 <AlertDialogDescription className="mt-1 text-xs leading-5 text-muted-foreground">
-              删除后会清理子虾工作空间、个人技能注册和后台设置；协作记录与审计记录会保留。这个操作只允许对已停用或失败的子虾执行。
+              删除后会清理智能体实例工作空间、个人技能注册和后台设置；协作记录与审计记录会保留。这个操作只允许对已停用或失败的智能体实例执行。
                 </AlertDialogDescription>
               </div>
             </div>

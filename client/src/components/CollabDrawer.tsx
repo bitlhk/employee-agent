@@ -835,7 +835,7 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
               <div className="mt-4 mx-auto max-w-[260px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(199,0,11,0.04)", border: "1px solid rgba(199,0,11,0.15)" }}>
                 <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
                 {[
-                  { q: "做一个介绍灵虾的 HTML 幻灯片，带动画", icon: "✨" },
+                  { q: "做一个介绍企业智能体的 HTML 幻灯片，带动画", icon: "✨" },
                   { q: "5 页 Q4 业务回顾的网页演示", icon: "📈" },
                   { q: "做一个产品发布会的 HTML slides", icon: "🚀" },
                 ].map(({ q, icon }) => (

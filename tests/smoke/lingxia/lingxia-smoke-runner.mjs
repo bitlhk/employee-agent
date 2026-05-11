@@ -65,7 +65,7 @@ async function getChatInput(tab) {
         };
       },
     });
-  const names = ["Message LingganClaw…", "Message 灵感精灵…", "Message LingganClaw...", "Message 灵感精灵..."];
+  const names = ["Message 企业智能体…", "Message Enterprise Agent…", "Message 智能体…", "Message LingganClaw…", "Message 灵感精灵…", "Message 企业智能体...", "Message Enterprise Agent...", "Message 智能体...", "Message LingganClaw...", "Message 灵感精灵..."];
   for (const name of names) {
     const input = tab.playwright.getByRole("textbox", { name, exact: true });
     if ((await input.count()) === 1) return withSafeFill(input);
@@ -90,7 +90,7 @@ function warn(name, reason, details = {}) {
 function pageFacts(label, snap) {
   if (label === "聊天") {
     return {
-      input: snap.includes("Message 灵感精灵") || snap.includes("Message LingganClaw"),
+      input: snap.includes("Message 企业智能体") || snap.includes("Message 智能体") || snap.includes("Message Enterprise Agent") || snap.includes("Message LingganClaw"),
       sendButton: snap.includes("button \"发送\"") || snap.includes("button \"停止生成\""),
       modelSelector: snap.includes("deepseek") || snap.includes("combobox"),
     };
@@ -490,7 +490,7 @@ export async function runScheduleLifecycleSmoke({ tab, adoptId = DEFAULT_ADOPT_I
   const query = await runChatAction({
     tab,
     name: "schedule-query-isolation",
-    prompt: `查询当前子虾自己的定时任务。只能列出当前子虾可见的任务；如果存在 ${taskName}，请列出这个任务。不要列出宿主机或其他子虾的任务。`,
+    prompt: `查询当前智能体实例自己的定时任务。只能列出当前智能体实例可见的任务；如果存在 ${taskName}，请列出这个任务。不要列出宿主机或其他智能体实例的任务。`,
     expectedAny: [taskName, "定时任务", "任务"],
     timeoutPlan: [0, 10000, 25000, 50000, 80000],
   });

@@ -1,5 +1,5 @@
 /**
- * LingxiaIcon — 灵虾动画 SVG 图标
+ * LingxiaIcon — 企业智能体动画 SVG 图标
  * 替代 🦞 emoji，支持 size/animate/idle 动画
  */
 import { useEffect, useState } from "react";
@@ -39,7 +39,7 @@ export function LingxiaIcon({
       xmlns="http://www.w3.org/2000/svg"
       className={`lingxia-icon ${breathe ? "lingxia-icon--breathe" : ""} ${className}`}
       role="img"
-      aria-label="灵虾"
+      aria-label="企业智能体"
     >
       <defs>
         <linearGradient id={`${uid}-g`} x1="0" y1="0" x2="1" y2="1">

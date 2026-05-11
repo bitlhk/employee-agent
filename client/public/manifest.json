@@ -1,6 +1,6 @@
 {
-  "name": "灵虾 · 企业 Agent 平台",
-  "short_name": "灵虾",
+  "name": "企业智能体",
+  "short_name": "企业智能体",
   "description": "可定制、可隔离、可协作、可治理的企业 Agent 工作台",
   "start_url": "/",
   "display": "standalone",

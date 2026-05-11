@@ -48,7 +48,7 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
   };
 
   return (
-    <PageContainer title="频道" desc="管理灵虾与你的触达方式。日常对话、协作提醒和定时任务都可以复用这些频道。">
+    <PageContainer title="频道" desc="管理企业智能体与你的触达方式。日常对话、协作提醒和定时任务都可以复用这些频道。">
       {dialog}
       <div className="channel-layout">
         <aside className="settings-card channel-list" aria-label="频道列表">
@@ -88,7 +88,7 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
             <ScanChannelDetail
               channelLabel="微信"
               connectedTitle="微信已连接"
-              connectedDesc="你可以直接在微信里和灵虾对话，也可以接收协作提醒和定时任务结果。"
+              connectedDesc="你可以直接在微信里和企业智能体对话，也可以接收协作提醒和定时任务结果。"
               idleTitle={wechat.status === "loading" ? "正在获取二维码..." : "连接你的微信"}
               idleDesc="绑定后，微信既可以作为对话入口，也可以作为定时任务和协作提醒的投递频道。"
               scanTitle="请用微信扫描二维码"
@@ -106,11 +106,11 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
             <ScanChannelDetail
               channelLabel="飞书"
               connectedTitle="飞书已连接"
-              connectedDesc="定时任务和协作提醒现在可以投递到飞书。飞书内直接发消息给灵虾的双向对话会在后续版本继续增强。"
+              connectedDesc="定时任务和协作提醒现在可以投递到飞书。飞书内直接发消息给企业智能体的双向对话会在后续版本继续增强。"
               idleTitle={feishu.status === "loading" ? "正在获取授权二维码..." : "扫码连接飞书"}
-              idleDesc="飞书采用扫码授权，不需要普通用户手动配置 webhook。当前已支持任务通知推送，飞书内主动发消息给灵虾暂未开放。"
+              idleDesc="飞书采用扫码授权，不需要普通用户手动配置 webhook。当前已支持任务通知推送，飞书内主动发消息给企业智能体暂未开放。"
               scanTitle="请用飞书扫描二维码"
-              scanDesc="扫码授权后，灵虾会自动保存飞书应用凭证用于任务通知。"
+              scanDesc="扫码授权后，企业智能体会自动保存飞书应用凭证用于任务通知。"
               status={feishu.status}
               qrcodeUrl={feishu.qrCode || ""}
               verificationUri={feishu.verificationUri}

@@ -57,7 +57,7 @@ export function UsageStatsTab() {
   const hasDailyData = dailySeries.some((d) => d.count > 0);
   const chartHeightPx = 72;
   const summaryCards = [
-    { label: "子虾总数", value: data.summary.totalClaws, icon: Users, tone: "red", hint: "已配置实例" },
+    { label: "智能体实例总数", value: data.summary.totalClaws, icon: Users, tone: "red", hint: "已配置实例" },
     { label: "总对话数", value: data.summary.totalChats, icon: MessageSquare, tone: "blue", hint: "累计会话调用" },
     { label: "今日活跃", value: data.summary.activeToday, icon: TrendingUp, tone: "green", hint: "今日有交互" },
   ];
@@ -124,10 +124,10 @@ export function UsageStatsTab() {
         </div>
       </div>
 
-      {/* 子虾排行 */}
+      {/* 智能体实例排行 */}
       <div className="admin-panel-card rounded-xl border border-gray-200 bg-white">
         <div className="px-4 py-3 border-b border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-900">子虾使用排行</h3>
+          <h3 className="text-sm font-semibold text-gray-900">智能体实例使用排行</h3>
         </div>
         <div className="divide-y divide-gray-50">
           {data.adoptions.map((a, i) => (

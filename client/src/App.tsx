@@ -50,7 +50,7 @@ function Router() {
           </AdminRoute>
         </Route>
 
-        {/* ── 子虾控制台 ── */}
+        {/* ── 智能体工作台 ── */}
         <Route path={"/claw/:adoptId"}>
           <Home />
         </Route>

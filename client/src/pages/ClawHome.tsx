@@ -1,7 +1,7 @@
 /**
- * ClawHome — 灵虾独立首页（路径模式）
+ * ClawHome — 企业智能体独立首页（路径模式）
  * 风格：白色主题，与灵感官网一致
- * 功能：Hero + 功能介绍 + 领养/进入
+ * 功能：Hero + 功能介绍 + 创建/进入
  */
 
 import { useState, useEffect } from "react";
@@ -40,7 +40,7 @@ const scaleIn: Variants = {
   visible: { opacity: 1, scale: 1, transition: { duration: 0.6, ease: "easeOut" } },
 };
 
-// ── 灵虾 SVG Logo 动画组件 ──
+// ── 企业智能体 SVG Logo 动画组件 ──
 function AnimatedLogo({ size = 120 }: { size?: number }) {
   return (
     <motion.svg
@@ -159,7 +159,7 @@ export default function ClawHome() {
 
   const adoptMutation = trpc.claw.adopt.useMutation({
     retry: false,
-    onError: (e: any) => toast.error(e?.message || "领养失败，请稍后重试"),
+    onError: (e: any) => toast.error(e?.message || "创建失败，请稍后重试"),
   });
 
   const handleAdopt = async () => {
@@ -195,11 +195,11 @@ export default function ClawHome() {
         if (status !== "active") throw new Error("创建时间较长，请刷新页面后重试");
       }
 
-      toast.success(result.reused ? `已为你打开${brand.name}` : "领养成功！");
+      toast.success(result.reused ? `已为你打开${brand.name}` : "创建成功！");
       await refetchClawMe();
       setLocation(`/claw/${adoptId}`);
     } catch (error: any) {
-      toast.error(error?.message || "领养失败，请稍后重试");
+      toast.error(error?.message || "创建失败，请稍后重试");
     } finally {
       setProvisioning(false);
     }
@@ -293,7 +293,7 @@ export default function ClawHome() {
             </motion.div>
 
             <motion.h1 variants={fadeInUp} className="text-3xl md:text-5xl font-bold leading-tight mb-4">
-              <span className="text-gray-900">领养一只</span>
+              <span className="text-gray-900">创建一个</span>
               <span className="bg-gradient-to-r from-primary via-rose-500 to-primary bg-clip-text text-transparent">{brand.name}</span>
             </motion.h1>
 
@@ -354,7 +354,7 @@ export default function ClawHome() {
                             className={`w-full text-white ${isHermes ? "bg-purple-600 hover:bg-purple-700" : "bg-primary hover:bg-primary/90"}`}
                             onClick={() => setLocation(`/claw/${a.adoptId}`)}
                           >
-                            进入控制台
+                            进入工作台
                             <ArrowRight className="w-4 h-4 ml-2" />
                           </Button>
                         </div>
@@ -364,7 +364,7 @@ export default function ClawHome() {
                 </div>
               )}
 
-              {/* 没有虾 → 领养（默认走 OpenClaw） */}
+              {/* 没有智能体 → 创建（默认走 OpenClaw） */}
               {user && !isLoading && !hasAnyClaw && (
                 <Button
                   size="lg"
@@ -379,7 +379,7 @@ export default function ClawHome() {
                     </>
                   ) : (
                     <>
-                      一键领养
+                      创建智能体
                       <ArrowRight className="w-4 h-4 ml-2" />
                     </>
                   )}

@@ -1,5 +1,5 @@
 /**
- * CoopSession — 灵虾组织协作窗口
+ * CoopSession — 企业智能体组织协作窗口
  * URL: /coop/:sessionId
  * 
  * 视角：
@@ -92,8 +92,8 @@ export default function CoopSession() {
     onError: (e) => toast.error(e.message || "拒绝失败"),
   });
 
-  // 拿当前用户的 adoptId，返回时跳 /claw/{adoptId}（即"我的虾"主页 + 协作 tab）
-  // 注意：App.tsx 里 / 是 <ClawHome /> 领养页，/claw/:adoptId 才是 <Home /> 含「我的协作」
+  // 拿当前用户的 adoptId，返回时跳 /claw/{adoptId}（即"我的智能体"主页 + 协作 tab）
+  // 注意：App.tsx 里 / 是 <ClawHome /> 创建页，/claw/:adoptId 才是 <Home /> 含「我的协作」
   const { data: myClawForBack } = trpc.claw.me.useQuery(undefined, { retry: false });
   const myAdoptIdForBack = (myClawForBack as any)?.adoption?.adoptId as string | undefined;
 
@@ -154,12 +154,12 @@ export default function CoopSession() {
         <div className="coop-session-header__inner">
           <Button variant="ghost" size="sm" className="coop-session-back" onClick={() => {
             // 显式回「我的协作」tab：写 sessionStorage 让 Home 初始化时落地 collab 页
-            // 跳 /claw/{adoptId}（Home），不是 / （那是 ClawHome 领养首页）
+            // 跳 /claw/{adoptId}（Home），不是 / （那是 ClawHome 创建首页）
             try { sessionStorage.setItem("home_initial_page", "collab"); } catch {}
             if (myAdoptIdForBack) {
               setLocation(`/claw/${myAdoptIdForBack}`);
             } else {
-              setLocation("/"); // fallback：没领养就回 ClawHome
+              setLocation("/"); // fallback：没创建就回 ClawHome
             }
           }}>
             <ArrowLeft className="w-4 h-4 mr-1" /> 返回

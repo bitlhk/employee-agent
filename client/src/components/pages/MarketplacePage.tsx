@@ -200,7 +200,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
         <div className="min-w-0">
           <div className="skills-market-hero__title">技能广场</div>
           <div className="skills-market-hero__desc">
-            从技能广场安装的技能会进入“我的技能”，并同步到当前灵虾运行时。
+            从技能广场安装的技能会进入“我的技能”，并同步到当前企业智能体运行时。
           </div>
         </div>
       </div>
@@ -366,7 +366,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                       )}
                     </div>
                     <span className="skills-market-detail__hint">
-                      安装后会进入“我的技能”，并同步到当前灵虾运行时。
+                      安装后会进入“我的技能”，并同步到当前企业智能体运行时。
                     </span>
                   </div>
                 </>

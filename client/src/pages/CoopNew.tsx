@@ -361,7 +361,7 @@ export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
                   <div className="text-[11px] text-muted-foreground truncate">
                     {formatCandidateOrg(c)}
                     {!c.departmentName && !c.teamName && c.groupName ? <><span className="mx-1">·</span><span className="text-primary">{c.groupName}</span></> : null}
-                    {c.adoptId ? <><span className="mx-1">·</span>🟢 Agent: {c.adoptId.slice(0, 12)}</> : <><span className="mx-1">·</span>⚪ 无灵虾</>}
+                    {c.adoptId ? <><span className="mx-1">·</span>🟢 Agent: {c.adoptId.slice(0, 12)}</> : <><span className="mx-1">·</span>⚪ 无智能体</>}
                   </div>
                 </div>
                 <UserPlus className="w-4 h-4 text-primary shrink-0" />
