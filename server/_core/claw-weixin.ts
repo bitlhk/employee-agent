@@ -3,7 +3,7 @@
  */
 import express from "express";
 import { requireClawOwner } from "./helpers";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
 import path from "path";
 import { randomUUID, randomBytes } from "crypto";
 
@@ -27,6 +27,27 @@ function loadAccount(adoptId: string): any {
 
 function saveAccount(adoptId: string, data: any) {
   writeFileSync(getAccountPath(adoptId), JSON.stringify(data, null, 2), "utf-8");
+}
+
+function isWeixinReactivationError(error?: string): boolean {
+  const msg = String(error || "").toLowerCase();
+  return (
+    msg.includes("context_token") ||
+    msg.includes("context_expired") ||
+    msg.includes("send a message to bot first") ||
+    msg.includes("session timeout") ||
+    msg.includes("errcode=-14")
+  );
+}
+
+function markAccountNeedsReactivation(adoptId: string, acct: any, reason: string) {
+  if (!acct) return;
+  saveAccount(adoptId, {
+    ...acct,
+    needsReactivation: true,
+    lastError: reason,
+    lastFailedAt: new Date().toISOString(),
+  });
 }
 
 function randomWechatUin(): string {
@@ -127,19 +148,28 @@ export async function sendWeixinMessage(adoptId: string, chatId: string, text: s
       item_list: [{ type: 1, text_item: { text } }],
     };
     await ilinkPost(acct.baseUrl || ILINK_BASE_URL, "ilink/bot/sendmessage", { msg }, acct.token);
-    saveAccount(adoptId, acct);
+    saveAccount(adoptId, { ...acct, needsReactivation: false, lastError: undefined, lastFailedAt: undefined });
     return { ok: true };
   } catch (e: any) {
-    return { ok: false, error: e.message };
+    const message = e?.message || String(e);
+    if (isWeixinReactivationError(message)) {
+      markAccountNeedsReactivation(adoptId, acct, message);
+      try {
+        const { stopPollForAccount } = await import("./claw-weixin-bridge");
+        stopPollForAccount(adoptId);
+      } catch {}
+    }
+    return { ok: false, error: message };
   }
 }
 
 export function getWeixinStatus(adoptId: string): { bound: boolean; targetLabel?: string; needsReactivation?: boolean } {
   const acct = loadAccount(adoptId);
+  const needsReactivation = !!acct?.needsReactivation;
   return {
-    bound: !!(acct && acct.token),
+    bound: !!(acct && acct.token && !needsReactivation),
     targetLabel: acct?.userId || "",
-    needsReactivation: !!acct?.needsReactivation,
+    needsReactivation,
   };
 }
 
@@ -162,7 +192,15 @@ export function registerWeixinRoutes(app: express.Express) {
         if (!claw) return;
       }
       const acct = loadAccount(adoptId);
-      res.json({ bound: !!(acct && acct.token), userId: acct?.userId || "" });
+      const needsReactivation = !!acct?.needsReactivation;
+      const bound = !!(acct && acct.token && !needsReactivation);
+      if (bound) {
+        try {
+          const { startPollForAccount } = await import("./claw-weixin-bridge");
+          startPollForAccount(adoptId);
+        } catch {}
+      }
+      res.json({ bound, userId: acct?.userId || "", needsReactivation });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -196,6 +234,7 @@ export function registerWeixinRoutes(app: express.Express) {
           token: data.bot_token || "",
           baseUrl: data.baseurl || ILINK_BASE_URL,
           userId: data.ilink_user_id || "",
+          needsReactivation: false,
           savedAt: new Date().toISOString(),
         });
         // 绑定成功后自动启动这只虾的 polling（无需重启服务）
@@ -229,7 +268,7 @@ export function registerWeixinRoutes(app: express.Express) {
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      try { require("fs").unlinkSync(getAccountPath(adoptId)); } catch {}
+      try { unlinkSync(getAccountPath(adoptId)); } catch {}
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

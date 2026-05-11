@@ -157,5 +157,11 @@ function formatChannelPayload(payload: ChannelPayload): string {
 
 function isWechatReactivationError(error?: string): boolean {
   const msg = String(error || "").toLowerCase();
-  return msg.includes("context_token") || msg.includes("context_expired") || msg.includes("send a message to bot first");
+  return (
+    msg.includes("context_token") ||
+    msg.includes("context_expired") ||
+    msg.includes("send a message to bot first") ||
+    msg.includes("session timeout") ||
+    msg.includes("errcode=-14")
+  );
 }
