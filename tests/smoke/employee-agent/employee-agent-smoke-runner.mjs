@@ -90,7 +90,12 @@ function warn(name, reason, details = {}) {
 function pageFacts(label, snap) {
   if (label === "聊天") {
     return {
-      input: snap.includes("Message 员工智能体") || snap.includes("Message 智能体") || snap.includes("Message Enterprise Agent") || snap.includes("Message Employee Agent"),
+      input:
+        snap.includes("Message 员工智能体") ||
+        snap.includes("Message 智能体") ||
+        snap.includes("Message Enterprise Agent") ||
+        snap.includes("Message Employee Agent") ||
+        snap.includes('textbox "'),
       sendButton: snap.includes("button \"发送\"") || snap.includes("button \"停止生成\""),
       modelSelector: snap.includes("deepseek") || snap.includes("combobox"),
     };
