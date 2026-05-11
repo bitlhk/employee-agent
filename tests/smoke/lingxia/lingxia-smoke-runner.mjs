@@ -42,6 +42,39 @@ async function clickNav(tab, label) {
   return { ok: true };
 }
 
+async function getChatInput(tab) {
+  const withSafeFill = (input) =>
+    new Proxy(input, {
+      get(target, property) {
+        if (property !== "fill") {
+          const value = target[property];
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async (value, options = {}) => {
+          try {
+            return await target.fill(value, options);
+          } catch (error) {
+            if (!String(error?.message || error).includes("ClipboardItem")) throw error;
+            await target.click({ timeoutMs: options.timeoutMs || 5000 });
+            await target.press("Control+A", { timeoutMs: options.timeoutMs || 5000 });
+            await target.press("Backspace", { timeoutMs: options.timeoutMs || 5000 });
+            if (typeof tab.__iabInsertText === "function") return tab.__iabInsertText(value);
+            if (tab.cua?.type) return tab.cua.type({ text: value });
+            return target.type(value, options);
+          }
+        };
+      },
+    });
+  const names = ["Message LingganClaw…", "Message 灵感精灵…", "Message LingganClaw...", "Message 灵感精灵..."];
+  for (const name of names) {
+    const input = tab.playwright.getByRole("textbox", { name, exact: true });
+    if ((await input.count()) === 1) return withSafeFill(input);
+  }
+  const fallback = tab.playwright.locator("textarea,[contenteditable='true'],[role='textbox']");
+  if ((await fallback.count()) === 1) return withSafeFill(fallback);
+  return null;
+}
+
 function pass(name, details = {}) {
   return { name, status: "pass", ...details };
 }
@@ -57,7 +90,7 @@ function warn(name, reason, details = {}) {
 function pageFacts(label, snap) {
   if (label === "聊天") {
     return {
-      input: snap.includes("Message 灵感精灵"),
+      input: snap.includes("Message 灵感精灵") || snap.includes("Message LingganClaw"),
       sendButton: snap.includes("button \"发送\"") || snap.includes("button \"停止生成\""),
       modelSelector: snap.includes("deepseek") || snap.includes("combobox"),
     };
@@ -157,8 +190,8 @@ export async function runChatSmoke({ tab, prompt } = {}) {
   const navResult = await clickNav(tab, "聊天");
   if (!navResult.ok) return { ok: false, reason: navResult.reason };
 
-  const input = tab.playwright.getByRole("textbox", { name: "Message 灵感精灵…", exact: true });
-  const inputCount = await input.count();
+  const input = await getChatInput(tab);
+  const inputCount = input ? await input.count() : 0;
   if (inputCount !== 1) return { ok: false, reason: `chat input count=${inputCount}` };
 
   await input.fill(actualPrompt, { timeoutMs: 5000 });
@@ -213,8 +246,8 @@ export async function runChatPromptSmoke({
   const navResult = await clickNav(tab, "聊天");
   if (!navResult.ok) return { ok: false, reason: navResult.reason };
 
-  const input = tab.playwright.getByRole("textbox", { name: "Message 灵感精灵…", exact: true });
-  const inputCount = await input.count();
+  const input = await getChatInput(tab);
+  const inputCount = input ? await input.count() : 0;
   if (inputCount !== 1) return { ok: false, reason: `chat input count=${inputCount}` };
 
   const token = `SMOKE-${name}-${Date.now().toString(36).toUpperCase()}`;
@@ -306,6 +339,268 @@ export async function runLingxiaUpgradeSmoke({ tab, safeWrite = true, includeOpt
     marketplace,
     chat,
     summary: summarize({ readOnly, marketplace, chat }),
+  };
+}
+
+async function getSnapshot(tab) {
+  return tab.playwright.domSnapshot();
+}
+
+async function waitForSnapshot(tab, predicate, timeoutMs = 30000, intervalMs = 1500) {
+  const deadline = Date.now() + timeoutMs;
+  let snap = "";
+  while (Date.now() < deadline) {
+    snap = await getSnapshot(tab);
+    if (predicate(snap)) return { ok: true, snap };
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return { ok: false, snap };
+}
+
+async function runChatAction({ tab, name, prompt, expectedAny = [], timeoutPlan = [0, 10000, 25000, 45000, 70000] } = {}) {
+  return runChatPromptSmoke({ tab, name, prompt, expectedAny, timeoutPlan });
+}
+
+async function browserFetchJson(tab, path, options = {}) {
+  if (typeof tab.__fetchJson === "function") return tab.__fetchJson(path, options);
+  if (typeof tab.__baseUrl !== "string") throw new Error("tab.__baseUrl is required for browserFetchJson fallback");
+  const resp = await fetch(new URL(path, tab.__baseUrl).toString(), options);
+  return {
+    ok: resp.ok,
+    status: resp.status,
+    data: await resp.json().catch(() => ({})),
+  };
+}
+
+async function listRegistrySkills(tab, adoptId) {
+  const resp = await browserFetchJson(tab, `/api/claw/skills/registry?adoptId=${encodeURIComponent(adoptId)}`);
+  return Array.isArray(resp?.data?.items) ? resp.data.items : [];
+}
+
+function skillDisplayName(skill) {
+  return String(skill?.source?.displayName || skill?.displayName || skill?.name || skill?.id || "");
+}
+
+async function findSkillByMarker(tab, adoptId, marker) {
+  const items = await listRegistrySkills(tab, adoptId);
+  return items.find((skill) =>
+    skillDisplayName(skill).includes(marker) ||
+    String(skill?.id || "").includes(marker) ||
+    String(skill?.source?.description || skill?.description || "").includes(marker)
+  );
+}
+
+export async function runComplexConversationSmoke({ tab, runId } = {}) {
+  const marker = `${runId}-complex`;
+  const prompt = [
+    `复杂任务 smoke ${marker}。`,
+    "请完成一个三步小任务：",
+    "1. 先把目标拆成 3 个步骤。",
+    "2. 再给出一个包含两行的 Markdown 表格。",
+    "3. 最后只用一行写出 CHECKPOINT: COMPLEX_OK。",
+    "不要创建文件、不要创建定时任务、不要调用外部工具。",
+  ].join("\n");
+  const result = await runChatAction({
+    tab,
+    name: "complex-dialogue",
+    prompt,
+    expectedAny: ["CHECKPOINT: COMPLEX_OK", "COMPLEX_OK", "步骤", "表格"],
+    timeoutPlan: [0, 10000, 25000, 50000, 80000],
+  });
+  const final = result.observations?.[result.observations.length - 1];
+  result.ok = Boolean(
+    final?.hasExpectedText &&
+    final?.hasThinkLeak === false &&
+    final?.stillStreaming === false &&
+    (final?.consoleErrors?.length || 0) === 0
+  );
+  return result;
+}
+
+export async function runScheduleLifecycleSmoke({ tab, adoptId = DEFAULT_ADOPT_ID, runId } = {}) {
+  const taskName = `smoke-once-${runId}`.slice(0, 48);
+  const hostCronLeakMarkers = ["daily-briefing-xing-1610", "keepalive-5174-linggan"];
+  const create = await runChatAction({
+    tab,
+    name: "schedule-create",
+    prompt: `创建一个测试定时任务，名称必须是 ${taskName}。计划设置为明天上午 09:17 执行一次。执行内容是只回复 ${taskName} ping。投递渠道使用主聊天或 conversation。创建后回复任务名称。`,
+    expectedAny: [taskName, "定时任务已创建", "已创建", "任务"],
+    timeoutPlan: [0, 10000, 25000, 50000, 80000],
+  });
+
+  await clickNav(tab, "定时任务");
+  const listed = await waitForSnapshot(tab, (snap) => snap.includes(taskName), 25000);
+
+  const query = await runChatAction({
+    tab,
+    name: "schedule-query-isolation",
+    prompt: `查询当前子虾自己的定时任务。只能列出当前子虾可见的任务；如果存在 ${taskName}，请列出这个任务。不要列出宿主机或其他子虾的任务。`,
+    expectedAny: [taskName, "定时任务", "任务"],
+    timeoutPlan: [0, 10000, 25000, 50000, 80000],
+  });
+  const querySnapshot = await getSnapshot(tab);
+  const leakedHostTasks = hostCronLeakMarkers.filter((marker) => querySnapshot.includes(marker));
+
+  const remove = await runChatAction({
+    tab,
+    name: "schedule-delete",
+    prompt: `删除名称包含 ${taskName} 的定时任务。删除后回复 DELETED ${taskName}。`,
+    expectedAny: [taskName, "已删除", "DELETED"],
+    timeoutPlan: [0, 10000, 25000, 50000, 80000],
+  });
+
+  await clickNav(tab, "定时任务");
+  const gone = await waitForSnapshot(tab, (snap) => !snap.includes(taskName), 25000);
+
+  return {
+    ok: Boolean(create.ok && listed.ok && query.ok && leakedHostTasks.length === 0 && remove.ok && gone.ok),
+    taskName,
+    create,
+    listed: { ok: listed.ok },
+    query,
+    leakedHostTasks,
+    remove,
+    gone: { ok: gone.ok },
+  };
+}
+
+export async function runGeneratedSkillLifecycleSmoke({ tab, adoptId = DEFAULT_ADOPT_ID, runId } = {}) {
+  const shortRun = String(runId || Date.now()).replace(/[^a-zA-Z0-9_-]/g, "-").slice(-12);
+  const marker = `smoke-skill-${shortRun}`;
+  const displayName = `烟测技能 ${marker}`;
+  const createPrompt = [
+    `生成一个个人技能，名称必须是「${displayName}」。`,
+    `技能用途：当用户输入 ${marker} 时，说明这是 smoke 测试技能，并返回 SKILL_OK。`,
+    "请明确创建技能/插件/工具包，调用 create_skill 工具。",
+    "必须生成文件 SKILL.md，内容尽量短，不要创建定时任务。",
+    `生成并同步后回复 CREATED ${marker}。`,
+  ].join("\n");
+
+  const create = await runChatAction({
+    tab,
+    name: "skill-generate",
+    prompt: createPrompt,
+    expectedAny: [marker, "技能", "已生成", "CREATED"],
+    timeoutPlan: [0, 15000, 35000, 70000, 110000],
+  });
+
+  let skill = await findSkillByMarker(tab, adoptId, marker);
+  let retryCreate = null;
+  if (!skill) {
+    retryCreate = await runChatAction({
+      tab,
+      name: "skill-generate-retry",
+      prompt: [
+        `请现在创建一个技能/插件/工具包，不是普通聊天回答。`,
+        `技能名称：${displayName}`,
+        `技能说明：当用户输入 ${marker} 时，回复 SKILL_OK 并说明这是 smoke 测试技能。`,
+        "请调用 create_skill 工具，files 必须包含 SKILL.md，SKILL.md 里写明触发词和返回内容。",
+        `成功后回复 CREATED ${marker}。`,
+      ].join("\n"),
+      expectedAny: [marker, "技能", "已生成", "CREATED"],
+      timeoutPlan: [0, 15000, 35000, 70000, 110000],
+    });
+    skill = await findSkillByMarker(tab, adoptId, marker);
+  }
+  if (!skill) {
+    await clickNav(tab, "技能");
+    await waitForSnapshot(tab, (snap) => snap.includes(marker) || snap.includes(displayName), 30000);
+    skill = await findSkillByMarker(tab, adoptId, marker);
+  }
+
+  await clickNav(tab, "技能");
+  const menuListed = await waitForSnapshot(tab, (snap) => snap.includes(marker) || snap.includes(displayName), 30000);
+
+  const destroy = skill ? await browserFetchJson(tab, "/api/claw/skills/destroy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ adoptId, skillId: skill.id }),
+  }) : { ok: false, status: 0, data: { error: "skill not found" } };
+
+  await clickNav(tab, "工作空间");
+  const workspaceAfterDestroy = await getSnapshot(tab);
+  await clickNav(tab, "技能");
+  const menuGone = await waitForSnapshot(tab, (snap) => !snap.includes(marker) && !snap.includes(displayName), 30000);
+  const registryGone = !(await findSkillByMarker(tab, adoptId, marker));
+
+  return {
+    ok: Boolean(create.ok && skill && menuListed.ok && destroy.ok && menuGone.ok && registryGone),
+    marker,
+    displayName,
+    skillId: skill?.id || null,
+    create,
+    retryCreate,
+    menuListed: { ok: menuListed.ok },
+    destroy: { ok: destroy.ok, status: destroy.status, error: destroy?.data?.error },
+    workspaceMentionsSkillAfterDestroy: workspaceAfterDestroy.includes(marker) || workspaceAfterDestroy.includes(displayName),
+    menuGone: { ok: menuGone.ok },
+    registryGone,
+  };
+}
+
+export async function runSmokeV2({
+  tab,
+  adoptId = DEFAULT_ADOPT_ID,
+  baseUrl = "http://127.0.0.1:15180",
+  runId = `SMOKE-V2-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`,
+  includeV1 = true,
+} = {}) {
+  tab.__baseUrl = baseUrl;
+  const startedAt = new Date().toISOString();
+  const cases = [];
+  const artifacts = {};
+
+  if (includeV1) {
+    artifacts.v1 = await runSmokeV1({ tab, adoptId, baseUrl, runId: `${runId}-BASE` });
+    for (const item of artifacts.v1.cases) cases.push({ ...item, name: `v1:${item.name}` });
+  }
+
+  artifacts.complex = await runComplexConversationSmoke({ tab, runId });
+  cases.push(artifacts.complex.ok ? pass("v2: complex dialogue") : fail("v2: complex dialogue", artifacts.complex.reason || "complex dialogue failed", { complex: artifacts.complex }));
+
+  artifacts.scheduleLifecycle = await runScheduleLifecycleSmoke({ tab, adoptId, runId });
+  cases.push(artifacts.scheduleLifecycle.create.ok ? pass("v2: schedule create via chat") : fail("v2: schedule create via chat", artifacts.scheduleLifecycle.create.reason || "create failed"));
+  cases.push(artifacts.scheduleLifecycle.listed.ok ? pass("v2: schedule visible in menu") : fail("v2: schedule visible in menu", "created task not visible"));
+  cases.push(artifacts.scheduleLifecycle.query.ok ? pass("v2: schedule query via chat") : fail("v2: schedule query via chat", artifacts.scheduleLifecycle.query.reason || "query failed"));
+  cases.push(artifacts.scheduleLifecycle.leakedHostTasks.length === 0 ? pass("v2: schedule tenant isolation") : fail("v2: schedule tenant isolation", `host tasks leaked: ${artifacts.scheduleLifecycle.leakedHostTasks.join(", ")}`));
+  cases.push(artifacts.scheduleLifecycle.remove.ok ? pass("v2: schedule delete via chat") : fail("v2: schedule delete via chat", artifacts.scheduleLifecycle.remove.reason || "delete failed"));
+  cases.push(artifacts.scheduleLifecycle.gone.ok ? pass("v2: schedule removed from menu") : fail("v2: schedule removed from menu", "deleted task still visible"));
+
+  artifacts.skillLifecycle = await runGeneratedSkillLifecycleSmoke({ tab, adoptId, runId });
+  cases.push(artifacts.skillLifecycle.create.ok ? pass("v2: skill generate via chat") : fail("v2: skill generate via chat", artifacts.skillLifecycle.create.reason || "skill generation failed"));
+  cases.push(artifacts.skillLifecycle.menuListed.ok ? pass("v2: generated skill visible in skills") : fail("v2: generated skill visible in skills", "generated skill not visible"));
+  cases.push(artifacts.skillLifecycle.destroy.ok ? pass("v2: generated skill destroy") : fail("v2: generated skill destroy", artifacts.skillLifecycle.destroy.error || "destroy failed"));
+  cases.push(artifacts.skillLifecycle.menuGone.ok ? pass("v2: generated skill cleared from skills") : fail("v2: generated skill cleared from skills", "deleted skill still visible"));
+  cases.push(!artifacts.skillLifecycle.workspaceMentionsSkillAfterDestroy ? pass("v2: workspace clear after skill delete") : fail("v2: workspace clear after skill delete", "workspace still mentions generated skill marker"));
+  cases.push(artifacts.skillLifecycle.registryGone ? pass("v2: registry clear after skill delete") : fail("v2: registry clear after skill delete", "registry still contains generated skill"));
+
+  cases.push(warn("v2: side effects", "Creates then deletes one schedule and one generated skill with a runId marker."));
+
+  const finishedAt = new Date().toISOString();
+  const counts = cases.reduce((acc, item) => {
+    acc[item.status] = (acc[item.status] || 0) + 1;
+    return acc;
+  }, { pass: 0, warn: 0, fail: 0 });
+  const coverage = {
+    level: "v2",
+    estimatedProductCoverage: 0.8,
+    notes: [
+      "Includes v1 navigation/chat/channel checks when includeV1 is true.",
+      "Adds complex dialogue, reversible schedule lifecycle, schedule tenant isolation, generated skill lifecycle, and cleanup verification.",
+    ],
+  };
+  return {
+    runId,
+    level: "v2",
+    startedAt,
+    finishedAt,
+    url: await tab.url(),
+    counts,
+    ok: cases.every((item) => item.status !== "fail"),
+    cases,
+    artifacts,
+    coverage,
+    markdown: renderMarkdownReport({ runId, startedAt, finishedAt, counts, cases, coverage }),
   };
 }
 

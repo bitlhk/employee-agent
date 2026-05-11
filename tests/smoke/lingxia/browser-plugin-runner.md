@@ -23,6 +23,36 @@ const result = await runSmokeV1({
 console.log(result.markdown);
 ```
 
+For the fuller reversible side-effect suite, use `runSmokeV2`. It includes the V1 cases by default and adds:
+
+- complex multi-step dialogue smoke;
+- create/list/query/delete schedule lifecycle;
+- schedule tenant-isolation check, including guarding against known host cron task names leaking into a child claw;
+- generated skill create/list/destroy lifecycle;
+- checks that the generated skill disappears from the skills menu, registry, and workspace surface after deletion.
+
+```js
+const { runSmokeV2 } = await import("./tests/smoke/lingxia/lingxia-smoke-runner.mjs");
+
+const result = await runSmokeV2({
+  tab,
+  baseUrl: "http://127.0.0.1:15180",
+  adoptId: "lgc-ofnmjm4joj",
+  runId: `SMOKE-V2-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`,
+  includeV1: true,
+});
+
+console.log(result.markdown);
+```
+
+On Windows Codex IAB, current Browser Use text input can fail with `ClipboardItem is not available`.
+Before running `runSmokeV2`, callers may attach two optional helpers to the active `tab`:
+
+- `tab.__iabInsertText(text)`: direct text insertion fallback, for example CDP `Input.insertText`.
+- `tab.__fetchJson(path, options)`: same-origin authenticated fetch fallback, for example page-context `fetch`.
+
+The smoke runner uses these helpers only as fallbacks, so normal Playwright/Browser Use runs are unchanged.
+
 ## Claude Code Chrome Shape
 
 If Claude Code Chrome controls a logged-in Chrome tab, open the target page first:
