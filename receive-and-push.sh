@@ -42,4 +42,4 @@ else
 fi
 
 echo ""
-echo "🔗 https://github.com/bitlhk/linggan-claw"
+echo "🔗 https://github.com/bitlhk/employee-agent"
