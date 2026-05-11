@@ -46,7 +46,7 @@ export const DEFAULT_BRAND: BrandConfig = {
     "You are Enterprise Agent, an enterprise AI assistant on the Linggan platform.",
   agentIdentity:
     "你是员工智能体，一个友好、专业、简洁的 AI 助手。",
-  githubUrl: "https://github.com/bitlhk/linggan-claw",
+  githubUrl: "https://github.com/bitlhk/employee-agent",
   pageTitle: "灵感 - AI让灵感触手可及",
 };
 

@@ -2,12 +2,20 @@
 set -euo pipefail
 
 # Bootstrap installer for Employee Agent.
-# Intended usage:
-#   curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh | bash
+# Intended usage after the repository is renamed:
+#   curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash
+# During the transition, the legacy linggan-claw URL is still accepted as a fallback.
 
-REPO_URL="${LINGXIA_REPO_URL:-https://github.com/bitlhk/linggan-claw.git}"
-BRANCH="${LINGXIA_BRANCH:-main}"
-INSTALL_DIR="${LINGXIA_INSTALL_DIR:-$HOME/linggan-claw}"
+DEFAULT_REPO_URL="https://github.com/bitlhk/employee-agent.git"
+LEGACY_REPO_URL="${EMPLOYEE_AGENT_LEGACY_REPO_URL:-https://github.com/bitlhk/linggan-claw.git}"
+REPO_URL="${EMPLOYEE_AGENT_REPO_URL:-${LINGXIA_REPO_URL:-$DEFAULT_REPO_URL}}"
+BRANCH="${EMPLOYEE_AGENT_BRANCH:-${LINGXIA_BRANCH:-main}}"
+DEFAULT_INSTALL_DIR="$HOME/employee-agent"
+if [[ -z "${EMPLOYEE_AGENT_INSTALL_DIR:-}" && -z "${LINGXIA_INSTALL_DIR:-}" && -d "$HOME/linggan-claw/.git" && ! -e "$DEFAULT_INSTALL_DIR" ]]; then
+  DEFAULT_INSTALL_DIR="$HOME/linggan-claw"
+fi
+INSTALL_DIR="${EMPLOYEE_AGENT_INSTALL_DIR:-${LINGXIA_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}}"
+REPO_EXPLICIT=false
 PORT="${LINGXIA_PORT:-5180}"
 HOST="${LINGXIA_HOST:-}"
 DB_MODE="${LINGXIA_DB_MODE:-mysql-auto}"
@@ -23,7 +31,7 @@ Usage: bash bootstrap-install.sh [options]
 Options:
   --repo <url>             Git repository URL.
   --branch <name>          Git branch, default main.
-  --dir <path>             Install directory, default $HOME/linggan-claw.
+  --dir <path>             Install directory, default $HOME/employee-agent for new installs.
   --port <port>            App port, default 5180.
   --host <ip-or-host>      Public host/IP for FRONTEND_URL. Auto-detected by default.
   --db-mode <mode>         mysql-auto | existing | compose. Default mysql-auto.
@@ -35,14 +43,14 @@ Options:
 
 Examples:
   bash bootstrap-install.sh
-  bash bootstrap-install.sh --host 111.119.236.165 --dir "$HOME/linggan-claw"
+  bash bootstrap-install.sh --host 111.119.236.165 --dir "$HOME/employee-agent"
   bash bootstrap-install.sh --db-mode existing --skip-mysql
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo) REPO_URL="${2:?missing --repo value}"; shift 2 ;;
+    --repo) REPO_URL="${2:?missing --repo value}"; REPO_EXPLICIT=true; shift 2 ;;
     --branch) BRANCH="${2:?missing --branch value}"; shift 2 ;;
     --dir) INSTALL_DIR="${2:?missing --dir value}"; shift 2 ;;
     --port) PORT="${2:?missing --port value}"; shift 2 ;;
@@ -141,6 +149,19 @@ ensure_node_tools() {
   fi
 }
 
+clone_repo() {
+  local target="$1"
+  if git clone --branch "$BRANCH" "$REPO_URL" "$target"; then
+    return 0
+  fi
+  if [[ "$REPO_EXPLICIT" != "true" && "$REPO_URL" != "$LEGACY_REPO_URL" ]]; then
+    echo "Primary repository unavailable; falling back to legacy repository: $LEGACY_REPO_URL" >&2
+    git clone --branch "$BRANCH" "$LEGACY_REPO_URL" "$target"
+    return 0
+  fi
+  return 1
+}
+
 checkout_repo() {
   log "Checking out Employee Agent"
   local parent owner
@@ -155,7 +176,7 @@ checkout_repo() {
   elif [[ -e "$INSTALL_DIR" ]]; then
     if [[ -z "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | head -1)" ]]; then
       run sudo_cmd chown "$owner":"$owner" "$INSTALL_DIR"
-      run git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+      run clone_repo "$INSTALL_DIR"
     else
       echo "$INSTALL_DIR exists but is not an empty directory or a git repository." >&2
       exit 1
@@ -163,7 +184,7 @@ checkout_repo() {
   else
     run sudo_cmd mkdir -p "$INSTALL_DIR"
     run sudo_cmd chown "$owner":"$owner" "$INSTALL_DIR"
-    run git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+    run clone_repo "$INSTALL_DIR"
   fi
 }
 
@@ -196,6 +217,12 @@ start_app() {
     return
   fi
   log "Building and starting Employee Agent"
+  if [[ -z "${PM2_APP_NAME:-}" ]] && command -v pm2 >/dev/null 2>&1; then
+    if pm2 describe linggan-claw >/dev/null 2>&1 && ! pm2 describe employee-agent >/dev/null 2>&1; then
+      export PM2_APP_NAME="linggan-claw"
+      log "Existing PM2 app linggan-claw detected; reusing it for this upgrade"
+    fi
+  fi
   run bash -lc "cd '$INSTALL_DIR' && corepack pnpm check"
   run bash -lc "cd '$INSTALL_DIR' && corepack pnpm build"
   if [[ -f "$INSTALL_DIR/ecosystem.config.cjs" ]]; then

@@ -11,7 +11,7 @@ const extraPath = [
 module.exports = {
   apps: [
     {
-      name: process.env.PM2_APP_NAME || "linggan-claw",
+      name: process.env.PM2_APP_NAME || "employee-agent",
       cwd: appRoot,
       script: "pnpm",
       args: "start",

@@ -14,7 +14,7 @@
 ## 目录结构
 
 ```
-linggan-claw/
+employee-agent/
 ├── client/              # 前端应用
 │   ├── src/            # 前端源代码
 │   ├── public/        # 静态资源

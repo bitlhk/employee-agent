@@ -95,7 +95,7 @@
 在 Ubuntu 服务器上执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash
 ```
 
 脚本会自动：
@@ -105,7 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bo
 - 启用 pnpm
 - 安装 PM2
 - 拉取 GitHub 仓库
-- 默认安装到 `$HOME/linggan-claw`
+- 默认安装到 `$HOME/employee-agent`
 - 自动探测服务器 IP
 - 生成 `.env`
 - 初始化 MySQL
@@ -116,7 +116,7 @@ curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bo
 
 ```bash
 curl -fsSL -o /tmp/bootstrap-install.sh \
-  https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh
+  https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh
 
 bash /tmp/bootstrap-install.sh --host 111.119.236.165
 ```
@@ -125,7 +125,7 @@ bash /tmp/bootstrap-install.sh --host 111.119.236.165
 
 ```bash
 bash /tmp/bootstrap-install.sh \
-  --dir "$HOME/linggan-claw" \
+  --dir "$HOME/employee-agent" \
   --port 5180 \
   --host 111.119.236.165 \
   --branch main
@@ -133,7 +133,7 @@ bash /tmp/bootstrap-install.sh \
 
 | 参数 | 说明 |
 |---|---|
-| `--dir` | 安装目录，默认 `$HOME/linggan-claw` |
+| `--dir` | 安装目录，默认 `$HOME/employee-agent` |
 | `--port` | 服务端口，默认 `5180` |
 | `--host` | 访问地址使用的公网 IP 或域名 |
 | `--branch` | Git 分支，默认 `main` |
@@ -149,7 +149,7 @@ bash /tmp/bootstrap-install.sh \
 部署完成后创建第一个管理员：
 
 ```bash
-cd ~/linggan-claw
+cd ~/employee-agent
 corepack pnpm tsx scripts/init-admin.ts \
   --email=admin@example.com \
   --password='换成强密码' \
@@ -164,16 +164,16 @@ http://服务器IP:5180
 
 ### 5. 升级
 
-一键脚本可以重复执行。已有 `$HOME/linggan-claw` Git 仓库时，它会自动拉取最新代码、重新初始化、构建并重启 PM2：
+一键脚本可以重复执行。已有 `$HOME/employee-agent` Git 仓库时，它会自动拉取最新代码、重新初始化、构建并重启 PM2：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash
 ```
 
 默认不会覆盖已有 `.env`。需要重建 `.env` 时：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bootstrap-install.sh | bash -s -- --overwrite-env
+curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash -s -- --overwrite-env
 ```
 
 ---
@@ -185,7 +185,7 @@ curl -fsSL https://raw.githubusercontent.com/bitlhk/linggan-claw/main/scripts/bo
 部署后检查：
 
 ```bash
-cd ~/linggan-claw
+cd ~/employee-agent
 bash scripts/check-local-openclaw-node.sh
 ```
 
@@ -202,18 +202,18 @@ bash scripts/check-local-openclaw-node.sh
 ## 四、PM2 运维
 
 ```bash
-pm2 status linggan-claw
-pm2 logs linggan-claw
-pm2 restart linggan-claw
+pm2 status employee-agent
+pm2 logs employee-agent
+pm2 restart employee-agent
 pm2 save
 ```
 
 常用目录：
 
 ```text
-~/linggan-claw/.env
-~/linggan-claw/ecosystem.config.cjs
-~/linggan-claw/dist/
+~/employee-agent/.env
+~/employee-agent/ecosystem.config.cjs
+~/employee-agent/dist/
 ~/.openclaw/
 ```
 
@@ -226,9 +226,9 @@ pm2 save
 先强刷浏览器。如果仍然不对，确认服务器已经重新构建并重启：
 
 ```bash
-cd ~/linggan-claw
+cd ~/employee-agent
 corepack pnpm build
-pm2 restart linggan-claw
+pm2 restart employee-agent
 ```
 
 ### 申请员工智能体失败？
@@ -236,9 +236,9 @@ pm2 restart linggan-claw
 检查：
 
 ```bash
-cd ~/linggan-claw
+cd ~/employee-agent
 bash scripts/check-local-openclaw-node.sh
-pm2 logs linggan-claw
+pm2 logs employee-agent
 ```
 
 常见原因是 OpenClaw Gateway 未启动、token 不一致、数据库未初始化或 `.env` 地址不对。
@@ -254,7 +254,7 @@ bash scripts/check-local-openclaw-node.sh
 再看 PM2 日志：
 
 ```bash
-pm2 logs linggan-claw
+pm2 logs employee-agent
 ```
 
 ### 微信或飞书收不到消息？
@@ -282,13 +282,13 @@ pm2 logs linggan-claw
 
 ```bash
 # 服务状态
-pm2 status linggan-claw
+pm2 status employee-agent
 
 # 服务日志
-pm2 logs linggan-claw
+pm2 logs employee-agent
 
 # 本机运行时检查
-cd ~/linggan-claw
+cd ~/employee-agent
 bash scripts/check-local-openclaw-node.sh
 
 # 类型检查
@@ -298,5 +298,5 @@ corepack pnpm check
 corepack pnpm build
 
 # 重启
-pm2 restart linggan-claw
+pm2 restart employee-agent
 ```
