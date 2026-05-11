@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Bootstrap installer for Employee Agent.
-# Intended usage after the repository is renamed:
+# Intended usage:
 #   curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash
-# During the transition, the legacy linggan-claw URL is still accepted as a fallback.
+# During the transition, the legacy linggan-claw URL remains accepted as a fallback.
 
 DEFAULT_REPO_URL="https://github.com/bitlhk/employee-agent.git"
 LEGACY_REPO_URL="${EMPLOYEE_AGENT_LEGACY_REPO_URL:-https://github.com/bitlhk/linggan-claw.git}"

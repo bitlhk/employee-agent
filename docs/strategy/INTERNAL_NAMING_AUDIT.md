@@ -141,7 +141,7 @@ tools/financial-harness-executor.py
 
 ## 四、B 类：仓库改名过渡项
 
-> 2026-05-11 更新：已将文档、package 名、新安装默认目录和新安装 PM2 默认名切到 `employee-agent`；bootstrap 保留 `linggan-claw` 仓库 fallback，并在检测到旧安装目录或旧 PM2 进程时继续兼容升级。GitHub 仓库实体改名仍需在网页端完成。
+> 2026-05-11 更新：已将文档、package 名、新安装默认目录和新安装 PM2 默认名切到 `employee-agent`；bootstrap 保留 `linggan-claw` 仓库 fallback，并在检测到旧安装目录或旧 PM2 进程时继续兼容升级。GitHub 仓库实体已改名为 `bitlhk/employee-agent`。
 
 这些和仓库实体地址、安装目录、进程名绑定。本阶段采用新默认值 + 旧兼容的方式过渡，避免 README、脚本、remote、PM2 和现有机器不一致。
 
