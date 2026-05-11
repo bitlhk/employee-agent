@@ -23,6 +23,14 @@ Current `runSmokeV1` covers:
 - Channel HTTP health check.
 - Thinking-leak and duplicate-message checks.
 
+Current `runSmokeV2` additionally covers reversible L3 flows:
+
+- Complex multi-step dialogue.
+- Schedule create / menu list / chat query / tenant isolation / delete.
+- Generated skill create / registry visible / menu visible / destroy / cleanup.
+- Generated artifact file create / workspace API visible / read / token download / workspace UI visible / cleanup.
+- Concurrent two-window chat stream probe when the adapter supports opening a sibling tab.
+
 ## Local Playwright Run
 
 Install Playwright in your local environment:
@@ -37,6 +45,13 @@ Run against an existing local tunnel:
 SMOKE_BASE_URL=http://127.0.0.1:15180 \
 SMOKE_ADOPT_ID=lgc-ofnmjm4joj \
 SMOKE_SESSION_COOKIE='paste-session-cookie-here' \
+node tests/smoke/lingxia/playwright-runner.mjs
+```
+
+Run the fuller V2 suite:
+
+```powershell
+$env:SMOKE_LEVEL = "v2"
 node tests/smoke/lingxia/playwright-runner.mjs
 ```
 

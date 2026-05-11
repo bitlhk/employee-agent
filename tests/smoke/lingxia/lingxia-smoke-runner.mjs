@@ -372,6 +372,42 @@ async function browserFetchJson(tab, path, options = {}) {
   };
 }
 
+async function browserFetchText(tab, path, options = {}) {
+  if (typeof tab.__fetchText === "function") return tab.__fetchText(path, options);
+  if (typeof tab.__baseUrl !== "string") throw new Error("tab.__baseUrl is required for browserFetchText fallback");
+  const resp = await fetch(new URL(path, tab.__baseUrl).toString(), options);
+  return {
+    ok: resp.ok,
+    status: resp.status,
+    text: await resp.text(),
+    headers: Object.fromEntries(resp.headers.entries()),
+  };
+}
+
+async function listWorkspaceFiles(tab, adoptId, subPath = "") {
+  const path = `/api/claw/files/list?adoptId=${encodeURIComponent(adoptId)}${subPath ? `&path=${encodeURIComponent(subPath)}` : ""}`;
+  const resp = await browserFetchJson(tab, path);
+  return Array.isArray(resp?.data?.files) ? resp.data.files : [];
+}
+
+async function readWorkspaceFile(tab, adoptId, filePath) {
+  return browserFetchJson(tab, `/api/claw/files/read?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(filePath)}`);
+}
+
+async function deleteWorkspacePath(tab, adoptId, filePath) {
+  return browserFetchJson(tab, "/api/claw/files/delete", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ adoptId, path: filePath }),
+  });
+}
+
+async function createSiblingTab(tab, url) {
+  if (typeof tab.__newTab === "function") return tab.__newTab(url);
+  if (typeof tab.newTab === "function") return tab.newTab(url);
+  return null;
+}
+
 async function listRegistrySkills(tab, adoptId) {
   const resp = await browserFetchJson(tab, `/api/claw/skills/registry?adoptId=${encodeURIComponent(adoptId)}`);
   return Array.isArray(resp?.data?.items) ? resp.data.items : [];
@@ -538,6 +574,134 @@ export async function runGeneratedSkillLifecycleSmoke({ tab, adoptId = DEFAULT_A
   };
 }
 
+export async function runArtifactFileSmoke({ tab, adoptId = DEFAULT_ADOPT_ID, runId } = {}) {
+  const shortRun = String(runId || Date.now()).replace(/[^a-zA-Z0-9_-]/g, "-").slice(-12);
+  const marker = `smoke-artifact-${shortRun}`;
+  const fileName = `${marker}.md`;
+  const expectedPath = `output/${fileName}`;
+  const prompt = [
+    `创建一个可下载的 Markdown 产物文件，文件名必须是 ${fileName}。`,
+    `文件内容必须包含一行：ARTIFACT_OK ${marker}`,
+    `优先写到 workspace 的 output/${fileName}。`,
+    "请调用文件写入工具完成，不要只在聊天里粘贴内容。",
+    `完成后回复 FILE_CREATED ${marker}。`,
+  ].join("\n");
+
+  const create = await runChatAction({
+    tab,
+    name: "artifact-file-create",
+    prompt,
+    expectedAny: [marker, "FILE_CREATED", "产出文件", fileName],
+    timeoutPlan: [0, 15000, 35000, 70000, 110000],
+  });
+
+  const files = await listWorkspaceFiles(tab, adoptId);
+  let file = files.find((item) => String(item.path || "").includes(marker) || String(item.name || "").includes(marker));
+  if (!file) {
+    const outputFiles = await listWorkspaceFiles(tab, adoptId, "output");
+    file = outputFiles.find((item) => String(item.path || "").includes(marker) || String(item.name || "").includes(marker));
+  }
+  const filePath = String(file?.path || expectedPath);
+  const read = file ? await readWorkspaceFile(tab, adoptId, filePath) : { ok: false, status: 0, data: { error: "file not found" } };
+  const token = file ? await browserFetchJson(tab, "/api/claw/files/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ adoptId, path: filePath, ttl: 300 }),
+  }) : { ok: false, status: 0, data: { error: "file not found" } };
+  const download = token?.data?.url ? await browserFetchText(tab, token.data.url) : { ok: false, status: 0, text: "" };
+
+  await clickNav(tab, "工作空间");
+  const workspaceVisible = await waitForSnapshot(tab, (snap) => snap.includes(fileName) || snap.includes(marker), 30000);
+
+  const cleanup = file ? await deleteWorkspacePath(tab, adoptId, filePath) : { ok: false, status: 0, data: { error: "file not found" } };
+  const filesAfterCleanup = await listWorkspaceFiles(tab, adoptId);
+  const cleanupGone = !filesAfterCleanup.some((item) => String(item.path || "").includes(marker) || String(item.name || "").includes(marker));
+
+  return {
+    ok: Boolean(
+      create.ok &&
+      file &&
+      read.ok &&
+      String(read?.data?.content || "").includes(`ARTIFACT_OK ${marker}`) &&
+      token.ok &&
+      download.ok &&
+      download.text.includes(`ARTIFACT_OK ${marker}`) &&
+      workspaceVisible.ok &&
+      cleanup.ok &&
+      cleanupGone
+    ),
+    marker,
+    fileName,
+    filePath: file ? filePath : null,
+    create,
+    fileListed: Boolean(file),
+    read: { ok: Boolean(read.ok), status: read.status },
+    token: { ok: Boolean(token.ok), status: token.status },
+    download: { ok: Boolean(download.ok), status: download.status, hasMarker: download.text.includes(`ARTIFACT_OK ${marker}`) },
+    workspaceVisible: { ok: workspaceVisible.ok },
+    cleanup: { ok: Boolean(cleanup.ok), status: cleanup.status },
+    cleanupGone,
+  };
+}
+
+export async function runConcurrentWindowSmoke({ tab, adoptId = DEFAULT_ADOPT_ID, baseUrl = "http://127.0.0.1:15180", runId } = {}) {
+  const targetUrl = `${baseUrl}/claw/${adoptId}`;
+  const sibling = await createSiblingTab(tab, targetUrl);
+  if (!sibling) {
+    return { ok: false, skipped: true, reason: "tab.newTab or tab.__newTab is not available in this browser adapter" };
+  }
+  let siblingClosed = false;
+  try {
+    const markerA = `CONCURRENT_A_${String(runId || Date.now()).replace(/[^a-zA-Z0-9_]/g, "_").slice(-18)}`;
+    const markerB = `CONCURRENT_B_${String(runId || Date.now()).replace(/[^a-zA-Z0-9_]/g, "_").slice(-18)}`;
+    await safeNetworkIdle(sibling, 15000);
+
+    const [resultA, resultB] = await Promise.all([
+      runChatAction({
+        tab,
+        name: "concurrent-window-a",
+        prompt: `并发窗口 A 测试。请只回复 ${markerA}，不要回复 ${markerB}，不要创建文件或定时任务。`,
+        expectedAny: [markerA],
+        timeoutPlan: [0, 10000, 25000, 50000, 80000],
+      }),
+      runChatAction({
+        tab: sibling,
+        name: "concurrent-window-b",
+        prompt: `并发窗口 B 测试。请只回复 ${markerB}，不要回复 ${markerA}，不要创建文件或定时任务。`,
+        expectedAny: [markerB],
+        timeoutPlan: [0, 10000, 25000, 50000, 80000],
+      }),
+    ]);
+
+    const snapA = await getSnapshot(tab);
+    const snapB = await getSnapshot(sibling);
+    const aHasA = snapA.includes(markerA);
+    const aHasB = snapA.includes(markerB);
+    const bHasA = snapB.includes(markerA);
+    const bHasB = snapB.includes(markerB);
+    const isolatedTabs = aHasA && !aHasB && bHasB && !bHasA;
+    const sharedHistoryTabs = aHasA && aHasB && bHasA && bHasB;
+    const wrongWindowA = !aHasA && aHasB;
+    const wrongWindowB = !bHasB && bHasA;
+
+    return {
+      ok: Boolean(resultA.ok && resultB.ok && (isolatedTabs || sharedHistoryTabs) && !wrongWindowA && !wrongWindowB),
+      skipped: false,
+      markerA,
+      markerB,
+      resultA,
+      resultB,
+      visibility: { aHasA, aHasB, bHasA, bHasB, isolatedTabs, sharedHistoryTabs, wrongWindowA, wrongWindowB },
+    };
+  } finally {
+    if (typeof sibling.close === "function") {
+      await sibling.close().catch(() => {});
+      siblingClosed = true;
+    }
+    void siblingClosed;
+  }
+}
+
 export async function runSmokeV2({
   tab,
   adoptId = DEFAULT_ADOPT_ID,
@@ -574,7 +738,24 @@ export async function runSmokeV2({
   cases.push(!artifacts.skillLifecycle.workspaceMentionsSkillAfterDestroy ? pass("v2: workspace clear after skill delete") : fail("v2: workspace clear after skill delete", "workspace still mentions generated skill marker"));
   cases.push(artifacts.skillLifecycle.registryGone ? pass("v2: registry clear after skill delete") : fail("v2: registry clear after skill delete", "registry still contains generated skill"));
 
-  cases.push(warn("v2: side effects", "Creates then deletes one schedule and one generated skill with a runId marker."));
+  artifacts.artifactFile = await runArtifactFileSmoke({ tab, adoptId, runId });
+  cases.push(artifacts.artifactFile.create.ok ? pass("v2: artifact create via chat") : fail("v2: artifact create via chat", artifacts.artifactFile.create.reason || "artifact creation failed"));
+  cases.push(artifacts.artifactFile.fileListed ? pass("v2: artifact listed in workspace API") : fail("v2: artifact listed in workspace API", "created artifact not found in workspace list"));
+  cases.push(artifacts.artifactFile.read.ok ? pass("v2: artifact readable") : fail("v2: artifact readable", "created artifact cannot be read"));
+  cases.push(artifacts.artifactFile.download.ok && artifacts.artifactFile.download.hasMarker ? pass("v2: artifact downloadable") : fail("v2: artifact downloadable", "download token or file content missing marker"));
+  cases.push(artifacts.artifactFile.workspaceVisible.ok ? pass("v2: artifact visible in workspace UI") : fail("v2: artifact visible in workspace UI", "workspace UI does not show created artifact"));
+  cases.push(artifacts.artifactFile.cleanup.ok && artifacts.artifactFile.cleanupGone ? pass("v2: artifact cleanup") : fail("v2: artifact cleanup", "created artifact cleanup failed"));
+
+  artifacts.concurrentWindows = await runConcurrentWindowSmoke({ tab, adoptId, baseUrl, runId });
+  if (artifacts.concurrentWindows.skipped) {
+    cases.push(warn("v2: concurrent windows", artifacts.concurrentWindows.reason));
+  } else {
+    cases.push(artifacts.concurrentWindows.resultA.ok ? pass("v2: concurrent window A reply") : fail("v2: concurrent window A reply", artifacts.concurrentWindows.resultA.reason || "window A did not complete"));
+    cases.push(artifacts.concurrentWindows.resultB.ok ? pass("v2: concurrent window B reply") : fail("v2: concurrent window B reply", artifacts.concurrentWindows.resultB.reason || "window B did not complete"));
+    cases.push(artifacts.concurrentWindows.ok ? pass("v2: concurrent window stream isolation") : fail("v2: concurrent window stream isolation", "reply markers were missing or attached to the wrong window", { visibility: artifacts.concurrentWindows.visibility }));
+  }
+
+  cases.push(warn("v2: side effects", "Creates then deletes one schedule, one generated skill, and one generated artifact with a runId marker."));
 
   const finishedAt = new Date().toISOString();
   const counts = cases.reduce((acc, item) => {
@@ -583,10 +764,10 @@ export async function runSmokeV2({
   }, { pass: 0, warn: 0, fail: 0 });
   const coverage = {
     level: "v2",
-    estimatedProductCoverage: 0.8,
+    estimatedProductCoverage: 0.86,
     notes: [
       "Includes v1 navigation/chat/channel checks when includeV1 is true.",
-      "Adds complex dialogue, reversible schedule lifecycle, schedule tenant isolation, generated skill lifecycle, and cleanup verification.",
+      "Adds complex dialogue, reversible schedule lifecycle, schedule tenant isolation, generated skill lifecycle, artifact file lifecycle/download, concurrent window stream probe, and cleanup verification.",
     ],
   };
   return {

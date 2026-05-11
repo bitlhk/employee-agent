@@ -15,6 +15,8 @@ class LocatorAdapter {
   count() { return this.locator.count(); }
   click(options = {}) { return this.locator.click(normalizeOptions(options)); }
   fill(value, options = {}) { return this.locator.fill(value, normalizeOptions(options)); }
+  press(key, options = {}) { return this.locator.press(key, normalizeOptions(options)); }
+  type(value, options = {}) { return this.locator.type(value, normalizeOptions(options)); }
   isEnabled() { return this.locator.isEnabled(); }
   isVisible() { return this.locator.isVisible(); }
   textContent(options = {}) { return this.locator.textContent(normalizeOptions(options)); }
@@ -68,11 +70,39 @@ async function domSnapshot(page) {
 
 export function createPlaywrightTabAdapter(page, { consoleErrors = [] } = {}) {
   const wrap = (locator) => new LocatorAdapter(locator);
+  const pageFetch = async (path, options = {}, responseType = "json") =>
+    page.evaluate(async ({ path, options, responseType }) => {
+      const resp = await fetch(path, { ...options, credentials: "include" });
+      const text = await resp.text();
+      let data = null;
+      if (responseType === "json") {
+        try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
+      }
+      return {
+        ok: resp.ok,
+        status: resp.status,
+        data,
+        text,
+        headers: Object.fromEntries(resp.headers.entries()),
+      };
+    }, { path, options, responseType });
+  const makeAdapter = (nextPage) => {
+    const nextErrors = attachConsoleCollectors(nextPage);
+    return createPlaywrightTabAdapter(nextPage, { consoleErrors: nextErrors });
+  };
   return {
     goto: (url) => page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 }),
     url: () => page.url(),
     title: () => page.title(),
     reload: () => page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }),
+    close: () => page.close(),
+    newTab: async (url) => {
+      const nextPage = await page.context().newPage();
+      if (url) await nextPage.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      return makeAdapter(nextPage);
+    },
+    __fetchJson: (path, options = {}) => pageFetch(path, options, "json"),
+    __fetchText: (path, options = {}) => pageFetch(path, options, "text"),
     playwright: {
       waitForLoadState: async ({ state = "load", timeoutMs = 12000 } = {}) =>
         page.waitForLoadState(state, { timeout: timeoutMs }),

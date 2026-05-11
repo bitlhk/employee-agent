@@ -29,6 +29,8 @@ For the fuller reversible side-effect suite, use `runSmokeV2`. It includes the V
 - create/list/query/delete schedule lifecycle;
 - schedule tenant-isolation check, including guarding against known host cron task names leaking into a child claw;
 - generated skill create/list/destroy lifecycle;
+- generated artifact create/list/read/download/delete lifecycle;
+- concurrent two-window chat stream probe when the browser adapter can open a sibling tab;
 - checks that the generated skill disappears from the skills menu, registry, and workspace surface after deletion.
 
 ```js
@@ -50,6 +52,8 @@ Before running `runSmokeV2`, callers may attach two optional helpers to the acti
 
 - `tab.__iabInsertText(text)`: direct text insertion fallback, for example CDP `Input.insertText`.
 - `tab.__fetchJson(path, options)`: same-origin authenticated fetch fallback, for example page-context `fetch`.
+- `tab.__fetchText(path, options)`: same-origin authenticated text/binary-ish fetch fallback for artifact download checks.
+- `tab.__newTab(url)`: optional sibling-tab opener for concurrent window stream checks.
 
 The smoke runner uses these helpers only as fallbacks, so normal Playwright/Browser Use runs are unchanged.
 

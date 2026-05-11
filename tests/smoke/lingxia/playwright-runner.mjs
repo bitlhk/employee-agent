@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { runSmokeV1 } from "./lingxia-smoke-runner.mjs";
+import { runSmokeV1, runSmokeV2 } from "./lingxia-smoke-runner.mjs";
 import { attachConsoleCollectors, createPlaywrightTabAdapter } from "./adapters/playwright-tab-adapter.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,7 +48,8 @@ async function main() {
   const config = await loadJsonIfExists(configPath);
   const baseUrl = argValue("base-url", process.env.SMOKE_BASE_URL || config.baseUrl || "http://127.0.0.1:15180");
   const adoptId = argValue("adopt-id", process.env.SMOKE_ADOPT_ID || config.adoptId || "lgc-ofnmjm4joj");
-  const runId = argValue("run-id", process.env.SMOKE_RUN_ID || config.runId || `SMOKE-V1-${timestampId()}`);
+  const level = argValue("level", process.env.SMOKE_LEVEL || config.level || "v1").toLowerCase();
+  const runId = argValue("run-id", process.env.SMOKE_RUN_ID || config.runId || `SMOKE-${level.toUpperCase()}-${timestampId()}`);
   const reportDir = argValue("report-dir", process.env.SMOKE_REPORT_DIR || config.reportDir || path.join(__dirname, "reports"));
   const headed = boolArg("headed", process.env.SMOKE_HEADED === "1" || config.headed === true);
   const channel = argValue("channel", process.env.SMOKE_BROWSER_CHANNEL || config.browserChannel || "chrome");
@@ -79,7 +80,9 @@ async function main() {
     const page = await context.newPage();
     const consoleErrors = attachConsoleCollectors(page);
     const tab = createPlaywrightTabAdapter(page, { consoleErrors });
-    const result = await runSmokeV1({ tab, adoptId, baseUrl, runId });
+    const result = level === "v2"
+      ? await runSmokeV2({ tab, adoptId, baseUrl, runId, includeV1: config.includeV1 !== false })
+      : await runSmokeV1({ tab, adoptId, baseUrl, runId });
 
     const jsonPath = path.join(reportDir, `${runId}.json`);
     const mdPath = path.join(reportDir, `${runId}.md`);
