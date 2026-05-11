@@ -51,11 +51,17 @@ type ChannelBindingAdapter = {
 type WechatStatusResponse = {
   bound?: boolean;
   userId?: string;
+  targetLabel?: string;
+  setupRequired?: boolean;
+  setupHint?: string;
+  error?: string;
 };
 
 type WechatQrResponse = {
   qrcode?: string;
   qrcodeUrl?: string;
+  message?: string;
+  error?: string;
 };
 
 type WechatQrStatusResponse = {
@@ -100,7 +106,7 @@ const wechatAdapter: ChannelBindingAdapter = {
   async fetchInitialStatus(adoptId) {
     const r = await fetch(`/api/claw/weixin/status?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" });
     const d = (await r.json()) as WechatStatusResponse;
-    if (d.bound) return { status: "bound", targetLabel: d.userId || "" };
+    if (d.bound) return { status: "bound", targetLabel: d.targetLabel || d.userId || "" };
     return { status: "idle", targetLabel: "" };
   },
 
@@ -112,6 +118,7 @@ const wechatAdapter: ChannelBindingAdapter = {
       body: JSON.stringify({ adoptId }),
     });
     const d = (await r.json()) as WechatQrResponse;
+    if (!r.ok || d.error) throw new Error(d.message || d.error || "openclaw_weixin_qrcode_failed");
     if (!d.qrcode || !d.qrcodeUrl) throw new Error("missing_wechat_qrcode");
     return {
       qrCode: d.qrcodeUrl,
