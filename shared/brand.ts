@@ -8,11 +8,11 @@
 export interface BrandConfig {
   /** 产品名（中文），如 "员工智能体" */
   name: string;
-  /** 产品名（英文），如 "Enterprise Agent" */
+  /** 产品名（英文），如 "Employee Agent" */
   nameEn: string;
-  /** 平台名（中文），如 "灵感" */
+  /** 平台名（中文），如 "员工智能体" */
   platform: string;
-  /** 平台名（英文），如 "Linggan" */
+  /** 平台名（英文），如 "Employee Agent" */
   platformEn: string;
   /** 标语 */
   slogan: string;
@@ -35,19 +35,19 @@ export interface BrandConfig {
 /** 员工智能体默认值 — 与当前硬编码完全一致 */
 export const DEFAULT_BRAND: BrandConfig = {
   name: "员工智能体",
-  nameEn: "Enterprise Agent",
-  platform: "灵感",
-  platformEn: "Linggan",
-  slogan: "AI让灵感触手可及",
+  nameEn: "Employee Agent",
+  platform: "员工智能体",
+  platformEn: "Employee Agent",
+  slogan: "企业 AI 员工平台",
   accentColor: "#9e1822",
   logo: "/images/lingxia.svg",
   favicon: "/favicon.png",
   systemPrompt:
-    "You are Enterprise Agent, an enterprise AI assistant on the Linggan platform.",
+    "You are Employee Agent, an enterprise AI assistant on the Employee Agent platform.",
   agentIdentity:
     "你是员工智能体，一个友好、专业、简洁的 AI 助手。",
   githubUrl: "https://github.com/bitlhk/employee-agent",
-  pageTitle: "灵感 - AI让灵感触手可及",
+  pageTitle: "员工智能体 - 企业 AI 员工平台",
 };
 
 /** system_configs 表中 brand 配置的 key 前缀 */
@@ -103,7 +103,7 @@ export const BRAND_PRESETS: BrandPreset[] = [
   {
     id: "lingxia",
     label: "员工智能体 (默认)",
-    description: "灵感平台默认品牌",
+    description: "员工智能体默认品牌",
     config: { ...DEFAULT_BRAND },
   },
 
