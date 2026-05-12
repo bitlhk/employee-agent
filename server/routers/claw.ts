@@ -55,6 +55,7 @@ import { cleanupOpenClawWeixinBindingForAdopt } from "../_core/claw-weixin";
 import type { SkillSource } from "../../shared/types/skill";
 
 const openClawWorkspaceDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/workspace-${String(runtimeAgentId || "").trim()}`;
+const openClawAgentStateDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/agents/${String(runtimeAgentId || "").trim()}`;
 const openClawSkillMarketDir = () => `${OPENCLAW_HOME}/skill-market`;
 const openClawSharedSkillsDir = () => `${OPENCLAW_HOME}/skills-shared`;
 
@@ -257,6 +258,7 @@ export const clawRouter = router({
         const adoptId = String(row.adoptId || "");
         const runtimeAgentId = resolveRuntimeAgentId(adoptId, String(row.agentId || ""));
         const workspacePath = openClawWorkspaceDir(runtimeAgentId);
+        const agentStatePath = openClawAgentStateDir(runtimeAgentId);
         const skillsRemoved = pruneSkillRegistryForAdopt(adoptId);
         const configPruned = pruneOpenClawAgentConfig([String(row.agentId || ""), runtimeAgentId, `trial_${adoptId}`]);
         const weixinCleanup = cleanupOpenClawWeixinBindingForAdopt(adoptId, row);
@@ -265,6 +267,11 @@ export const clawRouter = router({
           if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
         } catch (e: any) {
           console.warn("[ADMIN-DELETE-CLAW] failed to remove workspace", { adoptId, workspacePath, error: String(e?.message || e) });
+        }
+        try {
+          if (existsSync(agentStatePath)) rmSync(agentStatePath, { recursive: true, force: true });
+        } catch (e: any) {
+          console.warn("[ADMIN-DELETE-CLAW] failed to remove agent state", { adoptId, agentStatePath, error: String(e?.message || e) });
         }
 
         const deleted = await deleteClawAdoptionAdmin(input.id);
@@ -281,6 +288,7 @@ export const clawRouter = router({
             runtimeAgentId,
             status: row.status,
             workspaceRemoved: !existsSync(workspacePath),
+            agentStateRemoved: !existsSync(agentStatePath),
             skillsRemoved,
             configPruned,
             weixinCleanup,
@@ -298,6 +306,8 @@ export const clawRouter = router({
           cleanup: {
             workspacePath,
             workspaceRemoved: !existsSync(workspacePath),
+            agentStatePath,
+            agentStateRemoved: !existsSync(agentStatePath),
             skillsRemoved,
             configPruned,
             weixinCleanup,
