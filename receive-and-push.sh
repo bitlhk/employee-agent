@@ -37,13 +37,40 @@ if [[ "$LOCAL" != "$REMOTE" ]]; then
   fi
 fi
 
+# 解压并校验脱敏包
+TMP_EXTRACT="$(mktemp -d)"
+cleanup() {
+  rm -rf "$TMP_EXTRACT"
+}
+trap cleanup EXIT
+tar xzf "$TAR_FILE" -C "$TMP_EXTRACT"
+
+# Accept either a flat package or a package wrapped in a single top-level
+# directory. Refuse nested git metadata so a packaging mistake cannot replace
+# the repository with an embedded checkout.
+SRC_DIR="$TMP_EXTRACT"
+top_count="$(find "$TMP_EXTRACT" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')"
+if [[ "$top_count" == "1" ]]; then
+  only_entry="$(find "$TMP_EXTRACT" -mindepth 1 -maxdepth 1 -print -quit)"
+  if [[ -d "$only_entry" ]]; then
+    SRC_DIR="$only_entry"
+  fi
+fi
+if find "$SRC_DIR" -name .git -type d -print -quit | grep -q .; then
+  echo "❌ 脱敏包包含 .git 目录，拒绝导入，避免嵌套仓库/误删。" >&2
+  exit 1
+fi
+if [[ ! -f "$SRC_DIR/package.json" || ! -d "$SRC_DIR/server" || ! -d "$SRC_DIR/client" ]]; then
+  echo "❌ 脱敏包结构异常，缺少 package.json/server/client，拒绝导入。" >&2
+  find "$SRC_DIR" -maxdepth 2 -mindepth 1 | sed -n '1,40p' >&2
+  exit 1
+fi
+
 # 保护 .git 和这个脚本自身
 echo "🔄 同步文件（保留 .git 历史）..."
 # 先清理除 .git 和 receive-and-push.sh 之外的所有文件
 find . -maxdepth 1 -not -name '.git' -not -name '.' -not -name 'receive-and-push.sh' -exec rm -rf {} +
-
-# 解压脱敏包
-tar xzf "$TAR_FILE" -C "$OSS_DIR"
+rsync -a "$SRC_DIR"/ "$OSS_DIR"/
 
 # git 增量提交
 echo "📝 生成增量 commit..."
