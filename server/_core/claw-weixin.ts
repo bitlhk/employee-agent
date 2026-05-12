@@ -80,6 +80,16 @@ function listOfficialAccountIds(): string[] {
   return [];
 }
 
+function findReusableOfficialAccount(): { accountId: string; account: any } | null {
+  const accountIds = listOfficialAccountIds();
+  for (let i = accountIds.length - 1; i >= 0; i--) {
+    const accountId = accountIds[i];
+    const account = loadOfficialAccount(accountId);
+    if (account?.token) return { accountId, account };
+  }
+  return null;
+}
+
 function isOfficialPluginEnabled(config = readOpenClawConfig()): boolean {
   const entry = config?.plugins?.entries?.[OPENCLAW_WEIXIN_CHANNEL];
   if (entry && entry.enabled === false) return false;
@@ -217,9 +227,9 @@ async function startOfficialWeixinLogin(accountId: string): Promise<{ qrcodeUrl?
   });
 }
 
-async function waitOfficialWeixinLogin(accountId: string): Promise<{ connected?: boolean; message?: string; accountId?: string; botToken?: string; baseUrl?: string; userId?: string }> {
+async function waitOfficialWeixinLogin(accountId: string): Promise<{ connected?: boolean; alreadyConnected?: boolean; message?: string; accountId?: string; botToken?: string; baseUrl?: string; userId?: string }> {
   const mod = await importWeixinPluginModule<{
-    waitForWeixinLogin: (params: Record<string, any>) => Promise<{ connected?: boolean; message?: string; accountId?: string; botToken?: string; baseUrl?: string; userId?: string }>;
+    waitForWeixinLogin: (params: Record<string, any>) => Promise<{ connected?: boolean; alreadyConnected?: boolean; message?: string; accountId?: string; botToken?: string; baseUrl?: string; userId?: string }>;
   }>("auth/login-qr.js");
   return await mod.waitForWeixinLogin({
     sessionKey: accountId,
@@ -340,6 +350,15 @@ export function registerWeixinRoutes(app: express.Express) {
 
       const result = await waitOfficialWeixinLogin(sessionKey);
       if (!result.connected) {
+        if (result.alreadyConnected) {
+          const reusable = findReusableOfficialAccount();
+          if (reusable) {
+            const userId = String(reusable.account?.userId || "").trim();
+            upsertOpenClawWeixinBinding({ adoptId, claw, accountId: reusable.accountId, userId });
+            return res.json({ status: "confirmed", userId: userId || reusable.accountId, accountId: reusable.accountId });
+          }
+          return res.json({ status: "wait", message: result.message || "already connected but no local account was found" });
+        }
         const msg = String(result.message || "").toLowerCase();
         if (msg.includes("expired")) return res.json({ status: "expired" });
         return res.json({ status: "wait", message: result.message || "" });
@@ -364,7 +383,7 @@ export function registerWeixinRoutes(app: express.Express) {
       const { accountId } = removeOpenClawWeixinBinding(adoptId, claw);
       if (accountId) {
         try {
-          callOpenClawRpc("channels.logout", { channel: OPENCLAW_WEIXIN_CHANNEL, accountId, timeoutMs: 15000 }, 25000);
+          callOpenClawRpc("channels.logout", { channel: OPENCLAW_WEIXIN_CHANNEL, accountId }, 25000);
         } catch {}
       }
       res.json({ ok: true });
