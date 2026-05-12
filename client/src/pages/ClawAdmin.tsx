@@ -14,6 +14,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -25,7 +33,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck, Building2, Trash2 } from "lucide-react";
+import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck, Building2, Trash2, KeyRound, UserCog } from "lucide-react";
 import { UsageStatsTab } from "@/components/pages/UsageStatsTab";
 import { TenantAuditTab } from "@/components/pages/TenantAuditTab";
 import { BizAgentsPanel } from "@/components/BizAgentsPanel";
@@ -270,6 +278,8 @@ export default function ClawAdmin() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [passwordTarget, setPasswordTarget] = useState<any | null>(null);
+  const [newPassword, setNewPassword] = useState("");
 
   useEffect(() => {
     const previous = document.body.getAttribute("data-admin-light");
@@ -429,6 +439,25 @@ export default function ClawAdmin() {
     onError: (e: any) => toast.error(e?.message || "保存失败"),
   });
 
+  const { data: authUsersData, refetch: refetchAuthUsers } = trpc.auth.listUsers.useQuery(undefined, {
+    enabled: activeTab === "accounts",
+    retry: false,
+  });
+  const authUsers = Array.isArray(authUsersData) ? authUsersData : [];
+  const setUserPasswordMutation = trpc.auth.setUserPassword.useMutation({
+    onSuccess: () => {
+      toast.success("密码已更新");
+      setPasswordTarget(null);
+      setNewPassword("");
+      refetchAuthUsers();
+    },
+    onError: (e: any) => toast.error(e?.message || "更新失败"),
+  });
+  const submitPassword = () => {
+    if (!passwordTarget) return;
+    setUserPasswordMutation.mutate({ userId: Number(passwordTarget.id), password: newPassword });
+  };
+
   // ── 权限检查 ──
   if (!user || (user as any)?.role !== "admin") {
     return (
@@ -454,6 +483,7 @@ export default function ClawAdmin() {
     { value: "collaboration", label: "组织协作", description: "空间、成员与准入", icon: Building2 },
     { value: "skills", label: "技能广场", description: "上架、审核与共享", icon: Sparkles },
     { value: "usage", label: "使用统计", description: "访问与使用趋势", icon: BarChart3 },
+    { value: "accounts", label: "账号管理", description: "管理员与登录密码", icon: UserCog },
     { value: "settings", label: "系统设置", description: "智能体运行配置", icon: Settings },
     { value: "brand", label: "品牌设置", description: "名称、视觉与身份", icon: Sparkles },
     { value: "collab", label: "智能体协作", description: "协作能力管理", icon: Zap },
@@ -939,6 +969,51 @@ export default function ClawAdmin() {
             <CollaborationTab />
           </TabsContent>
           <TabsContent value="usage" className="space-y-4">            <UsageStatsTab />          </TabsContent>
+          <TabsContent value="accounts" className="space-y-4">
+            <Card className="admin-panel-card p-6">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">账号管理</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">管理登录用户和管理员密码。</p>
+                </div>
+                <Button size="sm" variant="outline" className="admin-secondary-action" onClick={() => refetchAuthUsers()}>
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  刷新
+                </Button>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                <div className="grid grid-cols-[72px_minmax(160px,1fr)_120px_160px] border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500">
+                  <span>ID</span>
+                  <span>邮箱</span>
+                  <span>角色</span>
+                  <span>操作</span>
+                </div>
+                {authUsers.length > 0 ? authUsers.map((u: any) => (
+                  <div key={u.id} className="grid grid-cols-[72px_minmax(160px,1fr)_120px_160px] items-center border-b border-gray-100 px-4 py-3 text-sm last:border-b-0">
+                    <span className="font-mono text-xs text-gray-500">{u.id}</span>
+                    <span className="truncate text-gray-900">{u.email || "-"}</span>
+                    <span>
+                      <span className={`rounded-full px-2 py-1 text-xs ${u.role === "admin" ? "bg-red-50 text-red-700" : "bg-gray-100 text-gray-600"}`}>
+                        {u.role === "admin" ? "管理员" : "用户"}
+                      </span>
+                    </span>
+                    <span>
+                      <Button type="button" variant="outline" size="sm" className="admin-secondary-action h-8" onClick={() => {
+                        setPasswordTarget(u);
+                        setNewPassword("");
+                      }}>
+                        <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                        改密码
+                      </Button>
+                    </span>
+                  </div>
+                )) : (
+                  <div className="px-4 py-8 text-center text-sm text-muted-foreground">暂无登录用户</div>
+                )}
+              </div>
+            </Card>
+          </TabsContent>
           <TabsContent value="tenant-audit" className="space-y-4">            <TenantAuditTab />          </TabsContent>
           </section>
         </Tabs>
@@ -979,6 +1054,50 @@ export default function ClawAdmin() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <Dialog open={!!passwordTarget} onOpenChange={(open) => {
+        if (!open) {
+          setPasswordTarget(null);
+          setNewPassword("");
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>修改登录密码</DialogTitle>
+            <DialogDescription>
+              为 {passwordTarget?.email || "该用户"} 设置新的登录密码。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="claw-admin-new-password">新密码</Label>
+            <Input
+              id="claw-admin-new-password"
+              type="password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && newPassword.length >= 6) submitPassword();
+              }}
+              autoComplete="new-password"
+              placeholder="至少 6 位"
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => {
+              setPasswordTarget(null);
+              setNewPassword("");
+            }}>
+              取消
+            </Button>
+            <Button
+              type="button"
+              onClick={submitPassword}
+              disabled={newPassword.length < 6 || setUserPasswordMutation.isPending}
+            >
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
