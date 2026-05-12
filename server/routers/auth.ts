@@ -57,6 +57,20 @@ export const authRouter = router({
         await updateUserAccessLevel(input.userId, input.accessLevel);
         return { success: true };
       }),
+
+    // 管理员：重置登录用户密码
+    setUserPassword: adminProcedure
+      .input(
+        z.object({
+          userId: z.number().int().positive(),
+          password: z.string().min(6, "密码至少需要6个字符").max(100, "密码过长"),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const hashedPassword = await bcrypt.hash(input.password, 10);
+        await updateUser(input.userId, { password: hashedPassword });
+        return { success: true };
+      }),
     // 邮箱密码注册
     register: publicProcedure
       .input(z.object({

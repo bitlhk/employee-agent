@@ -588,6 +588,40 @@ export const businessAgents = mysqlTable("business_agents", {
 export type BusinessAgent = typeof businessAgents.$inferSelect;
 export type InsertBusinessAgent = typeof businessAgents.$inferInsert;
 
+// ── Business Agent tenant isolation audit ──
+export const businessAgentAudits = mysqlTable("business_agent_audit", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull(),
+  tenantToken: varchar("tenant_token", { length: 128 }).notNull(),
+  agentId: varchar("agent_id", { length: 128 }).notNull(),
+  action: varchar("action", { length: 64 }).notNull(),
+  sessionKey: varchar("session_key", { length: 128 }),
+  meta: text("meta"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  userIdx: index("idx_business_agent_audit_user").on(table.userId),
+  agentIdx: index("idx_business_agent_audit_agent").on(table.agentId),
+  tenantIdx: index("idx_business_agent_audit_tenant").on(table.tenantToken),
+  createdIdx: index("idx_business_agent_audit_created").on(table.createdAt),
+}));
+
+export const businessAgentTenantMap = mysqlTable("business_agent_tenant_map", {
+  tenantToken: varchar("tenant_token", { length: 128 }).primaryKey(),
+  userId: int("user_id").notNull(),
+  agentId: varchar("agent_id", { length: 128 }).notNull(),
+  workspacePath: varchar("workspace_path", { length: 512 }),
+  firstUsedAt: timestamp("first_used_at"),
+  lastUsedAt: timestamp("last_used_at"),
+  messageCount: int("message_count").notNull().default(0),
+}, (table) => ({
+  userIdx: index("idx_business_agent_tenant_map_user").on(table.userId),
+  agentIdx: index("idx_business_agent_tenant_map_agent").on(table.agentId),
+  lastUsedIdx: index("idx_business_agent_tenant_map_last_used").on(table.lastUsedAt),
+}));
+
+export type BusinessAgentAudit = typeof businessAgentAudits.$inferSelect;
+export type BusinessAgentTenantMap = typeof businessAgentTenantMap.$inferSelect;
+
 // ── Agent 调用日志 ──
 export const agentCallLogs = mysqlTable("agent_call_logs", {
   id:           int("id").autoincrement().primaryKey(),
