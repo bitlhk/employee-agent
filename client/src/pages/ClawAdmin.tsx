@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck, Building2, Trash2, KeyRound, UserCog } from "lucide-react";
+import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck, Building2, Trash2, KeyRound, UserCog, Activity, Server, Database, Radio, GitBranch } from "lucide-react";
 import { UsageStatsTab } from "@/components/pages/UsageStatsTab";
 import { TenantAuditTab } from "@/components/pages/TenantAuditTab";
 import { BizAgentsPanel } from "@/components/BizAgentsPanel";
@@ -73,6 +73,53 @@ const STATUS_COLORS: Record<string, string> = {
   recycled: "#9ca3af",
   failed: "#ef4444",
 };
+
+const formatBytes = (value?: number) => {
+  const n = Number(value || 0);
+  if (!n) return "-";
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+};
+
+const formatUptime = (value?: number) => {
+  const n = Number(value || 0);
+  if (!n) return "-";
+  const diff = Date.now() - n;
+  if (diff < 0) return "-";
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} 小时`;
+  return `${Math.floor(hours / 24)} 天`;
+};
+
+const HealthBadge = ({ ok, warn, label }: { ok?: boolean; warn?: boolean; label?: string }) => (
+  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+    ok ? "border-green-200 bg-green-50 text-green-700" : warn ? "border-yellow-200 bg-yellow-50 text-yellow-700" : "border-red-200 bg-red-50 text-red-700"
+  }`}>
+    {label || (ok ? "正常" : warn ? "注意" : "异常")}
+  </span>
+);
+
+function HealthMetricCard({ icon: Icon, title, value, desc, ok, warn }: { icon: any; title: string; value: string; desc?: string; ok?: boolean; warn?: boolean }) {
+  return (
+    <Card className="admin-panel-card p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-50 text-gray-700">
+            <Icon className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">{title}</div>
+            <div className="mt-1 text-sm font-semibold text-gray-900">{value}</div>
+          </div>
+        </div>
+        <HealthBadge ok={ok} warn={warn} />
+      </div>
+      {desc ? <div className="mt-3 text-xs leading-5 text-muted-foreground">{desc}</div> : null}
+    </Card>
+  );
+}
 
 function BrandSettingsPanel() {
   const brand = useBrand();
@@ -443,6 +490,11 @@ export default function ClawAdmin() {
     enabled: activeTab === "accounts",
     retry: false,
   });
+  const { data: systemHealth, isLoading: systemHealthLoading, refetch: refetchSystemHealth } = trpc.claw.adminSystemHealth.useQuery(undefined, {
+    enabled: activeTab === "health",
+    retry: false,
+    refetchInterval: activeTab === "health" ? 30000 : false,
+  });
   const authUsers = Array.isArray(authUsersData) ? authUsersData : [];
   const setUserPasswordMutation = trpc.auth.setUserPassword.useMutation({
     onSuccess: () => {
@@ -484,6 +536,7 @@ export default function ClawAdmin() {
     { value: "skills", label: "技能广场", description: "上架、审核与共享", icon: Sparkles },
     { value: "usage", label: "使用统计", description: "访问与使用趋势", icon: BarChart3 },
     { value: "accounts", label: "账号管理", description: "管理员与登录密码", icon: UserCog },
+    { value: "health", label: "系统健康", description: "OpenClaw 与平台状态", icon: Activity },
     { value: "settings", label: "系统设置", description: "智能体运行配置", icon: Settings },
     { value: "brand", label: "品牌设置", description: "名称、视觉与身份", icon: Sparkles },
     { value: "collab", label: "智能体协作", description: "协作能力管理", icon: Zap },
@@ -1012,6 +1065,119 @@ export default function ClawAdmin() {
                   <div className="px-4 py-8 text-center text-sm text-muted-foreground">暂无登录用户</div>
                 )}
               </div>
+            </Card>
+          </TabsContent>
+          <TabsContent value="health" className="space-y-4">
+            <Card className="admin-panel-card p-6">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">系统健康</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">只读监测平台服务、OpenClaw、频道、模型白名单和数据库关键表。</p>
+                </div>
+                <Button size="sm" variant="outline" className="admin-secondary-action" onClick={() => refetchSystemHealth()}>
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  刷新
+                </Button>
+              </div>
+
+              {systemHealthLoading ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  正在检查系统状态
+                </div>
+              ) : systemHealth ? (
+                <div className="space-y-5">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <HealthMetricCard
+                      icon={Server}
+                      title="平台服务"
+                      value={(systemHealth as any).app?.pm2?.status || "-"}
+                      desc={`PM2: ${(systemHealth as any).app?.pm2?.name || "-"} · 重启 ${(systemHealth as any).app?.pm2?.restarts ?? "-"} 次 · 内存 ${formatBytes((systemHealth as any).app?.pm2?.memory)}`}
+                      ok={Boolean((systemHealth as any).app?.healthOk && (systemHealth as any).app?.pm2?.status === "online")}
+                    />
+                    <HealthMetricCard
+                      icon={Activity}
+                      title="OpenClaw Gateway"
+                      value={(systemHealth as any).openclaw?.reachable ? "reachable" : "unreachable"}
+                      desc={`版本 ${(systemHealth as any).openclaw?.version || "-"} · 进程 ${(systemHealth as any).openclaw?.processCount ?? 0} 个`}
+                      ok={Boolean((systemHealth as any).openclaw?.reachable && Number((systemHealth as any).openclaw?.processCount || 0) === 1)}
+                      warn={Boolean((systemHealth as any).openclaw?.reachable && Number((systemHealth as any).openclaw?.processCount || 0) !== 1)}
+                    />
+                    <HealthMetricCard
+                      icon={Radio}
+                      title="频道状态"
+                      value={`${((systemHealth as any).channels?.lines || []).filter((c: any) => c.ok).length}/${((systemHealth as any).channels?.lines || []).length} running`}
+                      desc={((systemHealth as any).channels?.lines || []).find((c: any) => String(c.raw).includes("openclaw-weixin"))?.raw || "暂无频道状态"}
+                      ok={((systemHealth as any).channels?.lines || []).some((c: any) => String(c.raw).includes("openclaw-weixin") && c.ok)}
+                      warn={((systemHealth as any).channels?.lines || []).some((c: any) => c.warn)}
+                    />
+                    <HealthMetricCard
+                      icon={Database}
+                      title="数据库"
+                      value={(systemHealth as any).database?.ok ? "connected" : "failed"}
+                      desc={`技能 ${(systemHealth as any).database?.skillMarketApproved ?? "-"} 个 · 子智能体 ${(systemHealth as any).database?.claws?.active ?? "-"}/${(systemHealth as any).database?.claws?.total ?? "-"}`}
+                      ok={Boolean((systemHealth as any).database?.ok && ((systemHealth as any).database?.tables || []).every((t: any) => t.exists))}
+                    />
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <Card className="p-5">
+                      <div className="mb-3 flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-gray-900">模型白名单</h3>
+                        <GitBranch className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="text-xs text-muted-foreground">默认模型</div>
+                      <div className="mt-1 rounded-lg bg-gray-50 px-3 py-2 font-mono text-xs text-gray-800">{(systemHealth as any).models?.primary || "-"}</div>
+                      <div className="mt-3 text-xs text-muted-foreground">允许模型</div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {((systemHealth as any).models?.allowlist || []).map((model: string) => (
+                          <span key={model} className="rounded-full bg-blue-50 px-2 py-1 font-mono text-[11px] text-blue-700">{model}</span>
+                        ))}
+                        {((systemHealth as any).models?.allowlist || []).length === 0 ? <span className="text-xs text-muted-foreground">未配置白名单</span> : null}
+                      </div>
+                      {((systemHealth as any).models?.agentModelDrift || []).length > 0 ? (
+                        <div className="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+                          有 {((systemHealth as any).models?.agentModelDrift || []).length} 个智能体模型不在白名单内。
+                        </div>
+                      ) : null}
+                    </Card>
+
+                    <Card className="p-5">
+                      <div className="mb-3 flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-gray-900">版本与运行态</h3>
+                        <Server className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="grid gap-2 text-xs">
+                        <div className="flex justify-between gap-3"><span className="text-muted-foreground">检查时间</span><span className="font-mono text-gray-800">{new Date((systemHealth as any).checkedAt).toLocaleString("zh-CN")}</span></div>
+                        <div className="flex justify-between gap-3"><span className="text-muted-foreground">代码分支</span><span className="font-mono text-gray-800">{(systemHealth as any).app?.git?.branch || "-"}</span></div>
+                        <div className="flex justify-between gap-3"><span className="text-muted-foreground">代码提交</span><span className="font-mono text-gray-800">{(systemHealth as any).app?.git?.commit || "-"}</span></div>
+                        <div className="flex justify-between gap-3"><span className="text-muted-foreground">平台运行</span><span className="font-mono text-gray-800">{formatUptime((systemHealth as any).app?.pm2?.uptime)}</span></div>
+                        <div className="flex justify-between gap-3"><span className="text-muted-foreground">Gateway 服务</span><span className="text-right text-gray-800">{String((systemHealth as any).openclaw?.service || "-")}</span></div>
+                      </div>
+                    </Card>
+                  </div>
+
+                  <Card className="p-5">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900">频道明细</h3>
+                      <HealthBadge ok={Boolean((systemHealth as any).channels?.ok)} warn={!((systemHealth as any).channels?.ok)} />
+                    </div>
+                    <div className="space-y-2">
+                      {((systemHealth as any).channels?.lines || []).map((line: any, index: number) => (
+                        <div key={`${line.raw}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs">
+                          <span className="min-w-0 truncate text-gray-700">{line.raw}</span>
+                          <HealthBadge ok={line.ok} warn={line.warn} />
+                        </div>
+                      ))}
+                      {((systemHealth as any).channels?.lines || []).length === 0 ? (
+                        <div className="rounded-lg bg-gray-50 px-3 py-3 text-center text-xs text-muted-foreground">暂无频道输出</div>
+                      ) : null}
+                    </div>
+                  </Card>
+                </div>
+              ) : (
+                <div className="rounded-lg bg-gray-50 px-4 py-8 text-center text-sm text-muted-foreground">暂无健康数据</div>
+              )}
             </Card>
           </TabsContent>
           <TabsContent value="tenant-audit" className="space-y-4">            <TenantAuditTab />          </TabsContent>

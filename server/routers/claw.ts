@@ -32,6 +32,7 @@ import {
   listBusinessAgentAudit,
   reverseTenantToken,
   getTenantAuditStats,
+  getDb,
 } from "../db";
 import {
   APP_ROOT,
@@ -58,6 +59,40 @@ const openClawWorkspaceDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/works
 const openClawAgentStateDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/agents/${String(runtimeAgentId || "").trim()}`;
 const openClawSkillMarketDir = () => `${OPENCLAW_HOME}/skill-market`;
 const openClawSharedSkillsDir = () => `${OPENCLAW_HOME}/skills-shared`;
+
+function safeExec(command: string, timeout = 8000): { ok: boolean; output: string; error?: string } {
+  try {
+    return {
+      ok: true,
+      output: execSync(command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout }).trim(),
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      output: String(e?.stdout || "").trim(),
+      error: String(e?.stderr || e?.message || e).trim(),
+    };
+  }
+}
+
+function safeJson<T = any>(text: string, fallback: T): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function redactHealthValue(value: any): any {
+  if (Array.isArray(value)) return value.map(redactHealthValue);
+  if (!value || typeof value !== "object") return value;
+  const out: Record<string, any> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (/token|secret|password|apiKey|cookie/i.test(key)) out[key] = "***";
+    else out[key] = redactHealthValue(raw);
+  }
+  return out;
+}
 
 function pruneSkillRegistryForAdopt(adoptId: string): number {
   const registryPath = `${APP_ROOT}/data/skill-registry.json`;
@@ -358,6 +393,103 @@ export const clawRouter = router({
       .query(async ({ input }) => {
         return listSkillMarketItems(input?.status);
       }),
+
+    adminSystemHealth: adminProcedure.query(async () => {
+      const checkedAt = new Date().toISOString();
+      const health = safeExec("curl -fsS http://127.0.0.1:5180/health", 5000);
+      const pm2 = safeExec("pm2 jlist", 8000);
+      const openclawStatus = safeExec("openclaw status --json", 12000);
+      const channelStatus = safeExec("openclaw channels status --deep", 12000);
+      const gitBranch = safeExec("git rev-parse --abbrev-ref HEAD", 5000);
+      const gitCommit = safeExec("git rev-parse --short HEAD", 5000);
+      const openclawProcesses = safeExec("pgrep -af '^openclaw( |$)'", 5000);
+
+      const pm2Rows = pm2.ok ? safeJson<any[]>(pm2.output || "[]", []) : [];
+      const appName = process.env.PM2_APP_NAME || (APP_ROOT.includes("linggan-platform") ? "linggan-claw" : "employee-agent");
+      const app = Array.isArray(pm2Rows)
+        ? pm2Rows.find((row) => String(row?.name || "") === appName) || pm2Rows.find((row) => /employee-agent|linggan-claw/.test(String(row?.name || "")))
+        : null;
+
+      const openclawJson = openclawStatus.ok ? safeJson<any>(openclawStatus.output, null) : null;
+      const config = existsSync(OPENCLAW_JSON_PATH) ? safeJson<any>(String(readFileSync(OPENCLAW_JSON_PATH, "utf8") || "{}"), {}) : {};
+      const allowlist = Object.keys(config?.agents?.defaults?.models || {});
+      const primary = String(config?.agents?.defaults?.model?.primary || "");
+      const agentModelDrift = (Array.isArray(config?.agents?.list) ? config.agents.list : [])
+        .map((agent: any) => {
+          const model = typeof agent?.model === "string" ? agent.model : String(agent?.model?.primary || "");
+          return { id: String(agent?.id || ""), model };
+        })
+        .filter((agent: any) => agent.model && allowlist.length > 0 && !allowlist.includes(agent.model));
+
+      const dbTables = ["users", "business_agent_audit", "business_agent_tenant_map", "skill_marketplace"];
+      const dbHealth: any = { ok: false, tables: [] as any[], skillMarketApproved: null, claws: null, error: "" };
+      try {
+        const db = await getDb();
+        if (!db) throw new Error("DB not available");
+        dbHealth.ok = true;
+        for (const table of dbTables) {
+          const result: any = await db.execute(`SHOW TABLES LIKE '${table.replace(/'/g, "")}'`);
+          const rows = Array.isArray(result) ? (Array.isArray(result[0]) ? result[0] : result) : [];
+          dbHealth.tables.push({ name: table, exists: rows.length > 0 });
+        }
+        const approved: any = await db.execute("SELECT COUNT(*) AS count FROM skill_marketplace WHERE status = 'approved'");
+        const claws: any = await db.execute("SELECT COUNT(*) AS total, SUM(status = 'active') AS active FROM claw_adoptions");
+        dbHealth.skillMarketApproved = Number((approved?.[0]?.[0] || approved?.[0] || {}).count || 0);
+        const clawRow = claws?.[0]?.[0] || claws?.[0] || {};
+        dbHealth.claws = { total: Number(clawRow.total || 0), active: Number(clawRow.active || 0) };
+      } catch (e: any) {
+        dbHealth.error = String(e?.message || e);
+      }
+
+      const channelLines = channelStatus.output.split(/\r?\n/).filter((line) => line.trim().startsWith("- "));
+      const channels = channelLines.map((line) => ({
+        raw: line.replace(/^\-\s*/, ""),
+        ok: /\brunning\b/.test(line) && !/\bstopped\b|\berror:/i.test(line),
+        warn: /\bdisconnected\b|degraded|timed out/i.test(line),
+      }));
+
+      const processLines = openclawProcesses.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+      return redactHealthValue({
+        checkedAt,
+        app: {
+          name: appName,
+          healthOk: health.ok,
+          health: health.ok ? safeJson(health.output, { raw: health.output }) : null,
+          pm2: app ? {
+            name: app.name,
+            status: app.pm2_env?.status,
+            restarts: app.pm2_env?.restart_time,
+            uptime: app.pm2_env?.pm_uptime,
+            memory: app.monit?.memory,
+            cpu: app.monit?.cpu,
+          } : null,
+          git: { branch: gitBranch.output || "", commit: gitCommit.output || "" },
+          errors: [health.error, pm2.error].filter(Boolean),
+        },
+        openclaw: {
+          reachable: Boolean(openclawJson?.gateway?.reachable),
+          version: openclawJson?.runtimeVersion || "",
+          gateway: openclawJson?.gateway || null,
+          service: openclawJson?.gatewayService?.runtimeShort || openclawJson?.gatewayService || null,
+          processCount: processLines.length,
+          processes: processLines,
+          errors: [openclawStatus.error, openclawProcesses.error].filter(Boolean),
+        },
+        channels: {
+          ok: channelStatus.ok,
+          lines: channels,
+          raw: channelStatus.output,
+          error: channelStatus.error || "",
+        },
+        models: {
+          primary,
+          allowlist,
+          agentModelDrift,
+        },
+        database: dbHealth,
+      });
+    }),
 
     // 管理员上传技能包（zip）— 通过 Express 路由处理，这里只做元数据入库
     adminPublishSkill: adminProcedure
