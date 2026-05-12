@@ -56,8 +56,11 @@ if [[ "$top_count" == "1" ]]; then
     SRC_DIR="$only_entry"
   fi
 fi
-if find "$SRC_DIR" -name .git -type d -print -quit | grep -q .; then
-  echo "❌ 脱敏包包含 .git 目录，拒绝导入，避免嵌套仓库/误删。" >&2
+if [[ -d "$SRC_DIR/.git" ]]; then
+  rm -rf "$SRC_DIR/.git"
+fi
+if find "$SRC_DIR" -mindepth 2 -name .git -type d -print -quit | grep -q .; then
+  echo "❌ 脱敏包包含嵌套 .git 目录，拒绝导入，避免嵌套仓库/误删。" >&2
   exit 1
 fi
 if [[ ! -f "$SRC_DIR/package.json" || ! -d "$SRC_DIR/server" || ! -d "$SRC_DIR/client" ]]; then
