@@ -1758,7 +1758,20 @@ export function registerBusinessRoutes(app: express.Express) {
       { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
     );
     const templateAgentId = String((bizAgentCfg as any)?.localAgentId || agentId);
-    const perTenantAgentId = ensurePerTenantAgent(templateAgentId, tenantCtxLocal);
+    let perTenantAgentId: string;
+    try {
+      perTenantAgentId = ensurePerTenantAgent(templateAgentId, tenantCtxLocal);
+    } catch (error: any) {
+      auditTenantAccess(tenantCtxLocal, "security_alert", {
+        reason: "per_tenant_agent_registration_failed",
+        template_agent_id: templateAgentId,
+        error: String(error?.message || error).slice(0, 500),
+      }).catch(() => {});
+      res.write(`data: ${JSON.stringify({ error: "租户隔离初始化失败，已阻止回退到共享 Agent。" })}\n\n`);
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+      return;
+    }
     console.log("[LOCAL]", agentId, "→ per-tenant agent:", perTenantAgentId, "tenant:", tenantCtxLocal.tenantShort);
 
     const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
