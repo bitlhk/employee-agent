@@ -77,6 +77,26 @@ function safeExec(command: string, timeout = 8000): { ok: boolean; output: strin
   }
 }
 
+function shellQuote(value: string): string {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function resolveOpenClawCli(): string {
+  const candidates = [
+    process.env.OPENCLAW_BIN,
+    `${process.env.HOME || ""}/.npm-global/bin/openclaw`,
+    `${process.env.HOME || ""}/.local/bin/openclaw`,
+    `${process.env.HOME || ""}/bin/openclaw`,
+    "/usr/local/bin/openclaw",
+    "/usr/bin/openclaw",
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return shellQuote(candidate);
+  }
+  return "openclaw";
+}
+
 function safeJson<T = any>(text: string, fallback: T): T {
   try {
     return JSON.parse(text) as T;
@@ -474,10 +494,11 @@ export const clawRouter = router({
 
     adminSystemHealth: adminProcedure.query(async () => {
       const checkedAt = new Date().toISOString();
+      const openclawCli = resolveOpenClawCli();
       const health = safeExec("curl -fsS http://127.0.0.1:5180/health", 5000);
       const pm2 = safeExec("pm2 jlist", 8000);
-      const openclawStatus = safeExec("openclaw status --json", 12000);
-      const channelStatus = safeExec("openclaw channels status --deep", 12000);
+      const openclawStatus = safeExec(`${openclawCli} status --json`, 12000);
+      const channelStatus = safeExec(`${openclawCli} channels status --deep`, 12000);
       const gitBranch = safeExec("git rev-parse --abbrev-ref HEAD", 5000);
       const gitCommit = safeExec("git rev-parse --short HEAD", 5000);
       const openclawProcesses = safeExec("pgrep -af '^openclaw( |$)'", 5000);
@@ -550,6 +571,7 @@ export const clawRouter = router({
         openclaw: {
           reachable: Boolean(openclawJson?.gateway?.reachable),
           version: openclawJson?.runtimeVersion || "",
+          cli: openclawCli.replace(/^'|'$/g, ""),
           gateway: openclawJson?.gateway || null,
           service: openclawJson?.gatewayService?.runtimeShort || openclawJson?.gatewayService || null,
           processCount: processLines.length,
