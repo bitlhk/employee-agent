@@ -22,6 +22,7 @@ import {
   normalizeClientRunId,
   touchChatRun,
 } from "./chat-inflight";
+import { restoreDeletedProtectedCoreFiles, snapshotProtectedCoreFiles } from "./core-file-guard";
 
 export function registerChatStreamRoutes(app: express.Express) {
 
@@ -460,14 +461,24 @@ const options = {
 
     // ── 工具代理层：拦截高危 tool_call，走 routeTool ────────────────
     const remoteHomeLocal = OPENCLAW_BASE_HOME;
+    const workspaceDir = openClawWorkspaceDir(runtimeAgentId);
     const toolCtx: ToolContext = {
       adoptId: String(adoptId),
       agentId: runtimeAgentId,
       userId: Number((claw as any).userId || 0),
       permissionProfile: String((claw as any).permissionProfile || "starter") as ToolContext["permissionProfile"],
       sessionKey,
-      workspaceDir: openClawWorkspaceDir(runtimeAgentId),
+      workspaceDir,
       sendEvent: (event: string, data: object) => writeEvent(event, data),  // 传入 SSE 写函数，供 routeTool 发送进度事件
+    };
+    const coreFileSnapshot = snapshotProtectedCoreFiles(workspaceDir);
+    const restoreCoreFiles = (phase: string) => {
+      restoreDeletedProtectedCoreFiles(coreFileSnapshot, {
+        adoptId: String(adoptId),
+        agentId: runtimeAgentId,
+        sessionKey,
+        phase,
+      });
     };
     const suppressedToolResults = new Set<string>();
     let lastSSEEventAt = Date.now(); // 任意 SSE 事件的最后时间戳
@@ -671,6 +682,7 @@ const options = {
           flag: process.env.SSE_TRUNCATE_DETECT || "off",
           triggeredBy: kindForLog,
         });
+        restoreCoreFiles(`stream_${kindForLog}`);
       };
 
       // ── SSE 截断诊断 listener（2026-04-28）──
@@ -968,6 +980,7 @@ const options = {
           clientClosed: clientClosedFlag,
           flag: process.env.SSE_TRUNCATE_DETECT || "off",
         });
+        restoreCoreFiles("stream_done");
       });
     });
 
@@ -985,6 +998,7 @@ const options = {
         res.write("data: [DONE]\n\n");
         res.end();
       }
+      restoreCoreFiles("stream_request_error");
     });
 
     // 客户端断开时取消上游请求
@@ -1001,6 +1015,7 @@ const options = {
       stopGatewayGapDetection();
       clearInterval(sseKeepaliveInterval);
       proxyReq.destroy();
+      restoreCoreFiles("stream_client_close");
     });
 
     proxyReq.write(body);

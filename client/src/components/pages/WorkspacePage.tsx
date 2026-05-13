@@ -24,6 +24,15 @@ import {
 type FileNode = { name: string; path: string; type: "file" | "directory"; size?: number; modifiedAt?: string };
 type Capabilities = { supportsList: boolean; supportsRead: boolean; supportsDownload: boolean; supportsUpload: boolean; supportsDelete: boolean; maxUploadBytes: number };
 type ListResp = { runtime: string; capabilities: Capabilities; files: FileNode[] };
+const PROTECTED_ROOT_FILES = new Set([
+  "AGENTS.md",
+  "SOUL.md",
+  "TOOLS.md",
+  "MEMORY.md",
+  "IDENTITY.md",
+  "HEARTBEAT.md",
+  "USER.md",
+]);
 
 // Parse response safely: 当上游反代（nginx 413/502 等）返回 HTML 错误页时，
 // 避免 r.json() 抛 "Unexpected token '<'"，改为提取可读信息。
@@ -67,6 +76,10 @@ function formatTime(iso?: string): string {
 function isPreviewable(name: string): boolean {
   const lower = name.toLowerCase();
   return /\.(md|txt|json|yaml|yml|csv|log|py|js|ts|tsx|jsx|html|css|sql|sh|xml|toml|ini|conf)$/.test(lower);
+}
+
+function isProtectedRootFile(file: FileNode): boolean {
+  return file.type === "file" && !file.path.includes("/") && PROTECTED_ROOT_FILES.has(file.path);
 }
 
 export function WorkspacePage({ adoptId }: { adoptId: string }) {
@@ -163,11 +176,13 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
 
   const requestDeleteFile = (file: FileNode) => {
     if (!caps?.supportsDelete) return;
+    if (isProtectedRootFile(file)) return;
     setDeleteTarget(file);
   };
 
   const deleteFile = async (file: FileNode) => {
     if (!caps?.supportsDelete) return;
+    if (isProtectedRootFile(file)) return;
     try {
       const r = await fetch("/api/claw/files/delete", {
         method: "DELETE",
@@ -321,7 +336,7 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
                           </Button>
                         </a>
                       )}
-                      {caps?.supportsDelete && (
+                      {caps?.supportsDelete && !isProtectedRootFile(f) && (
                         <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); requestDeleteFile(f); }} className="h-7 px-2 text-xs gap-1 lingxia-soft-action lingxia-soft-action--danger">
                           <Trash2 className="w-3 h-3" />
                         </Button>

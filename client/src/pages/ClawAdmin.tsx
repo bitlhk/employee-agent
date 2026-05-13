@@ -82,6 +82,11 @@ const formatBytes = (value?: number) => {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 };
 
+const formatPercent = (value?: number) => {
+  const n = Number(value || 0);
+  return `${n.toFixed(n >= 10 ? 0 : 1)}%`;
+};
+
 const formatUptime = (value?: number) => {
   const n = Number(value || 0);
   if (!n) return "-";
@@ -104,7 +109,7 @@ const formatAuditJson = (value: unknown) => {
 };
 
 const HealthBadge = ({ ok, warn, label }: { ok?: boolean; warn?: boolean; label?: string }) => (
-  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+  <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${
     ok ? "border-green-200 bg-green-50 text-green-700" : warn ? "border-yellow-200 bg-yellow-50 text-yellow-700" : "border-red-200 bg-red-50 text-red-700"
   }`}>
     {label || (ok ? "正常" : warn ? "注意" : "异常")}
@@ -113,23 +118,47 @@ const HealthBadge = ({ ok, warn, label }: { ok?: boolean; warn?: boolean; label?
 
 function HealthMetricCard({ icon: Icon, title, value, desc, ok, warn }: { icon: any; title: string; value: string; desc?: string; ok?: boolean; warn?: boolean }) {
   return (
-    <Card className="admin-panel-card p-5">
+    <Card className="admin-panel-card min-w-0 p-5">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-50 text-gray-700">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-50 text-gray-700">
             <Icon className="h-4 w-4" />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="text-xs text-muted-foreground">{title}</div>
-            <div className="mt-1 text-sm font-semibold text-gray-900">{value}</div>
+            <div className="mt-1 truncate text-sm font-semibold text-gray-900">{value}</div>
           </div>
         </div>
         <HealthBadge ok={ok} warn={warn} />
       </div>
-      {desc ? <div className="mt-3 text-xs leading-5 text-muted-foreground">{desc}</div> : null}
+      {desc ? <div className="mt-3 break-words text-xs leading-5 text-muted-foreground">{desc}</div> : null}
     </Card>
   );
 }
+
+const channelKind = (raw: string) => {
+  if (/telegram/i.test(raw)) return "Telegram";
+  if (/weixin|wechat/i.test(raw)) return "微信";
+  return "其他";
+};
+
+const summarizeChannels = (lines: any[] = []) => {
+  if (!lines.length) return "未配置频道";
+  const counts = lines.reduce<Record<string, number>>((acc, line) => {
+    const kind = channelKind(String(line?.raw || ""));
+    acc[kind] = (acc[kind] || 0) + 1;
+    return acc;
+  }, {});
+  return Object.entries(counts).map(([kind, count]) => `${kind} ${count} 个`).join(" · ");
+};
+
+const channelLabel = (raw: string) => {
+  const text = String(raw || "");
+  const named = text.match(/\(([^)]+)\)/)?.[1];
+  if (/telegram/i.test(text)) return "Telegram";
+  if (/weixin|wechat/i.test(text)) return named ? `微信：${named}` : "微信通道";
+  return text.split(":")[0] || "频道";
+};
 
 function BrandSettingsPanel() {
   const brand = useBrand();
@@ -1148,28 +1177,28 @@ export default function ClawAdmin() {
                 </div>
               ) : systemHealth ? (
                 <div className="space-y-5">
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
                     <HealthMetricCard
                       icon={Server}
                       title="平台服务"
                       value={(systemHealth as any).app?.pm2?.status || "-"}
-                      desc={`PM2: ${(systemHealth as any).app?.pm2?.name || "-"} · 重启 ${(systemHealth as any).app?.pm2?.restarts ?? "-"} 次 · 内存 ${formatBytes((systemHealth as any).app?.pm2?.memory)}`}
+                      desc={`${(systemHealth as any).app?.pm2?.name || "employee-agent"} · CPU ${formatPercent((systemHealth as any).app?.pm2?.cpu)} · 内存 ${formatBytes((systemHealth as any).app?.pm2?.memory)} · 重启 ${(systemHealth as any).app?.pm2?.restarts ?? "-"} 次`}
                       ok={Boolean((systemHealth as any).app?.healthOk && (systemHealth as any).app?.pm2?.status === "online")}
                     />
                     <HealthMetricCard
                       icon={Activity}
                       title="OpenClaw Gateway"
                       value={(systemHealth as any).openclaw?.reachable ? "reachable" : "unreachable"}
-                      desc={`版本 ${(systemHealth as any).openclaw?.version || "-"} · 进程 ${(systemHealth as any).openclaw?.processCount ?? 0} 个`}
-                      ok={Boolean((systemHealth as any).openclaw?.reachable && Number((systemHealth as any).openclaw?.processCount || 0) === 1)}
-                      warn={Boolean((systemHealth as any).openclaw?.reachable && Number((systemHealth as any).openclaw?.processCount || 0) !== 1)}
+                      desc={`版本 ${(systemHealth as any).openclaw?.version || "-"} · gateway ${String((systemHealth as any).openclaw?.service || "-").split(",")[0]}`}
+                      ok={Boolean((systemHealth as any).openclaw?.reachable)}
+                      warn={Boolean(!(systemHealth as any).openclaw?.reachable && Number((systemHealth as any).openclaw?.processCount || 0) > 0)}
                     />
                     <HealthMetricCard
                       icon={Radio}
                       title="频道状态"
-                      value={`${((systemHealth as any).channels?.lines || []).filter((c: any) => c.ok).length}/${((systemHealth as any).channels?.lines || []).length} running`}
-                      desc={((systemHealth as any).channels?.lines || []).find((c: any) => String(c.raw).includes("openclaw-weixin"))?.raw || "暂无频道状态"}
-                      ok={((systemHealth as any).channels?.lines || []).some((c: any) => String(c.raw).includes("openclaw-weixin") && c.ok)}
+                      value={`${((systemHealth as any).channels?.lines || []).filter((c: any) => c.ok).length}/${((systemHealth as any).channels?.lines || []).length} 运行`}
+                      desc={summarizeChannels((systemHealth as any).channels?.lines || [])}
+                      ok={Boolean((systemHealth as any).channels?.ok && (((systemHealth as any).channels?.lines || []).length === 0 || ((systemHealth as any).channels?.lines || []).some((c: any) => c.ok)))}
                       warn={((systemHealth as any).channels?.lines || []).some((c: any) => c.warn)}
                     />
                     <HealthMetricCard
@@ -1183,7 +1212,7 @@ export default function ClawAdmin() {
                       icon={ShieldCheck}
                       title="Audit Ledger"
                       value={auditHealth?.ok ? "ready" : "attention"}
-                      desc={`tables ${auditPresentCount}/${auditExpectedCount} · DLQ ${formatBytes(auditHealth?.dlq?.bytes)} · failures ${auditHealth?.recentFailures?.length ?? "-"}`}
+                      desc={`表 ${auditPresentCount}/${auditExpectedCount} · DLQ ${formatBytes(auditHealth?.dlq?.bytes)} · 最近异常 ${auditHealth?.recentFailures?.length ?? "-"} 条`}
                       ok={Boolean(auditHealth?.ok)}
                       warn={Boolean(auditHealth && !auditHealth.ok)}
                     />
@@ -1227,12 +1256,13 @@ export default function ClawAdmin() {
                   </div>
 
                   <Card className="p-5">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-gray-900">Audit Ledger Baseline</h3>
-                      <HealthBadge ok={Boolean(auditHealth?.ok)} warn={Boolean(auditHealth && !auditHealth.ok)} />
-                    </div>
+                    <details>
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                        <span className="text-sm font-semibold text-gray-900">审计基线明细</span>
+                        <HealthBadge ok={Boolean(auditHealth?.ok)} warn={Boolean(auditHealth && !auditHealth.ok)} />
+                      </summary>
                     {auditHealth ? (
-                      <div className="space-y-4">
+                      <div className="mt-4 space-y-4">
                         <div className="grid gap-3 lg:grid-cols-4">
                           <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs"><div className="text-muted-foreground">Rows</div><div className="mt-1 font-mono text-sm font-semibold text-gray-900">{auditHealth.ledger?.rowCount ?? 0}</div></div>
                           <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs"><div className="text-muted-foreground">Oldest</div><div className="mt-1 font-mono text-[11px] text-gray-900">{auditHealth.ledger?.oldestEventTime ? new Date(auditHealth.ledger.oldestEventTime).toLocaleString("zh-CN") : "-"}</div></div>
@@ -1251,7 +1281,8 @@ export default function ClawAdmin() {
                         </div>
                         {(auditHealth.warnings || []).length > 0 ? <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">{auditHealth.warnings.join(" · ")}</div> : null}
                       </div>
-                    ) : (<div className="rounded-lg bg-gray-50 px-3 py-3 text-center text-xs text-muted-foreground">No audit baseline data</div>)}
+                    ) : (<div className="mt-4 rounded-lg bg-gray-50 px-3 py-3 text-center text-xs text-muted-foreground">No audit baseline data</div>)}
+                    </details>
                   </Card>
 
                   <Card className="p-5">
@@ -1262,7 +1293,7 @@ export default function ClawAdmin() {
                     <div className="space-y-2">
                       {((systemHealth as any).channels?.lines || []).map((line: any, index: number) => (
                         <div key={`${line.raw}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs">
-                          <span className="min-w-0 truncate text-gray-700">{line.raw}</span>
+                          <span className="min-w-0 truncate text-gray-700">{channelLabel(line.raw)}</span>
                           <HealthBadge ok={line.ok} warn={line.warn} />
                         </div>
                       ))}

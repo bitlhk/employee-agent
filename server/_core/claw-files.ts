@@ -22,6 +22,15 @@ const MAX_FILES_PER_LIST = 500;
 const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_FILES_PER_WORKSPACE = 2000;
+const PROTECTED_ROOT_FILES = new Set([
+  "AGENTS.md",
+  "SOUL.md",
+  "TOOLS.md",
+  "MEMORY.md",
+  "IDENTITY.md",
+  "HEARTBEAT.md",
+  "USER.md",
+]);
 
 // File type whitelist (defense against agent prompt-injection-via-uploaded-file)
 const ALLOWED_EXTENSIONS = new Set([
@@ -61,6 +70,11 @@ function safeJoin(workspace: string, relPath: string): string | null {
   const abs = path.normalize(path.join(workspace, relPath));
   if (!abs.startsWith(workspace + path.sep) && abs !== workspace) return null;
   return abs;
+}
+
+function isProtectedRootFile(relPath: string): boolean {
+  const normalized = path.posix.normalize(String(relPath || "").replace(/\\/g, "/"));
+  return !normalized.includes("/") && PROTECTED_ROOT_FILES.has(normalized);
 }
 
 function openclawListFiles(workspace: string, subPath: string = ""): LinggFileNode[] {
@@ -234,6 +248,9 @@ export function registerFilesRoutes(app: express.Express) {
       const normalized = path.posix.normalize(relPath.replace(/\\/g, "/"));
       if (normalized === "" || normalized === "." || normalized === "/" || normalized === ".." || normalized.startsWith("../")) {
         return res.status(400).json({ error: "refuse to delete workspace root" });
+      }
+      if (isProtectedRootFile(normalized)) {
+        return res.status(403).json({ error: "protected_core_file", message: "system files can be edited but not deleted" });
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;

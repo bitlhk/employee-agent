@@ -363,7 +363,7 @@ export function registerMiscRoutes(app: express.Express) {
   });
 
 
-  // ── 智能体使用量统计（从 claw-exec.log 解析）──
+  // ── 智能体使用量统计（从聊天日志解析）──
   app.get("/api/claw/admin/usage-stats", async (req, res) => {
     try {
       // 简单鉴权
@@ -374,19 +374,45 @@ export function registerMiscRoutes(app: express.Express) {
       }
 
       const { readFileSync, existsSync } = await import("fs");
-      const logPath = APP_ROOT + "/logs/claw-exec.log";
-      if (!existsSync(logPath)) return res.json({ adoptions: [], daily: [], summary: {} });
-
-      const raw = readFileSync(logPath, "utf8");
-      const lines = raw.split("\n").filter(Boolean);
+      const logPaths = [
+        APP_ROOT + "/logs/claw-exec-detail.log",
+        APP_ROOT + "/logs/claw-exec.log",
+      ];
+      const lines = logPaths.flatMap((logPath) => {
+        if (!existsSync(logPath)) return [] as string[];
+        return readFileSync(logPath, "utf8").split("\n").filter(Boolean);
+      });
+      if (lines.length === 0) return res.json({ adoptions: [], daily: [], summary: {} });
 
       // 按 adoptId 统计
       const byAdopt: Record<string, { total: number; days: Record<string, number>; lastTs: string; userId: number }> = {};
       const dailyAll: Record<string, number> = {};
+      const seen = new Set<string>();
+      const isChatUsageEvent = (d: any) => {
+        if (d?.event === "chat_stream_response" || d?.event === "ws_chat_response") return true;
+        // 兼容旧 tRPC claw.chat 日志；排除管理操作，例如 admin_delete_claw。
+        if (d?.event === "claw_exec" && d?.message && d?.message !== "admin_delete_claw") return true;
+        return false;
+      };
+      const usageKey = (d: any) => {
+        const sessionKey = d?.sessionKey ? String(d.sessionKey) : "";
+        const chatId = d?.chatCompletionId ? String(d.chatCompletionId) : "";
+        return [
+          d?.event || "",
+          d?.adoptId || "",
+          d?.ts || "",
+          sessionKey,
+          chatId,
+        ].join("|");
+      };
 
       for (const line of lines) {
         try {
           const d = JSON.parse(line);
+          if (!isChatUsageEvent(d)) continue;
+          const key = usageKey(d);
+          if (seen.has(key)) continue;
+          seen.add(key);
           const aid = d.adoptId || "";
           const day = (d.ts || "").slice(0, 10);
           const uid = d.userId || 0;
@@ -441,7 +467,7 @@ export function registerMiscRoutes(app: express.Express) {
         daily,
         summary: {
           totalClaws: adoptions.length,
-          totalChats: lines.length,
+          totalChats: seen.size,
           activeToday: adoptions.filter(a => a.dailyBreakdown.some(d => d.date === new Date().toISOString().slice(0, 10))).length,
         },
       });

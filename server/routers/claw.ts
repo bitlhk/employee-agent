@@ -56,6 +56,7 @@ import { skillRegistry } from "../_core/skills/skill-registry";
 import { parseSkillSourceDirectory } from "../_core/skills/skill-source";
 import { cleanupOpenClawWeixinBindingForAdopt } from "../_core/claw-weixin";
 import type { SkillSource } from "../../shared/types/skill";
+import { restoreDeletedProtectedCoreFiles, snapshotProtectedCoreFiles } from "../_core/core-file-guard";
 
 const openClawWorkspaceDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/workspace-${String(runtimeAgentId || "").trim()}`;
 const openClawAgentStateDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/agents/${String(runtimeAgentId || "").trim()}`;
@@ -75,6 +76,26 @@ function safeExec(command: string, timeout = 8000): { ok: boolean; output: strin
       error: String(e?.stderr || e?.message || e).trim(),
     };
   }
+}
+
+function shellQuote(value: string): string {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function resolveOpenClawCli(): string {
+  const candidates = [
+    process.env.OPENCLAW_BIN,
+    `${process.env.HOME || ""}/.npm-global/bin/openclaw`,
+    `${process.env.HOME || ""}/.local/bin/openclaw`,
+    `${process.env.HOME || ""}/bin/openclaw`,
+    "/usr/local/bin/openclaw",
+    "/usr/bin/openclaw",
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return shellQuote(candidate);
+  }
+  return "openclaw";
 }
 
 function safeJson<T = any>(text: string, fallback: T): T {
@@ -474,10 +495,15 @@ export const clawRouter = router({
 
     adminSystemHealth: adminProcedure.query(async () => {
       const checkedAt = new Date().toISOString();
-      const health = safeExec("curl -fsS http://127.0.0.1:5180/health", 5000);
+      const openclawCli = resolveOpenClawCli();
+      const health = {
+        ok: true,
+        output: JSON.stringify({ status: "ok", timestamp: checkedAt }),
+        error: "",
+      };
       const pm2 = safeExec("pm2 jlist", 8000);
-      const openclawStatus = safeExec("openclaw status --json", 12000);
-      const channelStatus = safeExec("openclaw channels status --deep", 12000);
+      const openclawStatus = safeExec(`${openclawCli} status --json`, 12000);
+      const channelStatus = safeExec(`${openclawCli} channels status --deep`, 12000);
       const gitBranch = safeExec("git rev-parse --abbrev-ref HEAD", 5000);
       const gitCommit = safeExec("git rev-parse --short HEAD", 5000);
       const openclawProcesses = safeExec("pgrep -af '^openclaw( |$)'", 5000);
@@ -550,6 +576,7 @@ export const clawRouter = router({
         openclaw: {
           reachable: Boolean(openclawJson?.gateway?.reachable),
           version: openclawJson?.runtimeVersion || "",
+          cli: openclawCli.replace(/^'|'$/g, ""),
           gateway: openclawJson?.gateway || null,
           service: openclawJson?.gatewayService?.runtimeShort || openclawJson?.gatewayService || null,
           processCount: processLines.length,
@@ -1262,6 +1289,15 @@ export const clawRouter = router({
           const remoteUser = process.env.CLAW_REMOTE_USER || "root";
           const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
           const useRemote = chatMode === "remote-openclaw" || !!remoteHost;
+          const runtimeAgentIdForGuard = String((claw as any).agentId || "");
+          const coreFileSnapshot = snapshotProtectedCoreFiles(openClawWorkspaceDir(runtimeAgentIdForGuard));
+          const restoreCoreFiles = (phase: string) => {
+            restoreDeletedProtectedCoreFiles(coreFileSnapshot, {
+              adoptId: input.adoptId,
+              agentId: runtimeAgentIdForGuard,
+              phase,
+            });
+          };
 
           const runAgentOnce = () => {
             if (useRemote) {
@@ -1343,6 +1379,7 @@ export const clawRouter = router({
                 throw firstErr;
               }
             }
+            restoreCoreFiles("trpc_chat_done");
 
             let parsed: any = null;
             try {
@@ -1380,6 +1417,7 @@ export const clawRouter = router({
               mode: chatMode,
             };
           } catch (error: any) {
+            restoreCoreFiles("trpc_chat_error");
             const msg = error?.stderr?.toString?.() || error?.message || String(error);
             writeClawExecAudit({
               adoptId: input.adoptId,

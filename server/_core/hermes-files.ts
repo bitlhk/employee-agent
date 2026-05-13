@@ -17,6 +17,13 @@ import { hermesProfileWorkspaceDir } from "./helpers";
 const MAX_LIST_DEPTH = 4;        // Anti-DOS: limit recursion
 const MAX_FILES_PER_LIST = 500;  // Anti-DOS: cap result size
 const MAX_READ_BYTES = 10 * 1024 * 1024; // 10MB max single-file read
+const PROTECTED_HERMES_FILES = new Set([
+  "SOUL.md",
+  "memories/MEMORY.md",
+  "memories/USER.md",
+  "MEMORY.md",
+  "USER.md",
+]);
 
 export type LinggFileNode = {
   name: string;
@@ -59,6 +66,11 @@ function resolveSafePath(workspace: string, relPath: string): string | null {
   const abs = path.normalize(path.join(workspace, relPath));
   if (!abs.startsWith(workspace + path.sep) && abs !== workspace) return null;
   return abs;
+}
+
+function isProtectedHermesFile(relPath: string): boolean {
+  const normalized = path.posix.normalize(String(relPath || "").replace(/\\/g, "/"));
+  return PROTECTED_HERMES_FILES.has(normalized);
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -172,6 +184,7 @@ export const hermesFiles = {
   deleteFile(claw: FilesProviderHandle, relPath: string): { ok: true } | { ok: false; reason: string } {
     const workspace = adoptIdToWorkspace(claw.adoptId);
     if (!workspace) return { ok: false, reason: "invalid adoptId" };
+    if (isProtectedHermesFile(relPath)) return { ok: false, reason: "protected_core_file" };
     const abs = resolveSafePath(workspace, relPath);
     if (!abs || !existsSync(abs)) return { ok: false, reason: "file not found" };
     const st = statSync(abs);

@@ -312,6 +312,10 @@ SQL
     echo "CLAW_GATEWAY_PORT=18789"
     echo "CLAW_GATEWAY_TOKEN=$GW_TOKEN"
     echo "CLAW_REMOTE_HOST=127.0.0.1"
+    echo "OPENCLAW_SANDBOX_ENABLED=true"
+    echo "OPENCLAW_SANDBOX_IMAGE=openclaw-sandbox:bookworm-slim"
+    echo "OPENCLAW_SANDBOX_AUTO_BUILD=true"
+    echo "OPENCLAW_SANDBOX_REQUIRED=false"
     echo "HERMES_HOME=$HOME/.hermes"
     echo "LINGXIA_INTERNAL_BASE_URL=http://127.0.0.1:$PORT_VALUE"
     echo ""
@@ -398,6 +402,7 @@ try:
 except Exception as exc:
     print(f"  OpenClaw 配置同步失败: {exc}")
 PYEOF
+    "${SCRIPT_DIR}/scripts/configure-openclaw-sandbox.sh" || echo "  [WARN] OpenClaw sandbox 配置未完全生效，请检查 Docker 权限与镜像。"
   elif [[ ! -f "$OC_CONFIG" ]]; then
     echo "  未找到 $OC_CONFIG。请先运行: openclaw setup"
   fi
