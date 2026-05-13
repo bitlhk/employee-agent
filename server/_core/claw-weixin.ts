@@ -171,15 +171,6 @@ function upsertOpenClawWeixinBinding(params: {
   writeOpenClawConfig(config);
 }
 
-async function triggerOfficialWeixinChannelReload(): Promise<void> {
-  try {
-    const accounts = await importWeixinPluginModule<{
-      triggerWeixinChannelReload: () => void;
-    }>("auth/accounts.js");
-    accounts.triggerWeixinChannelReload();
-  } catch {}
-}
-
 function removeOpenClawWeixinBinding(adoptId: string, claw: any): { accountId: string; userId: string } {
   const config = readOpenClawConfig();
   const binding = findBindingForAdopt(adoptId, claw, config);
@@ -260,7 +251,6 @@ async function saveOfficialWeixinAccount(result: { accountId?: string; botToken?
     saveWeixinAccount: (accountId: string, data: Record<string, any>) => void;
     registerWeixinAccountId: (accountId: string) => void;
     clearStaleAccountsForUserId: (accountId: string, userId: string, onClearContextTokens?: (accountId: string) => void) => void;
-    triggerWeixinChannelReload: () => void;
   }>("auth/accounts.js");
   accounts.saveWeixinAccount(accountId, {
     token: result.botToken,
@@ -269,7 +259,6 @@ async function saveOfficialWeixinAccount(result: { accountId?: string; botToken?
   });
   accounts.registerWeixinAccountId(accountId);
   if (result.userId) accounts.clearStaleAccountsForUserId(accountId, result.userId);
-  accounts.triggerWeixinChannelReload();
   return accountId;
 }
 
@@ -370,7 +359,6 @@ export function registerWeixinRoutes(app: express.Express) {
           if (reusable) {
             const userId = String(reusable.account?.userId || "").trim();
             upsertOpenClawWeixinBinding({ adoptId, claw, accountId: reusable.accountId, userId });
-            await triggerOfficialWeixinChannelReload();
             await recordAuditBestEffort({
               action: "channel.weixin.bound",
               ...auditActor({ id: claw.userId }),
@@ -401,7 +389,6 @@ export function registerWeixinRoutes(app: express.Express) {
       const account = accountId ? loadOfficialAccount(accountId) : null;
       const userId = String(account?.userId || "").trim();
       upsertOpenClawWeixinBinding({ adoptId, claw, accountId, userId });
-      await triggerOfficialWeixinChannelReload();
       await recordAuditBestEffort({
         action: "channel.weixin.bound",
         ...auditActor({ id: claw.userId }),

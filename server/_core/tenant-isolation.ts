@@ -164,13 +164,6 @@ import { execFileSync } from "child_process";
 
 const _registeredAgents = new Set<string>();
 
-function strictTenantAgentIsolationEnabled(): boolean {
-  const flag = String(process.env.TIL_STRICT_AGENT_ISOLATION || "").trim().toLowerCase();
-  if (flag === "true" || flag === "1" || flag === "yes") return true;
-  if (flag === "false" || flag === "0" || flag === "no") return false;
-  return process.env.NODE_ENV === "production";
-}
-
 /**
  * 确保 per-tenant agent 已在 OpenClaw 注册
  * 返回 per-tenant agent_id
@@ -227,10 +220,7 @@ export function ensurePerTenantAgent(
     return perTenantAgentId;
   } catch (e: any) {
     console.error("[TIL] agents.create failed for", perTenantAgentId, ":", e?.message);
-    if (strictTenantAgentIsolationEnabled()) {
-      throw new Error(`[TIL] per-tenant agent registration failed in strict isolation mode: ${perTenantAgentId}`);
-    }
-    // 非严格模式保留 fallback，避免开发/演示环境因 OpenClaw 注册短暂失败完全不可用。
+    // 失败时回退到模板 agent，保证业务可用
     return templateAgentId;
   }
 }

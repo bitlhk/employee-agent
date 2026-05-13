@@ -1161,15 +1161,15 @@ export default function ClawAdmin() {
                       title="OpenClaw Gateway"
                       value={(systemHealth as any).openclaw?.reachable ? "reachable" : "unreachable"}
                       desc={`版本 ${(systemHealth as any).openclaw?.version || "-"} · 进程 ${(systemHealth as any).openclaw?.processCount ?? 0} 个`}
-                      ok={Boolean((systemHealth as any).openclaw?.reachable)}
-                      warn={Boolean(!(systemHealth as any).openclaw?.reachable && Number((systemHealth as any).openclaw?.processCount || 0) > 0)}
+                      ok={Boolean((systemHealth as any).openclaw?.reachable && Number((systemHealth as any).openclaw?.processCount || 0) === 1)}
+                      warn={Boolean((systemHealth as any).openclaw?.reachable && Number((systemHealth as any).openclaw?.processCount || 0) !== 1)}
                     />
                     <HealthMetricCard
                       icon={Radio}
                       title="频道状态"
                       value={`${((systemHealth as any).channels?.lines || []).filter((c: any) => c.ok).length}/${((systemHealth as any).channels?.lines || []).length} running`}
-                      desc={((systemHealth as any).channels?.lines || []).find((c: any) => c.ok)?.raw || ((systemHealth as any).channels?.lines || [])[0]?.raw || "暂无频道状态"}
-                      ok={Boolean((systemHealth as any).channels?.ok && (((systemHealth as any).channels?.lines || []).length === 0 || ((systemHealth as any).channels?.lines || []).some((c: any) => c.ok)))}
+                      desc={((systemHealth as any).channels?.lines || []).find((c: any) => String(c.raw).includes("openclaw-weixin"))?.raw || "暂无频道状态"}
+                      ok={((systemHealth as any).channels?.lines || []).some((c: any) => String(c.raw).includes("openclaw-weixin") && c.ok)}
                       warn={((systemHealth as any).channels?.lines || []).some((c: any) => c.warn)}
                     />
                     <HealthMetricCard
