@@ -83,7 +83,6 @@ type UploadedLingxiaAttachment = {
   size: number;
   runtime?: string;
 };
-
 function formatFileSize(size: number) {
   if (!Number.isFinite(size) || size < 0) return "unknown size";
   if (size < 1024) return `${size} B`;
@@ -282,6 +281,7 @@ export default function Home() {
   const brand = useBrand();
   const { confirm, dialog } = useConfirmDialog();
   const [lingxiaInput, setLingxiaInput] = useState("");
+  const chatRuntimeMode = "fast" as const;
   const [lingxiaMsgs, setLingxiaMsgs] = useState<LxMsg[]>([]);
   // 2026-04-29 批次 2 A3：mirror ref 用于 SSE 异步 handler 拿稳定 snapshot
   // React 18 concurrent 下 setState updater 不保证同步执行，不能在 updater 里抓 id 给外层用
@@ -383,6 +383,10 @@ export default function Home() {
       return makeConversationId();
     }
   }, [resolvedAdoptId]);
+  // lgh-* 是 Hermes，lgj-* 是 JiuwenClaw；二者都不走 OpenClaw WSS，直接走 HTTP SSE。
+  const isHermesRuntime = String(resolvedAdoptId || "").startsWith("lgh-");
+  const isJiuwenRuntime = String(resolvedAdoptId || "").startsWith("lgj-");
+  const isDirectHttpRuntime = isHermesRuntime || isJiuwenRuntime;
 
   const { data: clawByAdoptId, isLoading: clawByAdoptLoading } = trpc.claw.getByAdoptId.useQuery(
     { adoptId: resolvedAdoptId || "" },
@@ -392,7 +396,10 @@ export default function Home() {
     { adoptId: resolvedAdoptId || "" },
     { enabled: !!resolvedAdoptId, retry: false }
   );
-  const { data: availableModels } = trpc.claw.getAvailableModels.useQuery(undefined, { retry: false, refetchInterval: 30000, refetchOnWindowFocus: true, refetchOnMount: true });
+  const { data: availableModels } = trpc.claw.getAvailableModels.useQuery(
+    resolvedAdoptId ? { adoptId: resolvedAdoptId } : undefined,
+    { retry: false, refetchInterval: 30000, refetchOnWindowFocus: true, refetchOnMount: true }
+  );
   // 模型兜底：优先用户在前端选过的偏好（claw-model-overrides.json），其次 isDefault，最后第一个
   // 修复刷新后下拉强制回 GLM5.1 但 OpenClaw 实际跑用户上次选的 model 的前后端不一致 bug
   useEffect(() => {
@@ -433,16 +440,15 @@ export default function Home() {
   const wsClientRef = useRef<OpenClawWSClient | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
 
-  // lgh-* 虾是 Hermes runtime，不走 OpenClaw WSS；直接 HTTP SSE 由 server 侧 prefix 分叉到 hermes-bridge
-  const isHermesRuntime = String(resolvedAdoptId || "").startsWith("lgh-");
   const chatV2Enabled = isLingxiaChatV2Enabled((user as any)?.id);
   const chatV2 = useLingxiaChat({
     adoptId: resolvedAdoptId,
     channel: webConversationId ? "web" : undefined,
     conversationId: webConversationId || undefined,
-    isHermesRuntime,
+    isHermesRuntime: isDirectHttpRuntime,
     memoryEnabled: lingxiaMemoryEnabled === "yes",
     contextTurns: lingxiaContextTurns,
+    runtimeMode: chatRuntimeMode,
   });
   const activeLingxiaMsgs = chatV2Enabled ? chatV2.messages : lingxiaMsgs;
   const activeLingxiaStreaming = chatV2Enabled ? chatV2.isStreaming : lingxiaStreaming;
@@ -484,13 +490,13 @@ export default function Home() {
 
   // 初始化 WSS 连接（后台自动尝试，不阻塞 UI）—— 仅 OpenClaw (lgc-*)
   useEffect(() => {
-    if (!resolvedAdoptId || !webConversationId || isHermesRuntime || chatV2Enabled) return;
+    if (!resolvedAdoptId || !webConversationId || isDirectHttpRuntime || chatV2Enabled) return;
     const apiBase = (import.meta as any).env?.VITE_API_URL || "";
     const ws = new OpenClawWSClient(resolvedAdoptId, apiBase, { channel: "web", conversationId: webConversationId });
     wsClientRef.current = ws;
     ws.connect().then((ok) => { if (ok) setWsConnected(true); });
     return () => { ws.disconnect(); wsClientRef.current = null; setWsConnected(false); };
-  }, [resolvedAdoptId, webConversationId, isHermesRuntime, chatV2Enabled]);
+  }, [resolvedAdoptId, webConversationId, isDirectHttpRuntime, chatV2Enabled]);
   const lingxiaMsgViewportRef = useRef<HTMLDivElement | null>(null);
   const [lingxiaNearBottom, setLingxiaNearBottom] = useState(true);
   // 工具执行显性化状态
@@ -691,9 +697,10 @@ export default function Home() {
       const controller = new AbortController();
       lingxiaStreamAbortRef.current = controller;
       // ── WSS 优先路径（仅 OpenClaw runtime） ──
-      // Hermes (lgh-*) 跳过 WSS 尝试，直接走 HTTP SSE（server 会 prefix 分叉到 hermes-bridge）
-      const wsClient = isHermesRuntime ? null : wsClientRef.current;
-      console.log(`[DIAG] runtime=${isHermesRuntime ? "hermes" : "openclaw"}, wsClient.state = ${wsClient?.state ?? "null"}, will ${wsClient?.state === "connected" ? "try WSS first" : "use HTTP SSE directly"}`);
+      // Hermes/JiuwenClaw 跳过 WSS 尝试，直接走 HTTP SSE（server 侧按 prefix 分叉）。
+      const wsClient = isDirectHttpRuntime ? null : wsClientRef.current;
+      const runtimeName = isJiuwenRuntime ? "jiuwenclaw" : isHermesRuntime ? "hermes" : "openclaw";
+      console.log(`[DIAG] runtime=${runtimeName}, wsClient.state = ${wsClient?.state ?? "null"}, will ${wsClient?.state === "connected" ? "try WSS first" : "use HTTP SSE directly"}`);
       if (wsClient?.state === "connected") {
         console.log("[WS] sending via WebSocket");
         // WS 消息处理：后端 WS 代理已转成与 HTTP SSE 一致的格式
@@ -745,7 +752,7 @@ export default function Home() {
               }
 
               // ── tool_call 事件（与 HTTP SSE event:tool_call 一致）──
-              
+
               // ── Agent Team 事件 ──
               if (chunk._event === "agent_dispatch") {
                 const tasks = (chunk.agents || []).map((a: any) => ({
@@ -897,7 +904,7 @@ export default function Home() {
             } catch {}
           };
           wsClient.setRawHandler(wsHandler);
-        const sent = wsClient.sendChat(text, undefined, { clientRunId, userMessageId, channel: "web", conversationId: webConversationId });
+        const sent = wsClient.sendChat(text, undefined, { clientRunId, userMessageId, channel: "web", conversationId: webConversationId, runtimeMode: chatRuntimeMode });
         if (sent) {
           // WSS 响应超时检测：企业代理可能静默拦截 WSS 数据
           // 等待第一个有效事件，超时则降级到 HTTP SSE
@@ -938,7 +945,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         signal: controller.signal,
-        body: JSON.stringify({ adoptId: resolvedAdoptId, message: text, model: lingxiaModelId, clientRunId, channel: "web", conversationId: webConversationId }),
+        body: JSON.stringify({ adoptId: resolvedAdoptId, message: text, model: lingxiaModelId, clientRunId, channel: "web", conversationId: webConversationId, runtimeMode: chatRuntimeMode }),
       });
 
       if (!resp.ok || !resp.body) {
@@ -1338,7 +1345,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ adoptId: resolvedAdoptId, message: "/reset", channel: "web", conversationId: webConversationId }),
+        body: JSON.stringify({ adoptId: resolvedAdoptId, message: "/reset", channel: "web", conversationId: webConversationId, runtimeMode: chatRuntimeMode }),
       });
 
       if (!resp.ok) throw new Error(`重置失败 (${resp.status})`);
@@ -1493,7 +1500,7 @@ export default function Home() {
 
             {/* 旧侧栏能力暂留（Phase B 迁移），当前隐藏 */}
                         <SidebarFooter
-              version={isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
+              version={isJiuwenRuntime ? "JiuwenClaw" : isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
               expiryText={lingxiaExpiryInfo.text}
               expiryColor={lingxiaExpiryInfo.color}
               collapsed={sidebarCollapsed}

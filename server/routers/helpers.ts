@@ -94,12 +94,15 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
       : [];
 
     if (modelAllowlist.length > 0) {
-      return modelAllowlist.map((id) => ({
-        id,
-        name: id,
-        desc: "agents.defaults.models",
-        isDefault: id === defaultsPrimary,
-      })).map((item, index, arr) => {
+      const visibleAllowlist = modelAllowlist
+        .filter((id) => !HIDDEN_FROM_FRONTEND.has(id))
+        .map((id) => ({
+          id,
+          name: id,
+          desc: "agents.defaults.models",
+          isDefault: id === defaultsPrimary,
+        }));
+      return visibleAllowlist.map((item, index, arr) => {
         if (arr.some((m) => m.isDefault)) return item;
         return index === 0 ? { ...item, isDefault: true } : item;
       });

@@ -58,6 +58,38 @@ import { cleanupOpenClawWeixinBindingForAdopt } from "../_core/claw-weixin";
 import type { SkillSource } from "../../shared/types/skill";
 import { restoreDeletedProtectedCoreFiles, snapshotProtectedCoreFiles } from "../_core/core-file-guard";
 
+const resolveClawRuntime = (adoptId: unknown): "openclaw" | "hermes" | "jiuwenclaw" => {
+  const id = String(adoptId || "");
+  if (id.startsWith("lgj-")) return "jiuwenclaw";
+  if (id.startsWith("lgh-")) return "hermes";
+  return "openclaw";
+};
+
+type RuntimeModelOption = { id: string; name: string; desc?: string; isDefault?: boolean };
+
+const parseEnvValue = (raw: string, key: string): string => {
+  const line = raw.split(/\r?\n/).find((entry) => entry.trim().startsWith(`${key}=`));
+  if (!line) return "";
+  return line.slice(line.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "");
+};
+
+const getAvailableJiuwenModels = (): RuntimeModelOption[] => {
+  const envPath = process.env.JIUWENCLAW_ENV_PATH || "/root/.jiuwenclaw/.env";
+  let modelName = "";
+  try {
+    if (existsSync(envPath)) modelName = parseEnvValue(readFileSync(envPath, "utf8"), "MODEL_NAME");
+  } catch {}
+  const id = modelName || process.env.JIUWENCLAW_DEFAULT_MODEL || "glm-5";
+  return [{ id, name: id.toUpperCase(), desc: "JiuwenClaw", isDefault: true }];
+};
+
+const getAvailableModelsForRuntime = (adoptId?: unknown): RuntimeModelOption[] => {
+  const runtime = resolveClawRuntime(adoptId);
+  if (runtime === "jiuwenclaw") return getAvailableJiuwenModels();
+  if (runtime === "hermes") return [{ id: "hermes/default", name: "Hermes 默认模型", desc: "Hermes", isDefault: true }];
+  return getAvailableClawModelsFromConfig();
+};
+
 const openClawWorkspaceDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/workspace-${String(runtimeAgentId || "").trim()}`;
 const openClawAgentStateDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/agents/${String(runtimeAgentId || "").trim()}`;
 const openClawSkillMarketDir = () => `${OPENCLAW_HOME}/skill-market`;
@@ -161,7 +193,7 @@ export const clawRouter = router({
         entryUrl: String(c?.entryUrl || "")
           .replace("http://", "https://")
           .replace(".demo.linggantest.top", ".demo.linggan.top"),
-        runtime: String(c?.adoptId || "").startsWith("lgh-") ? "hermes" : "openclaw",
+        runtime: resolveClawRuntime(c?.adoptId),
       });
 
       const adoptions = all.map(normalizeEntry);
@@ -196,14 +228,17 @@ export const clawRouter = router({
       return { visibility: visibility === "internal" ? "internal" : "public" };
     }),
 
-    getAvailableModels: publicProcedure.query(() => {
-      return getAvailableClawModelsFromConfig();
-    }),
+    getAvailableModels: publicProcedure
+      .input(z.object({ adoptId: z.string().min(1).max(64).optional() }).optional())
+      .query(({ input }) => {
+        return getAvailableModelsForRuntime(input?.adoptId);
+      }),
 
     switchModel: protectedProcedure
       .input(z.object({ adoptId: z.string().min(1).max(64), modelId: z.string().min(1).max(120) }))
       .mutation(async ({ input, ctx }) => {
-        const allowed = new Set(getAvailableClawModelsFromConfig().map((m) => m.id));
+        const runtimeType = resolveClawRuntime(input.adoptId);
+        const allowed = new Set(getAvailableModelsForRuntime(input.adoptId).map((m) => m.id));
         if (!allowed.has(input.modelId)) {
           throw new Error("不支持的模型");
         }
@@ -220,6 +255,34 @@ export const clawRouter = router({
           model: input.modelId,
           updatedBy: ctx.user!.id,
         } as any);
+
+        if (runtimeType !== "openclaw") {
+          await recordAuditBestEffort({
+            action: "model.switched",
+            ...auditActor(ctx.user),
+            ...auditRequest(ctx.req),
+            targetType: "agent",
+            targetId: input.adoptId,
+            targetName: String((claw as any).agentId || input.adoptId),
+            agentInstanceId: input.adoptId,
+            runtimeType,
+            runtimeAgentId: String((claw as any).agentId || ""),
+            metadata: {
+              previousModel: previousModel || null,
+              model: input.modelId,
+              applied: true,
+              runtimeManaged: true,
+            },
+          });
+          return {
+            ok: true,
+            model: input.modelId,
+            applied: true,
+            statusCode: null,
+            applyError: null,
+            runtimeManaged: true,
+          };
+        }
 
         // 2) 通过 OpenClaw 会话命令即时切换（不重启 gateway）
         const sessionKey = buildClawSessionKey(String((claw as any).adoptId || input.adoptId), Number((claw as any).userId || 0));
@@ -253,7 +316,7 @@ export const clawRouter = router({
           targetId: input.adoptId,
           targetName: String((claw as any).agentId || input.adoptId),
           agentInstanceId: input.adoptId,
-          runtimeType: String(input.adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeType: resolveClawRuntime(input.adoptId),
           runtimeAgentId: String((claw as any).agentId || ""),
           metadata: {
             previousModel: previousModel || null,
@@ -312,7 +375,7 @@ export const clawRouter = router({
           targetId: before?.adoptId ? String(before.adoptId) : String(input.id),
           targetName: before?.agentId ? String(before.agentId) : null,
           agentInstanceId: before?.adoptId ? String(before.adoptId) : null,
-          runtimeType: before?.adoptId && String(before.adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeType: resolveClawRuntime(before?.adoptId),
           runtimeAgentId: before?.agentId ? String(before.agentId) : null,
           metadata: {
             id: input.id,
@@ -394,7 +457,7 @@ export const clawRouter = router({
           targetId: adoptId,
           targetName: String(row.agentId || ""),
           agentInstanceId: adoptId,
-          runtimeType: adoptId.startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeType: resolveClawRuntime(adoptId),
           runtimeAgentId,
           metadata: {
             id: input.id,
@@ -1676,7 +1739,7 @@ export const clawRouter = router({
           resourceType: "agent",
           resourceId: input.adoptId,
           agentInstanceId: input.adoptId,
-          runtimeType: String(input.adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeType: resolveClawRuntime(input.adoptId),
           runtimeAgentId,
           metadata: { source: input.source },
         });
@@ -1721,7 +1784,7 @@ export const clawRouter = router({
           resourceType: "agent",
           resourceId: input.adoptId,
           agentInstanceId: input.adoptId,
-          runtimeType: String(input.adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeType: resolveClawRuntime(input.adoptId),
           runtimeAgentId: String(claw.agentId || ""),
           metadata: {
             skillMdBytes: Buffer.byteLength(input.skillMd, "utf8"),
@@ -1762,7 +1825,7 @@ export const clawRouter = router({
           resourceType: "agent",
           resourceId: input.adoptId,
           agentInstanceId: input.adoptId,
-          runtimeType: String(input.adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeType: resolveClawRuntime(input.adoptId),
           runtimeAgentId: String(claw.agentId || ""),
         });
         return { ok: true };

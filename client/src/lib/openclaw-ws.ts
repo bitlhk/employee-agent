@@ -192,7 +192,7 @@ export class OpenClawWSClient {
     }
   }
 
-  sendChat(message: string, sessionKey?: string, meta?: { clientRunId?: string; userMessageId?: string; channel?: string; conversationId?: string }) {
+  sendChat(message: string, sessionKey?: string, meta?: { clientRunId?: string; userMessageId?: string; channel?: string; conversationId?: string; runtimeMode?: "fast" | "plan" }) {
     if (!this.ws || this._state !== "connected") return false;
     this.ws.send(JSON.stringify({
       type: "chat",
@@ -202,6 +202,7 @@ export class OpenClawWSClient {
       userMessageId: meta?.userMessageId,
       channel: meta?.channel,
       conversationId: meta?.conversationId,
+      runtimeMode: meta?.runtimeMode,
     }));
     return true;
   }

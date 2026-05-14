@@ -39,6 +39,35 @@ export const openClawAgentDir = (agentId: string) => openClawPath("agents", Stri
 export const openClawWorkspaceDir = (runtimeAgentId: string) => openClawPath(`workspace-${String(runtimeAgentId || "").trim()}`);
 export const openClawSkillMarketDir = () => openClawPath("skill-market");
 
+const runtimePathPart = (value: unknown, fallback: string, maxLen = 96): string => {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, maxLen)
+    .replace(/^_+|_+$/g, "");
+  return normalized || fallback;
+};
+
+export const isJiuwenClawAdoptId = (adoptId: string) => String(adoptId || "").startsWith("lgj-");
+
+export function normalizeJiuwenClawHome(raw?: string): string {
+  return expandHomePath(raw || process.env.JIUWENCLAW_HOME || path.join(processHome, ".jiuwenclaw"));
+}
+
+export const JIUWENCLAW_HOME = normalizeJiuwenClawHome();
+export const jiuwenClawServiceId = () => runtimePathPart(process.env.JIUWENCLAW_SERVICE_ID || "linggan", "linggan", 64);
+export const jiuwenClawAgentId = (adoptId: string, dbAgentIdRaw: any) =>
+  runtimePathPart(dbAgentIdRaw || `jiuwen_${String(adoptId || "").trim()}`, `jiuwen_${String(adoptId || "default").trim()}`, 96);
+export const jiuwenClawWorkspaceDir = (adoptId: string, dbAgentIdRaw: any) =>
+  path.join(
+    JIUWENCLAW_HOME,
+    `service_${jiuwenClawServiceId()}`,
+    `agent_${jiuwenClawAgentId(adoptId, dbAgentIdRaw)}`,
+    "agent",
+    "jiuwenclaw_workspace",
+  );
+
 export function normalizeHermesProfilesDir(raw?: string): string {
   const value = expandHomePath(
     raw
@@ -283,6 +312,7 @@ export const requireClawOwner = async (req: Request, res: Response, adoptId: str
 
 
 export const resolveRuntimeAgentId = (adoptId: string, dbAgentIdRaw: any) => {
+  if (isJiuwenClawAdoptId(adoptId)) return jiuwenClawAgentId(adoptId, dbAgentIdRaw);
   const dbAgentId = String(dbAgentIdRaw || "").trim();
   const trialAgentId = `trial_${String(adoptId)}`;
   const trialAgentDir = openClawAgentDir(trialAgentId);
@@ -318,8 +348,19 @@ export function generateFileToken(adoptId: string, runtimeAgentId: string, relPa
 }
 
 // ── Workspace helpers ──
+export const resolveRuntimeWorkspaceByIds = (adoptId: string, runtimeAgentId: string) => {
+  if (isJiuwenClawAdoptId(adoptId)) return jiuwenClawWorkspaceDir(adoptId, runtimeAgentId);
+  return openClawWorkspaceDir(runtimeAgentId);
+};
+
+export const resolveRuntimeWorkspace = (claw: any, adoptIdRaw?: string) => {
+  const adoptId = String(adoptIdRaw || claw?.adoptId || "").trim();
+  const runtimeAgentId = resolveRuntimeAgentId(adoptId, String(claw?.agentId || ""));
+  return resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId);
+};
+
 export const resolveClawWorkspace = (claw: any) => {
-  return openClawWorkspaceDir(String(claw?.agentId || "").trim());
+  return resolveRuntimeWorkspace(claw);
 };
 
 export const computeEtag = (content: string) => createHash("sha1").update(content || "", "utf8").digest("hex");
@@ -393,7 +434,7 @@ export function verifyFileToken(rawToken: string): { ok: true; adoptId: string; 
   const payload = rawToken.slice(0, dotIdx);
   const sig = rawToken.slice(dotIdx + 1);
 
-  
+
   const secret = process.env.FILE_TOKEN_SECRET || process.env.JWT_SECRET || "";
   if (!secret) return { ok: false, error: "server secret not configured", status: 500 };
   const expectedSig = createHmac("sha256", secret).update(payload).digest("base64url");

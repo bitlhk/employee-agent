@@ -27,6 +27,7 @@ export type UseLingxiaChatOptions = {
   isHermesRuntime?: boolean;
   memoryEnabled?: boolean;
   contextTurns?: number;
+  runtimeMode?: "fast" | "plan";
   now?: () => number;
 };
 
@@ -70,6 +71,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
     isHermesRuntime = false,
     memoryEnabled,
     contextTurns,
+    runtimeMode = "fast",
     now = Date.now,
   } = options;
 
@@ -288,6 +290,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
       message,
       channel,
       conversationId,
+      runtimeMode,
       userMessageId: userId,
       clientRunId,
       memoryEnabled,
@@ -333,7 +336,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
         abortControllerRef.current = null;
       }
     }
-  }, [adoptId, channel, contextTurns, conversationId, dispatchEvent, isHermesRuntime, memoryEnabled, now, transports, waitForFirstEvent]);
+  }, [adoptId, channel, contextTurns, conversationId, dispatchEvent, isHermesRuntime, memoryEnabled, now, runtimeMode, transports, waitForFirstEvent]);
 
   const abort = useCallback((reason?: string) => {
     abortControllerRef.current?.abort(reason);

@@ -5,6 +5,8 @@ import { spawnSync } from "child_process";
 import {
   requireClawOwner, resolveRuntimeAgentId,
   openClawWorkspaceDir,
+  resolveRuntimeWorkspace,
+  resolveRuntimeWorkspaceByIds,
   generateFileToken,
   streamFileDownload,
   sanitizeRelPath,
@@ -69,8 +71,7 @@ export function registerDownloadRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
-      const filePath = `${openClawWorkspaceDir(runtimeAgentId)}/${relPath}`;
+      const filePath = `${resolveRuntimeWorkspace(claw, adoptId)}/${relPath}`;
 
       if (!existsSync(filePath)) return res.status(404).json({ error: "file not found: " + filePath });
 
@@ -115,7 +116,7 @@ export function registerDownloadRoutes(app: express.Express) {
       const canonicalAdoptId = String((claw as any).adoptId || adoptId);
       const runtimeAgentId = resolveRuntimeAgentId(canonicalAdoptId, String((claw as any).agentId || ""));
       const relPath = filePath;
-      const absPath = `${openClawWorkspaceDir(runtimeAgentId)}/${relPath}`;
+      const absPath = `${resolveRuntimeWorkspaceByIds(canonicalAdoptId, runtimeAgentId)}/${relPath}`;
 
       if (!existsSync(absPath)) return res.status(404).json({ error: "file not found: " + absPath });
 
@@ -160,7 +161,8 @@ export function registerDownloadRoutes(app: express.Express) {
       }
 
       const relPath = sanitizeRelPath(String(parsed.path || "")) || "";
-      const filePath = `${openClawWorkspaceDir(String(parsed.runtimeAgentId || ""))}/${relPath}`;
+      const adoptId = String(parsed.adoptId || "");
+      const filePath = `${resolveRuntimeWorkspaceByIds(adoptId, String(parsed.runtimeAgentId || ""))}/${relPath}`;
 
       if (!existsSync(filePath)) return sendError(res, "NOT_FOUND", "file not found");
 
@@ -199,8 +201,7 @@ export function registerDownloadRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
-      const workspaceDir = openClawWorkspaceDir(runtimeAgentId);
+      const workspaceDir = resolveRuntimeWorkspace(claw, adoptId);
       const filePath = `${workspaceDir}/${relPath}`;
 
       if (!existsSync(filePath)) return sendError(res, "NOT_FOUND", "file not found");

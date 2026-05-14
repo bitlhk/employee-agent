@@ -13,7 +13,7 @@ import {
   OPENCLAW_BASE_HOME,
   openClawAgentDir,
   openClawSkillMarketDir,
-  openClawWorkspaceDir,
+  resolveRuntimeWorkspaceByIds,
 } from "./helpers";
 import { skillRegistry } from "./skills/skill-registry";
 import { skillInstaller } from "./skills/skill-installer";
@@ -43,7 +43,7 @@ async function discoverGeneratedRuntimeSkills(adoptId: string, runtimeAgentId: s
   installed: Array<{ skillId: string; displayName: string }>;
   skipped: Array<{ skillId: string; reason: string }>;
 }> {
-  const runtimeSkillsRoot = path.join(openClawWorkspaceDir(runtimeAgentId), "skills");
+  const runtimeSkillsRoot = path.join(resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId), "skills");
   if (!existsSync(runtimeSkillsRoot)) return { discovered: 0, installed: [], skipped: [] };
 
   const listed = await skillRegistry.listSkills(adoptId);
@@ -558,7 +558,7 @@ export function registerSkillRoutes(app: express.Express) {
           const trialAgentId = `trial_${adoptId}`;
           const trialAgentDir = openClawAgentDir(trialAgentId);
           const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : claw.agentId;
-          const skillsBase = `${openClawWorkspaceDir(runtimeAgentId)}/skills`;
+          const skillsBase = `${resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId)}/skills`;
 
           // 1) 精确匹配
           const dir = `${skillsBase}/${sid}`;
@@ -669,7 +669,7 @@ with zipfile.ZipFile(${JSON.stringify(zipPath)}, 'r') as z:
       }
       const skillId: string = JSON.parse(probeRaw.trim())?.skillId || "uploaded-skill";
 
-      const skillDir = `${openClawWorkspaceDir(runtimeAgentId)}/skills/${skillId}`;
+      const skillDir = `${resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId)}/skills/${skillId}`;
 
       const py = `import zipfile, os, json
 zip_path=${JSON.stringify(zipPath)}
@@ -866,7 +866,7 @@ with zipfile.ZipFile(${JSON.stringify(dstZipPath)}, 'r') as z:
       }
       const skillId: string = JSON.parse(probeRaw.trim())?.skillId || "market-skill";
 
-      const skillDir = `${openClawWorkspaceDir(runtimeAgentId)}/skills/${skillId}`;
+      const skillDir = `${resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId)}/skills/${skillId}`;
       const pyInstall = `import zipfile, os, json
 zip_path=${JSON.stringify(dstZipPath)}
 dst=${JSON.stringify(skillDir)}

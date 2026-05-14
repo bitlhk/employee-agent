@@ -3,7 +3,7 @@ import { parseAdoptId, parseMemoryTarget, parseWriteMode, sendError, handleRoute
 import path from "path";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync, readdirSync } from "fs";
 import {
-  requireClawOwner, resolveClawWorkspace, computeEtag, appendLogAsync,
+  isJiuwenClawAdoptId, requireClawOwner, resolveClawWorkspace, computeEtag, appendLogAsync,
   APP_ROOT,
 } from "./helpers";
 import { resolveHermesMemoryTarget } from "./hermes-memory";
@@ -70,6 +70,21 @@ export function registerMemoryRoutes(app: express.Express) {
     return { ok: false, reason: "path_not_allowed" } as const;
   };
 
+  const resolveMemoryTargetForRuntime = (adoptId: string, workspace: string, target: string) => {
+    if (!isJiuwenClawAdoptId(adoptId)) return resolveMemoryTarget(workspace, target);
+    const t = String(target || "").trim();
+    if (t === "MEMORY.md") return { ok: true, path: `${workspace}/memory/MEMORY.md`, max: LIMIT_MEMORY_FILE } as const;
+    if (t === "DREAMS.md") return { ok: true, path: `${workspace}/memory/DREAMS.md`, max: LIMIT_MEMORY_FILE } as const;
+
+    const m = t.match(/^memory:(\d{4}-\d{2}-\d{2})$/);
+    if (m) return { ok: true, path: `${workspace}/memory/daily_memory/${m[1]}.md`, max: LIMIT_DAILY_FILE } as const;
+
+    const n = t.match(/^notes:([a-zA-Z0-9._-]+\.md)$/);
+    if (n) return { ok: true, path: `${workspace}/notes/${n[1]}`, max: LIMIT_NOTES_FILE } as const;
+
+    return { ok: false, reason: "path_not_allowed" } as const;
+  };
+
   const auditMemoryWrite = (entry: any) => {
     appendLogAsync("claw-memory-write.log", { ts: new Date().toISOString(), ...entry });
   };
@@ -83,7 +98,7 @@ export function registerMemoryRoutes(app: express.Express) {
       if (!claw) return;
       const r = adoptId.startsWith("lgh-")
         ? resolveHermesMemoryTarget(adoptId, target)
-        : resolveMemoryTarget(resolveClawWorkspace(claw), target);
+        : resolveMemoryTargetForRuntime(adoptId, resolveClawWorkspace(claw), target);
       if (!r.ok) return sendError(res, "BAD_REQUEST", "path_not_allowed");
 
       const content = existsSync(r.path) ? String(readFileSync(r.path, "utf8") || "") : "";
@@ -110,7 +125,7 @@ export function registerMemoryRoutes(app: express.Express) {
       if (!claw) return;
       const r = adoptId.startsWith("lgh-")
         ? resolveHermesMemoryTarget(adoptId, target)
-        : resolveMemoryTarget(resolveClawWorkspace(claw), target);
+        : resolveMemoryTargetForRuntime(adoptId, resolveClawWorkspace(claw), target);
       if (!r.ok) return sendError(res, "BAD_REQUEST", "path_not_allowed");
 
       const before = existsSync(r.path) ? String(readFileSync(r.path, "utf8") || "") : "";
@@ -144,15 +159,15 @@ export function registerMemoryRoutes(app: express.Express) {
       const workspace = resolveClawWorkspace(claw);
       const items: Array<{ target: string; exists: boolean; updatedAt: string | null; size: number | null }> = [];
 
-      const memPath = `${workspace}/MEMORY.md`;
+      const memPath = isJiuwenClawAdoptId(adoptId) ? `${workspace}/memory/MEMORY.md` : `${workspace}/MEMORY.md`;
       items.push({ target: "MEMORY.md", exists: existsSync(memPath), updatedAt: existsSync(memPath) ? statSync(memPath).mtime.toISOString() : null, size: existsSync(memPath) ? Number(statSync(memPath).size || 0) : null });
 
-      const dreamsPath = `${workspace}/DREAMS.md`;
+      const dreamsPath = isJiuwenClawAdoptId(adoptId) ? `${workspace}/memory/DREAMS.md` : `${workspace}/DREAMS.md`;
       if (existsSync(dreamsPath)) {
         items.push({ target: "DREAMS.md", exists: true, updatedAt: statSync(dreamsPath).mtime.toISOString(), size: Number(statSync(dreamsPath).size || 0) });
       }
 
-      const mDir = `${workspace}/memory`;
+      const mDir = isJiuwenClawAdoptId(adoptId) ? `${workspace}/memory/daily_memory` : `${workspace}/memory`;
       if (existsSync(mDir)) {
         for (const f of readdirSync(mDir)) {
           if (/^\d{4}-\d{2}-\d{2}\.md$/.test(f)) {

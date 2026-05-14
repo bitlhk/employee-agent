@@ -1,7 +1,7 @@
 import express from "express";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from "fs";
 import {
-  requireClawOwner, resolveClawWorkspace, computeEtag,
+  isJiuwenClawAdoptId, requireClawOwner, resolveClawWorkspace, computeEtag,
 } from "./helpers";
 import { adoptIdToProfilePath, resolveHermesCoreFilePath, listHermesCoreFileMeta } from "./hermes-memory";
 
@@ -14,13 +14,17 @@ export function registerCoreFileRoutes(app: express.Express) {
     "TOOLS.md": "TOOLS.md",
     "MEMORY.md": "MEMORY.md",
     "IDENTITY.md": "IDENTITY.md",
+    "HEARTBEAT.md": "HEARTBEAT.md",
+    "USER.md": "USER.md",
     "STYLE.md": "STYLE.md",
     "PLAN.md": "PLAN.md",
     "KNOWLEDGE.md": "KNOWLEDGE.md",
   };
 
-  const resolveCoreFilePath = (workspace: string, name: string) => {
-    const mapped = CORE_FILE_MAP[name];
+  const resolveCoreFilePath = (workspace: string, name: string, adoptId?: string) => {
+    const mapped = isJiuwenClawAdoptId(String(adoptId || "")) && name === "AGENTS.md"
+      ? "AGENT.md"
+      : CORE_FILE_MAP[name];
     if (!mapped) return null;
     if (mapped.includes("..") || mapped.startsWith("/")) return null;
     return `${workspace}/${mapped}`;
@@ -41,7 +45,7 @@ export function registerCoreFileRoutes(app: express.Express) {
 
       const workspace = resolveClawWorkspace(claw);
       const files = Object.keys(CORE_FILE_MAP).map((name) => {
-        const fp = resolveCoreFilePath(workspace, name)!;
+        const fp = resolveCoreFilePath(workspace, name, adoptId)!;
         if (!existsSync(fp)) return { name, exists: false, updatedAt: null, size: null };
         try {
           const st = statSync(fp);
@@ -74,7 +78,7 @@ export function registerCoreFileRoutes(app: express.Express) {
       }
 
       const workspace = resolveClawWorkspace(claw);
-      const fp = resolveCoreFilePath(workspace, name);
+      const fp = resolveCoreFilePath(workspace, name, adoptId);
       if (!fp) return res.status(400).json({ error: "invalid core file" });
 
       const content = existsSync(fp) ? String(readFileSync(fp, "utf8") || "") : "";
@@ -100,7 +104,7 @@ export function registerCoreFileRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       const workspace = resolveClawWorkspace(claw);
-      const fp = resolveCoreFilePath(workspace, name);
+      const fp = resolveCoreFilePath(workspace, name, adoptId);
       if (!fp) return res.status(400).json({ error: "invalid core file" });
 
       const current = existsSync(fp) ? String(readFileSync(fp, "utf8") || "") : "";

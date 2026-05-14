@@ -16,7 +16,7 @@ export type ToolCallEntry = {
   suppressedOriginalResult?: boolean;
   policyDenyReason?: string;
   auditId?: string;
-  outputFiles?: Array<{ name: string; size: number }>;
+  outputFiles?: Array<{ name: string; size: number; wsPath?: string }>;
   adoptId?: string;
   _gateway?: boolean;
 };

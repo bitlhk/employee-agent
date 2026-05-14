@@ -5,7 +5,7 @@
 import express from "express";
 import path from "path";
 import { existsSync, statSync, readdirSync, readFileSync, createReadStream, mkdirSync, writeFileSync, unlinkSync, rmSync } from "fs";
-import { openClawWorkspaceDir, requireClawOwner, resolveRuntimeAgentId } from "./helpers";
+import { isJiuwenClawAdoptId, requireClawOwner, resolveRuntimeWorkspace } from "./helpers";
 import { hermesFiles, type LinggFileNode, type FilesProviderCapabilities, type FilesProviderHandle, adoptIdToWorkspace } from "./hermes-files";
 
 const OPENCLAW_FILES_CAPABILITIES: FilesProviderCapabilities = {
@@ -23,6 +23,7 @@ const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_FILES_PER_WORKSPACE = 2000;
 const PROTECTED_ROOT_FILES = new Set([
+  "AGENT.md",
   "AGENTS.md",
   "SOUL.md",
   "TOOLS.md",
@@ -55,13 +56,18 @@ function isHermesAdopt(adoptId: string): boolean {
   return String(adoptId || "").startsWith("lgh-");
 }
 
+function runtimeName(adoptId: string): "openclaw" | "hermes" | "jiuwenclaw" {
+  if (isHermesAdopt(adoptId)) return "hermes";
+  if (isJiuwenClawAdoptId(adoptId)) return "jiuwenclaw";
+  return "openclaw";
+}
+
 function toFilesHandle(claw: any): FilesProviderHandle {
   return { adoptId: claw.adoptId, agentId: String(claw.agentId || ""), userId: Number(claw.userId || 0) };
 }
 
-function openclawWorkspace(claw: any, adoptId: string): string {
-  const runtimeAgentId = resolveRuntimeAgentId(adoptId, String(claw?.agentId || ""));
-  return openClawWorkspaceDir(runtimeAgentId);
+function runtimeWorkspace(claw: any, adoptId: string): string {
+  return resolveRuntimeWorkspace(claw, adoptId);
 }
 
 function safeJoin(workspace: string, relPath: string): string | null {
@@ -115,7 +121,7 @@ export function registerFilesRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       if (isHermesAdopt(adoptId)) return res.json({ runtime: "hermes", capabilities: hermesFiles.capabilities() });
-      return res.json({ runtime: "openclaw", capabilities: OPENCLAW_FILES_CAPABILITIES });
+      return res.json({ runtime: runtimeName(adoptId), capabilities: OPENCLAW_FILES_CAPABILITIES });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || "capabilities failed") });
     }
@@ -132,9 +138,9 @@ export function registerFilesRoutes(app: express.Express) {
         const files = hermesFiles.listFiles(toFilesHandle(claw), subPath);
         return res.json({ runtime: "hermes", capabilities: hermesFiles.capabilities(), files });
       }
-      const workspace = openclawWorkspace(claw, adoptId);
+      const workspace = runtimeWorkspace(claw, adoptId);
       const files = openclawListFiles(workspace, subPath);
-      return res.json({ runtime: "openclaw", capabilities: OPENCLAW_FILES_CAPABILITIES, files });
+      return res.json({ runtime: runtimeName(adoptId), capabilities: OPENCLAW_FILES_CAPABILITIES, files });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || "list failed") });
     }
@@ -152,13 +158,13 @@ export function registerFilesRoutes(app: express.Express) {
         if (!r) return res.status(404).json({ error: "file not found or too large" });
         return res.json({ runtime: "hermes", path: relPath, ...r });
       }
-      const workspace = openclawWorkspace(claw, adoptId);
+      const workspace = runtimeWorkspace(claw, adoptId);
       const abs = safeJoin(workspace, relPath);
       if (!abs || !existsSync(abs)) return res.status(404).json({ error: "file not found" });
       const st = statSync(abs);
       if (!st.isFile() || st.size > MAX_READ_BYTES) return res.status(413).json({ error: "not a file or too large" });
       const content = readFileSync(abs, "utf8");
-      return res.json({ runtime: "openclaw", path: relPath, content, size: Number(st.size), modifiedAt: st.mtime.toISOString() });
+      return res.json({ runtime: runtimeName(adoptId), path: relPath, content, size: Number(st.size), modifiedAt: st.mtime.toISOString() });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || "read failed") });
     }
@@ -175,7 +181,7 @@ export function registerFilesRoutes(app: express.Express) {
       if (isHermesAdopt(adoptId)) {
         absPath = hermesFiles.resolveAbsPath(toFilesHandle(claw), relPath);
       } else {
-        const workspace = openclawWorkspace(claw, adoptId);
+        const workspace = runtimeWorkspace(claw, adoptId);
         absPath = safeJoin(workspace, relPath);
         if (absPath && (!existsSync(absPath) || !statSync(absPath).isFile())) absPath = null;
       }
@@ -212,7 +218,7 @@ export function registerFilesRoutes(app: express.Express) {
       if (isHermesAdopt(adoptId)) {
         existingFiles = hermesFiles.listFiles(toFilesHandle(claw));
       } else {
-        existingFiles = openclawListFiles(openclawWorkspace(claw, adoptId));
+        existingFiles = openclawListFiles(runtimeWorkspace(claw, adoptId));
       }
       const fileCount = existingFiles.filter(f => f.type === "file").length;
       if (fileCount >= MAX_FILES_PER_WORKSPACE) return res.status(429).json({ error: `workspace file count >= ${MAX_FILES_PER_WORKSPACE}` });
@@ -222,13 +228,13 @@ export function registerFilesRoutes(app: express.Express) {
         if (!r.ok) return res.status(400).json({ error: r.reason });
         return res.json({ runtime: "hermes", ok: true, path: targetRel, size: r.size });
       }
-      const ws = openclawWorkspace(claw, adoptId);
+      const ws = runtimeWorkspace(claw, adoptId);
       const abs = safeJoin(ws, targetRel);
       if (!abs) return res.status(400).json({ error: "path_not_allowed" });
       try {
         mkdirSync(path.dirname(abs), { recursive: true });
         writeFileSync(abs, buf);
-        return res.json({ runtime: "openclaw", ok: true, path: targetRel, size: buf.length });
+        return res.json({ runtime: runtimeName(adoptId), ok: true, path: targetRel, size: buf.length });
       } catch (e: any) {
         return res.status(500).json({ error: `write failed: ${e?.message || e}` });
       }
@@ -259,7 +265,7 @@ export function registerFilesRoutes(app: express.Express) {
         if (!r.ok) return res.status(400).json({ error: r.reason });
         return res.json({ runtime: "hermes", ok: true });
       }
-      const ws = openclawWorkspace(claw, adoptId);
+      const ws = runtimeWorkspace(claw, adoptId);
       const abs = safeJoin(ws, relPath);
       if (!abs || !existsSync(abs)) return res.status(404).json({ error: "file not found" });
       if (path.resolve(abs) === path.resolve(ws)) return res.status(400).json({ error: "refuse to delete workspace root" });
@@ -267,10 +273,10 @@ export function registerFilesRoutes(app: express.Express) {
       try {
         if (st.isDirectory()) {
           rmSync(abs, { recursive: true, force: true });
-          return res.json({ runtime: "openclaw", ok: true, deleted: "directory" });
+          return res.json({ runtime: runtimeName(adoptId), ok: true, deleted: "directory" });
         }
         unlinkSync(abs);
-        return res.json({ runtime: "openclaw", ok: true, deleted: "file" });
+        return res.json({ runtime: runtimeName(adoptId), ok: true, deleted: "file" });
       } catch (e: any) {
         return res.status(500).json({ error: `delete failed: ${e?.message || e}` });
       }

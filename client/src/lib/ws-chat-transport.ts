@@ -53,6 +53,7 @@ export class WsChatTransport implements ChatTransport {
       adoptId: payload.adoptId,
       channel: payload.channel,
       conversationId: payload.conversationId,
+      runtimeMode: payload.runtimeMode,
     };
     const client = await this.ensureClient(payload.adoptId, payload.channel, payload.conversationId);
     this.state = "streaming";
@@ -61,6 +62,7 @@ export class WsChatTransport implements ChatTransport {
       userMessageId: payload.userMessageId,
       channel: payload.channel,
       conversationId: payload.conversationId,
+      runtimeMode: payload.runtimeMode,
     });
     if (!sent) {
       throw new ChatTransportError(this.kind, "WebSocket chat send failed");

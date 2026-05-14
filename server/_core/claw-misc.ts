@@ -1,12 +1,80 @@
 import express from "express";
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync } from "fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync, statSync } from "fs";
 import { execSync } from "child_process";
 import path from "path";
 import { strictLimiter } from "./security";
-import { APP_ROOT, OPENCLAW_JSON_PATH, openClawAgentDir, openClawSkillMarketDir, openClawWorkspaceDir, requireClawOwner } from "./helpers";
+import { APP_ROOT, OPENCLAW_HOME, OPENCLAW_JSON_PATH, openClawAgentDir, openClawSkillMarketDir, openClawWorkspaceDir, requireClawOwner } from "./helpers";
 import { createContext } from "./context";
 import { skillInstaller } from "./skills/skill-installer";
 import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer } from "./skills/skill-source";
+
+type UsageBucket = { total: number; days: Record<string, number>; lastTs: string; userId: number };
+
+function addUsageEvent(params: {
+  byAdopt: Record<string, UsageBucket>;
+  dailyAll: Record<string, number>;
+  seen: Set<string>;
+  key: string;
+  adoptId: string;
+  ts: string;
+  userId?: number;
+}) {
+  const aid = String(params.adoptId || "").trim();
+  const ts = String(params.ts || "").trim();
+  const day = ts.slice(0, 10);
+  if (!aid || !day || params.seen.has(params.key)) return;
+  params.seen.add(params.key);
+
+  const uid = Number(params.userId || 0);
+  if (!params.byAdopt[aid]) params.byAdopt[aid] = { total: 0, days: {}, lastTs: "", userId: uid };
+  params.byAdopt[aid].total += 1;
+  params.byAdopt[aid].days[day] = (params.byAdopt[aid].days[day] || 0) + 1;
+  if (ts > params.byAdopt[aid].lastTs) {
+    params.byAdopt[aid].lastTs = ts;
+    params.byAdopt[aid].userId = uid;
+  }
+  params.dailyAll[day] = (params.dailyAll[day] || 0) + 1;
+}
+
+function runtimeAgentIdFromSessionKey(sessionKey: string): string {
+  const match = /^agent:([^:]+):/.exec(String(sessionKey || ""));
+  return match?.[1] || "";
+}
+
+function adoptIdFromRuntimeAgentId(runtimeAgentId: string): string {
+  return String(runtimeAgentId || "").startsWith("trial_")
+    ? String(runtimeAgentId).slice("trial_".length)
+    : "";
+}
+
+function listTrajectoryFiles(rootDir: string, maxFiles: number): string[] {
+  const files: Array<{ path: string; mtimeMs: number }> = [];
+  const visit = (dir: string) => {
+    let entries: ReturnType<typeof readdirSync> = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true }) as any;
+    } catch {
+      return;
+    }
+    for (const entry of entries as any[]) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith(".trajectory.jsonl")) {
+        try {
+          files.push({ path: fullPath, mtimeMs: statSync(fullPath).mtimeMs });
+        } catch {
+          files.push({ path: fullPath, mtimeMs: 0 });
+        }
+      }
+    }
+  };
+  visit(rootDir);
+  return files
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, maxFiles)
+    .map((item) => item.path);
+}
 
 export function registerMiscRoutes(app: express.Express) {
 
@@ -161,7 +229,7 @@ export function registerMiscRoutes(app: express.Express) {
       }
 
       const { sdk } = await import("./sdk");
-      
+
       const token = await sdk.signSession({
         userId: context.user.id,
         name: context.user.name ?? "",
@@ -373,7 +441,6 @@ export function registerMiscRoutes(app: express.Express) {
         return res.status(403).json({ error: "admin only" });
       }
 
-      const { readFileSync, existsSync } = await import("fs");
       const logPaths = [
         APP_ROOT + "/logs/claw-exec-detail.log",
         APP_ROOT + "/logs/claw-exec.log",
@@ -382,10 +449,8 @@ export function registerMiscRoutes(app: express.Express) {
         if (!existsSync(logPath)) return [] as string[];
         return readFileSync(logPath, "utf8").split("\n").filter(Boolean);
       });
-      if (lines.length === 0) return res.json({ adoptions: [], daily: [], summary: {} });
-
       // 按 adoptId 统计
-      const byAdopt: Record<string, { total: number; days: Record<string, number>; lastTs: string; userId: number }> = {};
+      const byAdopt: Record<string, UsageBucket> = {};
       const dailyAll: Record<string, number> = {};
       const seen = new Set<string>();
       const isChatUsageEvent = (d: any) => {
@@ -410,32 +475,75 @@ export function registerMiscRoutes(app: express.Express) {
         try {
           const d = JSON.parse(line);
           if (!isChatUsageEvent(d)) continue;
-          const key = usageKey(d);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const aid = d.adoptId || "";
-          const day = (d.ts || "").slice(0, 10);
-          const uid = d.userId || 0;
-          if (!aid || !day) continue;
-
-          if (!byAdopt[aid]) byAdopt[aid] = { total: 0, days: {}, lastTs: "", userId: uid };
-          byAdopt[aid].total++;
-          byAdopt[aid].days[day] = (byAdopt[aid].days[day] || 0) + 1;
-          if (d.ts > byAdopt[aid].lastTs) { byAdopt[aid].lastTs = d.ts; byAdopt[aid].userId = uid; }
-
-          dailyAll[day] = (dailyAll[day] || 0) + 1;
+          addUsageEvent({
+            byAdopt,
+            dailyAll,
+            seen,
+            key: usageKey(d),
+            adoptId: d.adoptId || "",
+            ts: d.ts || "",
+            userId: d.userId || 0,
+          });
         } catch {}
       }
 
-      // 查用户名
+      // 查用户名和 runtime agent 映射。OpenClaw 微信 channel 直接进 gateway，
+      // 不经过 employee-agent 的聊天接口，所以需要从 trajectory 里补统计。
       let userMap: Record<number, string> = {};
+      const agentToAdopt: Record<string, { adoptId: string; userId: number }> = {};
       try {
         const { getDb } = await import("../db");
-        const { users } = await import("../../drizzle/schema");
+        const { users, clawAdoptions } = await import("../../drizzle/schema");
         const db = await getDb();
         if (db) {
           const allUsers = await db.select({ id: users.id, name: users.name, email: users.email }).from(users);
           for (const u of allUsers) userMap[u.id] = u.name || u.email || String(u.id);
+          const claws = await db.select({
+            adoptId: clawAdoptions.adoptId,
+            agentId: clawAdoptions.agentId,
+            userId: clawAdoptions.userId,
+          }).from(clawAdoptions);
+          for (const claw of claws) {
+            const adoptId = String(claw.adoptId || "").trim();
+            const userId = Number(claw.userId || 0);
+            const configuredAgentId = String(claw.agentId || "").trim();
+            if (configuredAgentId) agentToAdopt[configuredAgentId] = { adoptId, userId };
+            if (adoptId) agentToAdopt[`trial_${adoptId}`] = { adoptId, userId };
+          }
+        }
+      } catch {}
+
+      try {
+        const maxFiles = Math.min(Math.max(Number(process.env.LINGXIA_USAGE_TRAJECTORY_MAX_FILES || 5000), 1), 50000);
+        const trajectoryFiles = listTrajectoryFiles(path.join(OPENCLAW_HOME, "agents"), maxFiles);
+        for (const filePath of trajectoryFiles) {
+          let raw = "";
+          try {
+            raw = readFileSync(filePath, "utf8");
+          } catch {
+            continue;
+          }
+          for (const line of raw.split("\n")) {
+            if (!line.includes('"type":"trace.artifacts"') || !line.includes("openclaw-weixin")) continue;
+            try {
+              const d = JSON.parse(line);
+              const sessionKey = String(d?.sessionKey || "");
+              if (!sessionKey.includes(":openclaw-weixin:")) continue;
+              const runtimeAgentId = runtimeAgentIdFromSessionKey(sessionKey);
+              const mapped = agentToAdopt[runtimeAgentId];
+              const adoptId = mapped?.adoptId || adoptIdFromRuntimeAgentId(runtimeAgentId);
+              if (!adoptId) continue;
+              addUsageEvent({
+                byAdopt,
+                dailyAll,
+                seen,
+                key: ["trajectory", d?.traceId || "", d?.runId || "", d?.seq || "", sessionKey].join("|"),
+                adoptId,
+                ts: d?.ts || "",
+                userId: mapped?.userId || 0,
+              });
+            } catch {}
+          }
         }
       } catch {}
 

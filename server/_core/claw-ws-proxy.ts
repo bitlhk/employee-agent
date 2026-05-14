@@ -77,6 +77,10 @@ function isRoutineEnglishToolPreamble(text: string) {
     && ROUTINE_ENGLISH_TOOL_PREAMBLE_RE.test(trimmed);
 }
 
+function normalizeRuntimeMode(value: unknown): "fast" | "plan" {
+  return "fast";
+}
+
 function signPayload(nonce: string) {
   const t = Date.now();
   const p = ["v2", DEV_ID, "openclaw-control-ui", "ui", "operator", SCOPES.join(","), String(t), GW_TOKEN, nonce].join("|");
@@ -97,6 +101,12 @@ export function registerWSProxy(server: Server) {
 
       const adoptId = url.searchParams.get("adoptId") || "";
       if (!adoptId) { socket.write("HTTP/1.1 400 Bad Request\r\n\r\n"); socket.destroy(); return; }
+      if (!adoptId.startsWith("lgc-")) {
+        socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+        socket.destroy();
+        console.warn("[WS] rejected non-OpenClaw runtime:", adoptId);
+        return;
+      }
       const channel = url.searchParams.get("channel") || "";
       const conversationId = url.searchParams.get("conversationId") || "";
 
@@ -560,6 +570,7 @@ export function registerWSProxy(server: Server) {
           pendingAssistantPreamble = "";
           preambleWindowOpen = activeUserPrefersChinese;
           activeClientRunId = normalizeClientRunId((msg as any).clientRunId);
+          const runtimeMode = normalizeRuntimeMode((msg as any).runtimeMode);
           if (sessionKey && activeClientRunId) {
             const run = markChatRunStarted({
               sessionKey,
@@ -612,7 +623,7 @@ export function registerWSProxy(server: Server) {
               sessionKey,
               message: gatewayMessage,
               idempotencyKey: chatRunId,
-              thinking: "off",
+              thinking: runtimeMode === "plan" ? "on" : "off",
               deliver: false,
             },
           });

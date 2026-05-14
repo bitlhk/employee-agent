@@ -40,6 +40,32 @@ const scaleIn: Variants = {
   visible: { opacity: 1, scale: 1, transition: { duration: 0.6, ease: "easeOut" } },
 };
 
+function getRuntimeCardMeta(adoptId: unknown) {
+  const id = String(adoptId || "");
+  if (id.startsWith("lgj-")) {
+    return {
+      name: "JiuwenClaw",
+      icon: "/uploads/jiuwenclaw.png",
+      badgeClass: "bg-emerald-100 text-emerald-700",
+      buttonClass: "bg-emerald-600 hover:bg-emerald-700",
+    };
+  }
+  if (id.startsWith("lgh-")) {
+    return {
+      name: "HermesAgent",
+      icon: "/uploads/hermesagent.png",
+      badgeClass: "bg-purple-100 text-purple-700",
+      buttonClass: "bg-purple-600 hover:bg-purple-700",
+    };
+  }
+  return {
+    name: "OpenClaw",
+    icon: "/uploads/openclaw.png",
+    badgeClass: "bg-primary/10 text-primary",
+    buttonClass: "bg-primary hover:bg-primary/90",
+  };
+}
+
 // ── 员工智能体 SVG Logo 动画组件 ──
 function AnimatedLogo({ size = 120 }: { size?: number }) {
   return (
@@ -312,33 +338,25 @@ export default function ClawHome() {
                 </div>
               )}
 
-              {/* 已有虾 → 进入（支持 OpenClaw lgc-* 和 Hermes lgh-* 多卡） */}
+              {/* 已有虾 → 进入（支持 OpenClaw / JiuwenClaw / HermesAgent 多 runtime） */}
               {user && !isLoading && hasAnyClaw && (
                 <div className="space-y-3">
                   {adoptions.map((a: any) => {
-                    const isHermes = String(a.adoptId || "").startsWith("lgh-");
-                    const runtimeLabel = isHermes ? "专业智能体" : "员工智能体";
-                    const runtimeBadge = isHermes ? (
-                      <><img src="/uploads/Hermes.png" alt="" className="w-3 h-3 inline-block mr-0.5 align-text-bottom" /> Hermes</>
-                    ) : (
-                      <>🦐 OpenClaw</>
-                    );
+                    const runtime = getRuntimeCardMeta(a.adoptId);
                     return (
                       <Card key={a.adoptId} className="border-border/50 bg-white/80 backdrop-blur-sm overflow-hidden">
                         <div className="p-5">
                           <div className="flex items-center gap-3 mb-4">
-                            <BrandIcon size={40} />
+                            <div className="w-10 h-10 rounded-xl bg-white border border-border/60 shadow-sm flex items-center justify-center overflow-hidden shrink-0">
+                              <img src={runtime.icon} alt={runtime.name} className="w-8 h-8 object-contain" />
+                            </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 mb-0.5">
-                                <p className="text-sm font-semibold text-gray-900">{runtimeLabel}</p>
+                                <p className="text-sm font-semibold text-gray-900">员工智能体</p>
                                 <span
-                                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                                    isHermes
-                                      ? "bg-purple-100 text-purple-700"
-                                      : "bg-primary/10 text-primary"
-                                  }`}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${runtime.badgeClass}`}
                                 >
-                                  {runtimeBadge}
+                                  {runtime.name}
                                 </span>
                               </div>
                               <p className="text-xs font-mono text-muted-foreground truncate">{a.adoptId}</p>
@@ -351,7 +369,7 @@ export default function ClawHome() {
                             </div>
                           </div>
                           <Button
-                            className={`w-full text-white ${isHermes ? "bg-purple-600 hover:bg-purple-700" : "bg-primary hover:bg-primary/90"}`}
+                            className={`w-full text-white ${runtime.buttonClass}`}
                             onClick={() => setLocation(`/claw/${a.adoptId}`)}
                           >
                             进入工作台

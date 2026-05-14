@@ -24,14 +24,21 @@ import {
 } from "./chat-inflight";
 import { restoreDeletedProtectedCoreFiles, snapshotProtectedCoreFiles } from "./core-file-guard";
 
+type ChatRuntimeMode = "fast" | "plan";
+
+function normalizeChatRuntimeMode(value: unknown): ChatRuntimeMode {
+  return "fast";
+}
+
 export function registerChatStreamRoutes(app: express.Express) {
 
   // POST /api/claw/chat-stream  { adoptId, message }
   // 直连 Gateway /v1/chat/completions SSE，用 Node http 模块透传（避免 fetch 缓冲问题）
   app.post("/api/claw/chat-stream", clawChatLimiter, async (req, res) => {
     const routeEnterMs = Date.now();
-    let { adoptId, message, model, pendingToolContext, epochLabel, channel, conversationId } = req.body || {};
+    let { adoptId, message, model, pendingToolContext, epochLabel, channel, conversationId, runtimeMode } = req.body || {};
     const clientRunId = normalizeClientRunId(req.body?.clientRunId);
+    const normalizedRuntimeMode = normalizeChatRuntimeMode(runtimeMode);
     if (!adoptId || !message) {
       res.status(400).json({ error: "adoptId and message required" });
       return;
@@ -49,14 +56,46 @@ export function registerChatStreamRoutes(app: express.Express) {
       if (!claw) return;
     }
 
-    // ── Hermes runtime 分叉（lgh-*）────────────────────────────────
-    // 仅影响 adoptId 前缀为 "lgh-" 的请求；lgc-* 代码路径 byte-identical
-    if (String(adoptId).startsWith("lgh-")) {
-      const msgStrForHermes = String(message || "").slice(0, 4000);
-      if (msgStrForHermes.trim().length === 0) {
+    // ── JiuwenClaw runtime branch (lgj-*) ──────────────────────────
+    // lgj-* is the JiuwenClaw lane. lgh-* remains reserved for the legacy
+    // Hermes lane below; lgc-* keeps the existing OpenClaw path.
+    if (String(adoptId).startsWith("lgj-")) {
+      const msgStrForRuntime = String(message || "").slice(0, 4000);
+      if (msgStrForRuntime.trim().length === 0) {
         res.status(400).json({ error: "message is empty" });
         return;
       }
+      const { forwardToJiuwenClaw } = await import("./jiuwenclaw-bridge");
+      await forwardToJiuwenClaw(
+        {
+          adoptId: String(claw.adoptId),
+          agentId: String(claw.agentId || `jiuwen_${String(claw.adoptId)}`),
+          userId: Number(claw.userId),
+        },
+        msgStrForRuntime,
+        res,
+        {
+          model,
+          req,
+          channel,
+          conversationId,
+          epochLabel,
+          clientRunId,
+          runtimeMode: normalizedRuntimeMode,
+        },
+      );
+      return;
+    }
+
+    // ── Hermes runtime branch (lgh-*) ──────────────────────────────
+    // Frozen compatibility path. New JiuwenClaw agents must use lgj-*.
+    if (String(adoptId).startsWith("lgh-")) {
+      const msgStrForRuntime = String(message || "").slice(0, 4000);
+      if (msgStrForRuntime.trim().length === 0) {
+        res.status(400).json({ error: "message is empty" });
+        return;
+      }
+
       const { forwardToHermes } = await import("./hermes-bridge");
       await forwardToHermes(
         {
@@ -65,7 +104,7 @@ export function registerChatStreamRoutes(app: express.Express) {
           userId: Number(claw.userId),
           hermesPort: (claw as any).hermesPort ?? null,
         },
-        msgStrForHermes,
+        msgStrForRuntime,
         res,
         {
           // 不传 sessionId 让 bridge 用 makeSessionId(adoptId) 生成固定 session_id
@@ -297,6 +336,7 @@ export function registerChatStreamRoutes(app: express.Express) {
       userId: Number((claw as any).userId || 0),
       permissionProfile: String((claw as any).permissionProfile || "starter"),
       message: String(message || "").slice(0, 500),
+      runtimeMode: normalizedRuntimeMode,
     });
 
 
@@ -370,6 +410,10 @@ export function registerChatStreamRoutes(app: express.Express) {
       const brand = await getBrandConfig();
       brandSystemPrompt = brand.systemPrompt;
     } catch {}
+    if (normalizedRuntimeMode === "plan") {
+      const planModePrompt = "Runtime mode: plan. For complex requests, spend more effort on decomposition and verification before finalizing the answer. Keep any visible plan concise and continue to execute the user's request.";
+      brandSystemPrompt = [brandSystemPrompt, planModePrompt].filter(Boolean).join("\n\n");
+    }
 
     // Phase 2 方案 D：如果上一轮是 agent 回复，用户端传来 pendingToolContext
     //   将之注入 gateway messages 数组，openclaw 可读到 agent 结论做 follow-up

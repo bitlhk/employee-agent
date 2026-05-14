@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { appendLogAsync } from "./helpers";
 
 const PROTECTED_ROOT_FILES = [
+  "AGENT.md",
   "AGENTS.md",
   "SOUL.md",
   "TOOLS.md",

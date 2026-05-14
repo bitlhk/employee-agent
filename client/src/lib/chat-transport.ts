@@ -16,6 +16,7 @@ export type ChatSendPayload = {
   message: string;
   channel?: string;
   conversationId?: string;
+  runtimeMode?: "fast" | "plan";
   userMessageId?: string;
   clientRunId?: string;
   memoryEnabled?: boolean;
@@ -29,6 +30,7 @@ export type ChatTransportContext = {
   agentId?: string;
   channel?: string;
   conversationId?: string;
+  runtimeMode?: "fast" | "plan";
   sessionKey?: string;
 };
 

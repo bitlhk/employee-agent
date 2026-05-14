@@ -154,7 +154,7 @@ function attachWorkspaceFiles(message: LingxiaChatMessage, event: Extract<ChatEv
     status: "done",
     ts: nowMs,
     executor: "native",
-    outputFiles: event.files.map((file) => ({ name: file.name, size: file.size ?? 0 })),
+    outputFiles: event.files.map((file) => ({ name: file.name, size: file.size ?? 0, wsPath: file.path })),
     adoptId: event.adoptId ?? adoptId,
   };
   return {

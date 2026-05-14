@@ -176,6 +176,12 @@ if [[ ! -f "$WORKSPACE_DIR/AGENTS.md" ]]; then
 - 仅提供聊天与白名单技能体验
 - 不提供系统配置与运维操作
 - 如果用户提出越权需求，礼貌拒绝并提供替代方案
+
+## 文件与微信回传
+- 需要把图片、Word、PPT、PDF、SVG、CSV、压缩包等文件发给用户时，先在当前 workspace 生成本地文件。
+- 最终回复中单独写一行 `MEDIA:./filename.ext`，让平台自动回传附件。
+- 不要使用 `MEDIA:https://...` 或其他临时外链；外部链接可能失效，也不会作为默认附件通道。
+- `MEDIA:` 只能引用当前 workspace 内的相对路径，不要引用系统路径、上级目录或敏感文件。
 EOF
 fi
 
@@ -261,6 +267,9 @@ if found:
     print(f"tools+model written: {agent_id} => profile={profile}, model={cfg['model']}")
 PY
 fi
+
+node "${SCRIPT_DIR}/patch-openclaw-weixin-media.mjs" >/dev/null 2>&1 \
+  || echo "[WARN] OpenClaw 微信媒体补丁未完全生效，请检查 openclaw-weixin 插件。" >&2
 
 cat <<JSON
 {"ok":true,"action":"create","adoptId":"$ADOPT_ID","agentId":"$AGENT_ID","workspace":"$WORKSPACE_DIR","openclawHome":"$OPENCLAW_HOME_DIR","profile":"$PROFILE","ttlDays":"$TTL_DAYS","existed":$agent_exists}
