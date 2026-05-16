@@ -12,9 +12,10 @@ import { validationResult } from "express-validator";
  * 配置安全 HTTP 头
  */
 export function setupSecurityHeaders(app: Express) {
-  const frontendUrl = process.env.FRONTEND_URL || "";
   const forceHttpsHeaders = process.env.LINGXIA_FORCE_HTTPS_HEADERS === "true";
-  const httpsHeadersEnabled = forceHttpsHeaders || frontendUrl.startsWith("https://");
+  // Do not infer HTTPS-only headers from FRONTEND_URL. This deployment keeps
+  // both the HTTPS domain and the direct HTTP IP entry available.
+  const httpsHeadersEnabled = forceHttpsHeaders;
 
   app.use(
     helmet({

@@ -20,7 +20,7 @@ import { fileURLToPath } from "url";
 import compression from "compression";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
-import { registerVoiceRoutes } from "./voice";
+import { registerVoiceRoutes, registerVoiceWsRoutes } from "./voice";
 import { startRecycler } from "./recycler";
 import { registerCronRoutes } from "./claw-cron";
 import { registerNotifyRoutes } from "./claw-notify";
@@ -190,6 +190,7 @@ async function startServer() {
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   registerVoiceRoutes(app);
+  registerVoiceWsRoutes(server);
   registerCronRoutes(app);
   registerNotifyRoutes(app);
   registerWeixinRoutes(app);

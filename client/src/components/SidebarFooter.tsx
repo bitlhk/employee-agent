@@ -3,7 +3,6 @@ type SidebarFooterProps = {
   expiryText: string;
   expiryColor: string;
   collapsed?: boolean;
-  onDocsClick?: () => void;
 };
 
 function normalizeVersion(version: string) {
@@ -15,7 +14,6 @@ export function SidebarFooter({
   expiryText,
   expiryColor,
   collapsed = false,
-  onDocsClick,
 }: SidebarFooterProps) {
   const cleanVersion = normalizeVersion(version);
 

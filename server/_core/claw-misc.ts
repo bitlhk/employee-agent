@@ -1,4 +1,5 @@
 import express from "express";
+import { COOKIE_NAME } from "@shared/const";
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync, statSync } from "fs";
 import { execSync } from "child_process";
 import path from "path";
@@ -410,8 +411,8 @@ export function registerMiscRoutes(app: express.Express) {
       ] as const;
 
       for (const opt of clearOpts) {
-        try { res.clearCookie("app_session_id", { ...opt, httpOnly: true, secure: true, sameSite: "none" as const }); } catch {}
-        try { res.clearCookie("app_session_id", { ...opt, httpOnly: true, secure: false, sameSite: "lax" as const }); } catch {}
+        try { res.clearCookie(COOKIE_NAME, { ...opt, httpOnly: true, secure: true, sameSite: "none" as const }); } catch {}
+        try { res.clearCookie(COOKIE_NAME, { ...opt, httpOnly: true, secure: false, sameSite: "lax" as const }); } catch {}
       }
 
       // lock sso-bridge for 3 minutes to avoid immediate auto-login after logout
@@ -480,7 +481,7 @@ export function registerMiscRoutes(app: express.Express) {
       });
 
       // shared cookie for subdomains
-      res.cookie("app_session_id", token, {
+      res.cookie(COOKIE_NAME, token, {
         domain: process.env.COOKIE_DOMAIN || ".linggan.top",
         httpOnly: true,
         path: "/",

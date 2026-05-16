@@ -432,6 +432,7 @@ export default function Home() {
       if (v) {
         sessionStorage.removeItem("home_initial_page");
         if (v === "agentLab") return "chat";
+        if (v === "docs") return "meeting";
         return v as PageKey;
       }
     } catch {}
@@ -1927,12 +1928,11 @@ export default function Home() {
             />
 
             {/* 旧侧栏能力暂留（Phase B 迁移），当前隐藏 */}
-                        <SidebarFooter
+            <SidebarFooter
               version={isJiuwenRuntime ? "JiuwenClaw" : isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
               expiryText={lingxiaExpiryInfo.text}
               expiryColor={lingxiaExpiryInfo.color}
               collapsed={sidebarCollapsed}
-              onDocsClick={() => setActivePage("docs")}
             />
 
             <div
