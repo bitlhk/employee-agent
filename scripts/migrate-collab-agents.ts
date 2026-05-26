@@ -8,6 +8,7 @@ const ROOT = process.cwd();
 const SEED_PATH = path.join(ROOT, "server/_core/agent/data/agents.seed.json");
 const args = new Set(process.argv.slice(2));
 const shouldApply = args.has("--apply");
+const RETIRED_LEGACY_AGENT_IDS = new Set(["task-my-wealth", "task-ppt"]);
 
 type LegacyBizAgent = {
   id: string;
@@ -45,7 +46,7 @@ function legacyEnvKey(id: string, suffix: string): string {
 }
 
 function inferMapping(id: string): InferredMapping {
-  if (id === "task-slides" || id === "task-ppt" || id === "task-code") {
+  if (id === "task-slides" || id === "task-code") {
     return {
       providerKey: "legacy-claude-code",
       runtimeFamily: "claude-code",
@@ -90,7 +91,7 @@ function inferMapping(id: string): InferredMapping {
     };
   }
 
-  if (id === "task-my-wealth" || id === "task-bond" || id === "task-credit-risk") {
+  if (id === "task-bond" || id === "task-credit-risk") {
     return {
       providerKey: "legacy-hermes",
       runtimeFamily: "hermes",
@@ -125,7 +126,10 @@ async function loadLegacyAgents(): Promise<{ source: LegacySource; agents: Legac
     if (response.ok) {
       const payload: any = await response.json();
       if (Array.isArray(payload?.agents) && payload.agents.length > 0) {
-        return { source: "business_agents_db", agents: payload.agents as LegacyBizAgent[] };
+        return {
+          source: "business_agents_db",
+          agents: (payload.agents as LegacyBizAgent[]).filter((agent) => !RETIRED_LEGACY_AGENT_IDS.has(agent.id)),
+        };
       }
     }
   } catch (error: any) {
@@ -134,16 +138,18 @@ async function loadLegacyAgents(): Promise<{ source: LegacySource; agents: Legac
 
   return {
     source: "collabAgents_ts_fallback",
-    agents: COLLAB_AGENTS.map((agent, index) => ({
-      id: agent.id,
-      name: agent.name,
-      description: `Legacy match rule: /${agent.pattern.source}/${agent.pattern.flags}`,
-      kind: "remote",
-      icon: agent.emoji,
-      enabled: 1,
-      sortOrder: index,
-      remoteAgentId: agent.id,
-    })),
+    agents: COLLAB_AGENTS
+      .filter((agent) => !RETIRED_LEGACY_AGENT_IDS.has(agent.id))
+      .map((agent, index) => ({
+        id: agent.id,
+        name: agent.name,
+        description: `Legacy match rule: /${agent.pattern.source}/${agent.pattern.flags}`,
+        kind: "remote",
+        icon: agent.emoji,
+        enabled: 1,
+        sortOrder: index,
+        remoteAgentId: agent.id,
+      })),
   };
 }
 

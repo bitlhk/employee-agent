@@ -8,6 +8,15 @@ import { SettingsPage } from "@/components/pages/SettingsPage";
 import { MeetingNotesPage } from "@/components/pages/MeetingNotesPage";
 import { CollabPage } from "@/components/pages/CollabPage";
 import type { PageKey } from "@/components/console/Sidebar";
+import type { ReactNode } from "react";
+
+function MainPanelShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex-1 min-h-0 overflow-hidden">
+      {children}
+    </div>
+  );
+}
 
 export function MainPanel({
   activePage,
@@ -31,16 +40,18 @@ export function MainPanel({
     adoptId: adoptId || "",
   };
 
-  if (activePage === "weixin") return <ChannelsPage adoptId={adoptId || ""} />;
-  if (activePage === "skills") {
-    return <SkillsPage skills={safeSkills.data} canEdit={safeSkills.canEdit} pending={safeSkills.pending} onToggle={safeSkills.onToggle} adoptId={safeSkills.adoptId} />;
-  }
-  if (activePage === "agent") return <AgentPage adoptId={adoptId || ""} skills={safeSkills.data as any} />;
-  if (activePage === "workspace") return <WorkspacePage adoptId={adoptId || ""} />;
-  if (activePage === "office") return <OfficeSpacePage adoptId={adoptId || ""} />;
-  if (activePage === "schedule") return <SchedulePageV2 adoptId={adoptId || ""} />;
-  if (activePage === "meeting") return <MeetingNotesPage adoptId={adoptId || ""} />;
-  if (activePage === "collab") return <CollabPage adoptId={adoptId || ""} />;
+  let content: ReactNode;
 
-  return <SettingsPage />;
+  if (activePage === "weixin") content = <ChannelsPage adoptId={adoptId || ""} />;
+  if (activePage === "skills") {
+    content = <SkillsPage skills={safeSkills.data} canEdit={safeSkills.canEdit} pending={safeSkills.pending} onToggle={safeSkills.onToggle} adoptId={safeSkills.adoptId} />;
+  }
+  if (activePage === "agent") content = <AgentPage adoptId={adoptId || ""} skills={safeSkills.data as any} />;
+  if (activePage === "workspace") content = <WorkspacePage adoptId={adoptId || ""} />;
+  if (activePage === "office") content = <OfficeSpacePage adoptId={adoptId || ""} />;
+  if (activePage === "schedule") content = <SchedulePageV2 adoptId={adoptId || ""} />;
+  if (activePage === "meeting") content = <MeetingNotesPage adoptId={adoptId || ""} />;
+  if (activePage === "collab") content = <CollabPage adoptId={adoptId || ""} />;
+
+  return <MainPanelShell>{content || <SettingsPage />}</MainPanelShell>;
 }

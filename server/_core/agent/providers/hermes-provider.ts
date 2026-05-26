@@ -136,7 +136,11 @@ export class HermesProvider implements ProviderAdapter {
         },
       }, input.definition.timeoutMs || this.provider.timeoutMs || 300_000);
 
-      const eventsPayload = await readProviderPayload(eventsResponse, input.onEvent);
+      const eventsPayload = await readProviderPayload(
+        eventsResponse,
+        input.onEvent,
+        input.definition.timeoutMs || this.provider.timeoutMs || 300_000,
+      );
       if (!eventsResponse.ok) {
         return {
           ok: true as const,

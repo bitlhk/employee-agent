@@ -68,31 +68,7 @@ function quickScheduleAction(message: string): { tool: string; args: any } | nul
   if (/(查看|列出|有哪些|有啥|任务列表|当前|我的|你有哪些|你有啥).*?(?:定时任务|任务|cron|schedule)/i.test(message)) {
     return { tool: "list_schedules", args: {} };
   }
-  if (/(删除|取消|关闭|停止).*任务/.test(message)) return null;
-  if (!/(每天|每日|每周|提醒我|定时|定期)/.test(message)) return null;
-
-  const timeMatch = message.match(/(凌晨|早上|上午|中午|下午|晚上)?\s*(\d{1,2})\s*(?:点|时)(?:半)?/);
-  if (!timeMatch) return null;
-  const hour = normalizeHour(timeMatch[1] || "", Number(timeMatch[2] || 9));
-  const minute = /半/.test(timeMatch[0]) ? 30 : 0;
-
-  const channel = /飞书/.test(message) ? "feishu" : /企微|企业微信/.test(message) ? "wecom" : /微信/.test(message) ? "wechat" : undefined;
-  const isWeather = /天气/.test(message);
-  const task = deriveScheduleTaskFromMessage(message);
-
-  const time = formatTime(hour, minute);
-  const weekdays = extractWeekdays(message);
-  return {
-    tool: "create_schedule",
-    args: {
-      name: isWeather ? "天气推送" : "定时任务",
-      prompt: task,
-      schedule: weekdays.length > 0
-        ? { kind: "weekly", time, weekdays }
-        : { kind: "daily", time },
-      ...(channel ? { channel } : {}),
-    },
-  };
+  return null;
 }
 
 // ── 从 DB 加载可用 Agent 列表 ──
@@ -403,8 +379,6 @@ const FORCE_ROUTE_MAP: Array<{ pattern: RegExp; agentId: string }> = [
   { pattern: /信贷|贷款|征信|风控|贷前调查|贷后管理|三表分析|担保物|五级分类|风险定价/, agentId: "task-credit-risk" },
   // 债券投研
   { pattern: /债券|国开债|国债|信用债|中债估值|收益率曲线|久期|违约预警/, agentId: "task-bond" },
-  // 个人理财
-  { pattern: /资产配置|理财规划|家庭财务|税费规划|基金.*配置|家庭.*资产/, agentId: "task-my-wealth" },
   // 深度求索 / 复杂任务拆解
   { pattern: /深度分析|深度求索|拆解.*任务|复杂.*任务|帮我规划|深度思考/, agentId: "task-trace" },
 ];
@@ -414,6 +388,17 @@ function matchForceRoute(message: string): { agentId: string } | null {
     if (rule.pattern.test(message)) return { agentId: rule.agentId };
   }
   return null;
+}
+
+function isScheduleManagementQuery(message: string): boolean {
+  return /(?:查看|列出|有哪些|有啥|任务列表|当前|我的|你有哪些|你有啥).*?(?:定时任务|任务|cron|schedule)/i.test(message) ||
+    /(?:删除|取消|关闭|停止).*?(?:定时任务|任务|cron|schedule)/i.test(message);
+}
+
+function isScheduleCreationLike(message: string): boolean {
+  if (isScheduleManagementQuery(message)) return false;
+  return /每天|每日|每周|每隔|提醒我|定时|定期|明天|后天|\d{1,2}\s*(?:点|时)(?:半)?/.test(message) &&
+    /(?:发|发送|推送|提醒|通知|查|查询|搜|搜索|看看|看下)/.test(message);
 }
 
 
@@ -440,6 +425,11 @@ export async function routeMessage(
     return true;
   }
 
+  if (isScheduleCreationLike(message)) {
+    console.log("[PM-L1] 定时创建交给 OpenClaw，走主聊天");
+    return false;
+  }
+
   if (!forcedActions) {
     const hasSkillOp = /(?:创建|生成|做|写|开发).*(?:技能|插件|工具包)|(?:技能|插件|工具包).*(?:创建|生成|做|写|开发)/.test(message);
 
@@ -448,8 +438,9 @@ export async function routeMessage(
 
     // L1 门禁：主对话只允许平台操作进入 PM（定时任务/渠道/技能生成）。
     // 业务 Agent 自动推荐/自动派发已关闭，避免普通问题被误路由成 Agent 卡片。
+    const hasScheduleManagementOp = isScheduleManagementQuery(message);
     const hasPlatformOp =
-      /定时任务|每天|每隔|每周|提醒我|cron|schedule/i.test(message) ||
+      hasScheduleManagementOp ||
       /(?:发|推|送)(?:到|给|去)?\s*(?:我的?)?\s*(?:微信|企微|飞书|webhook)/i.test(message) ||
       /(?:删除|取消|关闭|停止).*任务|任务列表|哪些.*任务|通知渠道|哪些渠道/.test(message) ||
       hasSkillOp;
@@ -488,6 +479,12 @@ export async function routeMessage(
   }
   const dispatches: typeof requestedDispatches = [];
   const platformOps = actions.filter(a => a.tool !== "dispatch_task" && a.tool !== "passthrough");
+
+  // 创建定时任务交给 OpenClaw 原生工具判断和执行，employee-agent 只保留查看/删除等管理动作。
+  // 这样“每天10点发吗？”这类业务查询不会被平台层误建成定时任务。
+  if (platformOps.some((op) => op.tool === "create_schedule")) {
+    return false;
+  }
 
   // 先执行平台操作（schedule/send 等）
   if (platformOps.length > 0) {

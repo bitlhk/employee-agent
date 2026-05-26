@@ -207,10 +207,10 @@ export const clawRouter = router({
       };
     }),
 
-    getByAdoptId: publicProcedure
+    getByAdoptId: protectedProcedure
       .input(z.object({ adoptId: z.string().min(1).max(64) }))
-      .query(async ({ input }) => {
-        const claw = await getClawByAdoptId(input.adoptId);
+      .query(async ({ input, ctx }) => {
+        const claw = await assertClawOwnerOrThrow(ctx, input.adoptId);
         if (!claw) return null;
         const profile = await getClawProfileSettings(Number((claw as any).id || 0));
         return {
@@ -1512,11 +1512,10 @@ export const clawRouter = router({
     // Layer1: openclaw 系统内置  /usr/lib/node_modules/openclaw/skills/
     // Layer2: 灵感公共金融技能  /root/.openclaw/skills-shared/
     // Layer3: 智能体私有技能      /root/.openclaw/workspace-lingganclaw/{agentId}/skills/
-    listSkills: publicProcedure
+    listSkills: protectedProcedure
       .input(z.object({ adoptId: z.string().min(1).max(64) }))
-      .query(async ({ input }) => {
-        const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("智能体实例不存在");
+      .query(async ({ input, ctx }) => {
+        const claw = await assertClawOwnerOrThrow(ctx, input.adoptId);
 
         // Hermes runtime (lgh-*) 走专属 skill provider，读 /root/.hermes/profiles/<name>/skills/
         if (String(input.adoptId).startsWith("lgh-")) {

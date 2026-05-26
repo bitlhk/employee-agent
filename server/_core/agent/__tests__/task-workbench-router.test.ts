@@ -12,7 +12,7 @@ describe("task workbench router", () => {
   it("routes greetings to chat", () => {
     const decision = routeTaskWorkbenchPromptByRules({
       prompt: "你好",
-      selectedTemplateId: "ai_topic_insight_ppt",
+      selectedTemplateId: "research_ppt",
     });
 
     expect(decision.intent).toBe("chat");
@@ -23,23 +23,23 @@ describe("task workbench router", () => {
   it("routes explicit PPT requests to the focused template", () => {
     const decision = routeTaskWorkbenchPromptByRules({
       prompt: "请把 Sequoia AI Ascent 2026 的核心观点生成一份 PPT",
-      selectedTemplateId: "ai_topic_insight_ppt",
+      selectedTemplateId: "research_ppt",
     });
 
     expect(decision.intent).toBe("run_template");
-    expect(decision.selectedTemplateId).toBe("ai_topic_insight_ppt");
-    expect(decision.userVisiblePlan).toHaveLength(3);
+    expect(decision.selectedTemplateId).toBe("research_ppt");
+    expect(decision.userVisiblePlan).toHaveLength(5);
   });
 
   it("routes research topics to the selected PPT template", () => {
     const decision = routeTaskWorkbenchPromptByRules({
       prompt: "看下最新的几个 SOTA 开源模型，分析能力差异以及对金融 AI 的影响",
-      selectedTemplateId: "ai_topic_insight_ppt",
+      selectedTemplateId: "research_ppt",
     });
 
     expect(decision.intent).toBe("run_template");
     expect(decision.confidence).toBe("medium");
-    expect(decision.selectedTemplateId).toBe("ai_topic_insight_ppt");
+    expect(decision.selectedTemplateId).toBe("research_ppt");
   });
 
   it("routes meeting preparation requests to the meeting prep template", () => {
@@ -65,6 +65,20 @@ describe("task workbench router", () => {
     expect(decision.userVisiblePlan).toHaveLength(3);
   });
 
+  it("routes announcement interpretation requests to the Wind template", () => {
+    const decision = routeTaskWorkbenchPromptByRules({
+      prompt: "帮我解读一下宁德时代最新公告对业绩和估值的影响",
+      selectedTemplateId: null,
+    });
+
+    expect(decision.intent).toBe("run_template");
+    expect(decision.selectedTemplateId).toBe("wind_announcement_digest");
+    expect(decision.userVisiblePlan).toEqual([
+      "检索员读取万得公告与财经新闻数据",
+      "专业写作员生成公告影响解读",
+    ]);
+  });
+
   it("asks for clarification when research intent has no selected delivery template", () => {
     const decision = routeTaskWorkbenchPromptByRules({
       prompt: "研究一下最新 AI 趋势",
@@ -78,7 +92,7 @@ describe("task workbench router", () => {
   it("rejects unsupported execution requests", () => {
     const decision = routeTaskWorkbenchPromptByRules({
       prompt: "帮我买入贵州茅台并发送给客户",
-      selectedTemplateId: "ai_topic_insight_ppt",
+      selectedTemplateId: "research_ppt",
     });
 
     expect(decision.intent).toBe("unsupported");
@@ -90,7 +104,7 @@ describe("task workbench router", () => {
 
     const decision = await routeTaskWorkbenchPrompt({
       prompt: "帮我做一份 AI 产业趋势 PPT",
-      selectedTemplateId: "ai_topic_insight_ppt",
+      selectedTemplateId: "research_ppt",
     });
 
     expect(decision.intent).toBe("run_template");
@@ -100,7 +114,7 @@ describe("task workbench router", () => {
   it("returns a normalized Financial Harness plan when the remote harness routes the task", async () => {
     vi.stubEnv("TASK_WORKBENCH_ROUTER_LLM", "true");
     vi.stubEnv("TASK_WORKBENCH_ROUTER_HARNESS", "true");
-    vi.stubEnv("LINGXIA_FIN_HARNESS_ENDPOINT", "http://127.0.0.1:18650");
+    vi.stubEnv("TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT", "http://127.0.0.1:18650");
     vi.stubEnv("HERMES_HTTP_KEY", "test-key");
 
     const harnessResult = {
@@ -109,13 +123,6 @@ describe("task workbench router", () => {
       reason: "Market update request",
       risk_flags: ["needs_source_check"],
       plan: [
-        {
-          stage_id: "sector_reader",
-          role: "Reader",
-          profile: "market-sector-reader",
-          input_contract: "public market question",
-          output_contract: "source-backed fact pack",
-        },
         {
           stage_id: "comps_analyst",
           role: "Analyst",
@@ -149,7 +156,180 @@ describe("task workbench router", () => {
     expect(decision.router?.mode).toBe("financial_harness");
     expect(decision.harnessPlan?.runId).toBe("run-harness-1");
     expect(decision.harnessPlan?.templateId).toBe("market-researcher");
-    expect(decision.harnessPlan?.stages.map((stage) => stage.profile)).toEqual(["market-sector-reader", "market-comps-spreader"]);
-    expect(decision.harnessPlan?.stages[1]?.skillRefs).toEqual(["comps-analysis"]);
+    expect(decision.harnessPlan?.stages.map((stage) => stage.profile)).toEqual(["market-comps-spreader"]);
+    expect(decision.harnessPlan?.stages[0]?.skillRefs).toEqual(["comps-analysis"]);
+    expect(decision.harnessPlan?.dataRequirements).toEqual([]);
+    expect(decision.harnessPlan?.computeRequirements).toEqual([]);
+  });
+
+  it("preserves Financial Harness data and compute requirements without executing them", async () => {
+    vi.stubEnv("TASK_WORKBENCH_ROUTER_LLM", "true");
+    vi.stubEnv("TASK_WORKBENCH_ROUTER_HARNESS", "true");
+    vi.stubEnv("LINGXIA_FIN_HARNESS_ENDPOINT", "http://127.0.0.1:18650");
+    vi.stubEnv("HERMES_HTTP_KEY", "test-key");
+
+    const harnessResult = {
+      template_id: "market-researcher",
+      confidence: 0.88,
+      reason: "Market update request with explicit data planning",
+      risk_flags: ["needs_source_check"],
+      data_requirements: [
+        {
+          id: "d1",
+          type: "financial_news",
+          query: "cross-border payment market developments",
+          top_k: 6,
+          reason: "Need recent public market evidence",
+          required: true,
+        },
+        {
+          id: "ignored",
+          type: "unsupported_source",
+          query: "should be ignored",
+        },
+      ],
+      compute_requirements: [
+        {
+          id: "c1",
+          type: "none",
+          input_refs: ["d1"],
+          reason: "No quantitative computation is required",
+        },
+      ],
+      plan: [
+        {
+          stage_id: "comps_analyst",
+          role: "Analyst",
+          profile: "market-comps-spreader",
+          input_contract: "controlled data pack",
+          output_contract: "market judgment",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/v1/harness/route")) {
+        return new Response(JSON.stringify({
+          status: "completed",
+          runId: "run-harness-2",
+          result: harnessResult,
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "unexpected_url" }), { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await routeTaskWorkbenchPrompt({
+      prompt: "latest cross-border payment market developments",
+      selectedTemplateId: null,
+    });
+
+    expect(decision.intent).toBe("run_template");
+    expect(decision.harnessPlan?.runId).toBe("run-harness-2");
+    expect(decision.harnessPlan?.dataRequirements).toEqual([
+      {
+        id: "d1",
+        type: "financial_news",
+        query: "cross-border payment market developments",
+        topK: 6,
+        reason: "Need recent public market evidence",
+        required: true,
+      },
+    ]);
+    expect(decision.harnessPlan?.computeRequirements).toEqual([
+      {
+        id: "c1",
+        type: "none",
+        inputRefs: ["d1"],
+        reason: "No quantitative computation is required",
+      },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Financial Harness plans when the route response omits run id", async () => {
+    vi.stubEnv("TASK_WORKBENCH_ROUTER_LLM", "true");
+    vi.stubEnv("TASK_WORKBENCH_ROUTER_HARNESS", "true");
+    vi.stubEnv("LINGXIA_FIN_HARNESS_ENDPOINT", "http://127.0.0.1:18650");
+    vi.stubEnv("HERMES_HTTP_KEY", "test-key");
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/v1/harness/route")) {
+        return new Response(JSON.stringify({
+          status: "completed",
+          result: {
+            template_id: "market-researcher",
+            confidence: 0.9,
+            reason: "Market research request",
+            data_requirements: [{
+              id: "d1",
+              type: "financial_news",
+              query: "US Iran conflict market impact",
+              top_k: 4,
+            }],
+            plan: [{
+              stage_id: "comps_analyst",
+              role: "Analyst",
+              profile: "market-comps-spreader",
+            }],
+          },
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "unexpected_url" }), { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await routeTaskWorkbenchPrompt({
+      prompt: "洞察一下近期美国伊朗战争对金融的影响趋势，生成研究简报",
+      selectedTemplateId: "market_research_brief",
+    });
+
+    expect(decision.intent).toBe("run_template");
+    expect(decision.selectedTemplateId).toBe("market_research_brief");
+    expect(decision.router?.mode).toBe("financial_harness");
+    expect(decision.harnessPlan?.runId).toMatch(/^financial-harness-/);
+    expect(decision.harnessPlan?.dataRequirements).toHaveLength(1);
+  });
+
+  it("routes with executor-only endpoint and token configuration", async () => {
+    vi.stubEnv("TASK_WORKBENCH_ROUTER_LLM", "true");
+    vi.stubEnv("TASK_WORKBENCH_ROUTER_HARNESS", "true");
+    vi.stubEnv("TASK_WORKBENCH_HARNESS_ENDPOINT", "");
+    vi.stubEnv("LINGXIA_FIN_HARNESS_ENDPOINT", "");
+    vi.stubEnv("HERMES_HTTP_KEY", "");
+    vi.stubEnv("LINGXIA_FIN_HARNESS_EXECUTOR_ENDPOINT", "http://127.0.0.1:18651");
+    vi.stubEnv("TASK_WORKBENCH_HARNESS_EXECUTOR_TOKEN", "executor-token");
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("http://127.0.0.1:18651/v1/harness/route");
+      expect(init?.headers).toMatchObject({
+        authorization: "Bearer executor-token",
+      });
+      return new Response(JSON.stringify({
+        status: "completed",
+        runId: "run-executor-only",
+        result: {
+          template_id: "meeting-prep-agent",
+          confidence: 0.86,
+          reason: "Meeting preparation request",
+          plan: [{
+            stage_id: "meeting_profiler",
+            role: "Analyst",
+            profile: "meeting-profiler",
+          }],
+        },
+      }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await routeTaskWorkbenchPrompt({
+      prompt: "准备一次银行客户拜访材料",
+      selectedTemplateId: "meeting_prep_agent",
+    });
+
+    expect(decision.intent).toBe("run_template");
+    expect(decision.selectedTemplateId).toBe("meeting_prep_agent");
+    expect(decision.router?.mode).toBe("financial_harness");
+    expect(decision.harnessPlan?.runId).toBe("run-executor-only");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

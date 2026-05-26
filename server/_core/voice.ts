@@ -4,7 +4,15 @@ import { WebSocket, WebSocketServer } from "ws";
 import crypto from "crypto";
 import { createContext } from "./context";
 import path from "path";
-import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { execFileSync } from "child_process";
 import {
   buildRuntimeSessionKey,
@@ -16,12 +24,20 @@ import { buildChatRequestBody, type PermissionProfile } from "./tool_schema";
 
 function buildRtasrUrl(appId: string, apiKey: string) {
   const ts = Math.floor(Date.now() / 1000).toString();
-  const base = crypto.createHash("md5").update(appId + ts).digest("hex");
+  const base = crypto
+    .createHash("md5")
+    .update(appId + ts)
+    .digest("hex");
   const signa = crypto.createHmac("sha1", apiKey).update(base).digest("base64");
   return `wss://rtasr.xfyun.cn/v1/ws?appid=${encodeURIComponent(appId)}&ts=${encodeURIComponent(ts)}&signa=${encodeURIComponent(signa)}&lang=cn`;
 }
 
-function extractRtasrText(raw: string): { text: string; action?: string; code?: string; desc?: string } {
+function extractRtasrText(raw: string): {
+  text: string;
+  action?: string;
+  code?: string;
+  desc?: string;
+} {
   const msg = JSON.parse(raw);
   const code = String(msg.code ?? "0");
   const action = String(msg.action || "");
@@ -30,7 +46,9 @@ function extractRtasrText(raw: string): { text: string; action?: string; code?: 
 
   let data = msg.data;
   if (typeof data === "string" && data.trim()) {
-    try { data = JSON.parse(data); } catch {}
+    try {
+      data = JSON.parse(data);
+    } catch {}
   }
   const rt = data?.cn?.st?.rt;
   if (!Array.isArray(rt)) return { text: "", action, code, desc };
@@ -62,25 +80,32 @@ function humanizeRtasrError(code: string, desc: string) {
 }
 
 function safeMeetingName(input: string) {
-  return String(input || "")
-    .trim()
-    .replace(/[^a-zA-Z0-9_-]/g, "_")
-    .replace(/_+/g, "_")
-    .slice(0, 80)
-    .replace(/^_+|_+$/g, "") || crypto.randomUUID();
+  return (
+    String(input || "")
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 80)
+      .replace(/^_+|_+$/g, "") || crypto.randomUUID()
+  );
 }
 
 function safeFileStem(input: string) {
-  return String(input || "output")
-    .trim()
-    .replace(/[\\/:*?"<>|#\r\n\t]/g, "_")
-    .replace(/\s+/g, "_")
-    .replace(/_+/g, "_")
-    .slice(0, 48)
-    .replace(/^_+|_+$/g, "") || "output";
+  return (
+    String(input || "output")
+      .trim()
+      .replace(/[\\/:*?"<>|#\r\n\t]/g, "_")
+      .replace(/\s+/g, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 48)
+      .replace(/^_+|_+$/g, "") || "output"
+  );
 }
 
-const meetingTypeConfig: Record<string, { label: string; instruction: string }> = {
+const meetingTypeConfig: Record<
+  string,
+  { label: string; instruction: string }
+> = {
   general: {
     label: "普通会议",
     instruction: "突出会议摘要、关键决策、明确待办和待确认问题。",
@@ -107,7 +132,8 @@ const meetingTypeConfig: Record<string, { label: string; instruction: string }> 
   },
   weekly: {
     label: "周会纪要",
-    instruction: "突出本周进展、下周计划、跨团队依赖、风险问题和需要升级的事项。",
+    instruction:
+      "突出本周进展、下周计划、跨团队依赖、风险问题和需要升级的事项。",
   },
   interview: {
     label: "面试纪要",
@@ -134,7 +160,9 @@ function countActionItems(markdown: string) {
   const match = markdown.match(/##\s*待办事项\s*\n([\s\S]*?)(?:\n##\s+|$)/);
   const body = match?.[1] || "";
   if (!body || /暂无|无明确|未明确/.test(body)) return 0;
-  return body.split("\n").filter((line) => /^\s*(?:[-*]|\d+[.)]|- \[[ xX]\])\s+/.test(line)).length;
+  return body
+    .split("\n")
+    .filter(line => /^\s*(?:[-*]|\d+[.)]|- \[[ xX]\])\s+/.test(line)).length;
 }
 
 function ensureMeetingDirs(workspace: string) {
@@ -158,27 +186,52 @@ function ensureSingleMeetingDirs(workspace: string, meetingId: string) {
     root,
     outputs,
     relRoot: `meeting-notes/${safeId}`,
-    outputRel: (fileName: string) => `meeting-notes/${safeId}/outputs/${fileName}`,
+    outputRel: (fileName: string) =>
+      `meeting-notes/${safeId}/outputs/${fileName}`,
   };
 }
 
-function writeMeetingRecord(workspace: string, recordsRoot: string, records: any[], record: any) {
+function writeMeetingRecord(
+  workspace: string,
+  recordsRoot: string,
+  records: any[],
+  record: any
+) {
   if (record?.metaPath) {
-    try { writeFileSync(path.join(workspace, record.metaPath), JSON.stringify(record, null, 2), "utf8"); } catch {}
+    try {
+      writeFileSync(
+        path.join(workspace, record.metaPath),
+        JSON.stringify(record, null, 2),
+        "utf8"
+      );
+    } catch {}
   }
-  writeMeetingIndex(recordsRoot, [record, ...records.filter((item) => item?.id !== record?.id)]);
+  writeMeetingIndex(recordsRoot, [
+    record,
+    ...records.filter(item => item?.id !== record?.id),
+  ]);
 }
 
 function meetingRecordForResponse(record: any, adoptId: string) {
   return {
     ...record,
-    audioUrl: record.audioPath ? `/api/claw/workspace/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(record.audioPath)}` : "",
-    transcriptUrl: record.transcriptPath ? `/api/claw/workspace/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(record.transcriptPath)}` : "",
-    summaryUrl: record.summaryPath ? `/api/claw/workspace/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(record.summaryPath)}` : "",
-    followups: Array.isArray(record.followups) ? record.followups.map((followup: any) => ({
-      ...followup,
-      outputUrl: followup.outputPath ? `/api/claw/workspace/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(followup.outputPath)}` : "",
-    })) : [],
+    audioUrl: record.audioPath
+      ? `/api/claw/workspace/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(record.audioPath)}`
+      : "",
+    transcriptUrl: record.transcriptPath
+      ? `/api/claw/workspace/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(record.transcriptPath)}`
+      : "",
+    summaryUrl: record.summaryPath
+      ? `/api/claw/workspace/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(record.summaryPath)}`
+      : "",
+    followups: Array.isArray(record.followups)
+      ? record.followups.map((followup: any) => ({
+          ...followup,
+          outputUrl: followup.outputPath
+            ? `/api/claw/workspace/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(followup.outputPath)}`
+            : "",
+        }))
+      : [],
   };
 }
 
@@ -195,7 +248,11 @@ function readMeetingIndex(root: string): any[] {
 
 function writeMeetingIndex(root: string, records: any[]) {
   mkdirSync(root, { recursive: true });
-  writeFileSync(path.join(root, "index.json"), JSON.stringify(records.slice(0, 100), null, 2), "utf8");
+  writeFileSync(
+    path.join(root, "index.json"),
+    JSON.stringify(records.slice(0, 100), null, 2),
+    "utf8"
+  );
 }
 
 function readRawBody(req: express.Request, maxBytes: number): Promise<Buffer> {
@@ -216,10 +273,16 @@ function readRawBody(req: express.Request, maxBytes: number): Promise<Buffer> {
   });
 }
 
-function xfyunOstHeaders(args: { url: string; method: "POST"; body: Buffer; contentType: string }) {
+function xfyunOstHeaders(args: {
+  url: string;
+  method: "POST";
+  body: Buffer;
+  contentType: string;
+}) {
   const apiKey = process.env.XFYUN_API_KEY || "";
   const apiSecret = process.env.XFYUN_API_SECRET || "";
-  if (!apiKey || !apiSecret) throw new Error("讯飞极速语音转写未配置 APIKey/APISecret");
+  if (!apiKey || !apiSecret)
+    throw new Error("讯飞极速语音转写未配置 APIKey/APISecret");
   const u = new URL(args.url);
   const host = u.host;
   const date = new Date().toUTCString();
@@ -230,7 +293,10 @@ function xfyunOstHeaders(args: { url: string; method: "POST"; body: Buffer; cont
     `${args.method} ${u.pathname} HTTP/1.1`,
     `digest: ${digest}`,
   ].join("\n");
-  const signature = crypto.createHmac("sha256", apiSecret).update(signOrigin).digest("base64");
+  const signature = crypto
+    .createHmac("sha256", apiSecret)
+    .update(signOrigin)
+    .digest("base64");
   const authorization = `api_key="${apiKey}", algorithm="hmac-sha256", headers="host date request-line digest", signature="${signature}"`;
   return {
     host,
@@ -242,22 +308,48 @@ function xfyunOstHeaders(args: { url: string; method: "POST"; body: Buffer; cont
   };
 }
 
-function multipartBody(parts: Array<{ name: string; value?: string; fileName?: string; contentType?: string; data?: Buffer }>) {
+function multipartBody(
+  parts: Array<{
+    name: string;
+    value?: string;
+    fileName?: string;
+    contentType?: string;
+    data?: Buffer;
+  }>
+) {
   const boundary = `----linggan-${crypto.randomUUID().replace(/-/g, "")}`;
   const chunks: Buffer[] = [];
   for (const part of parts) {
     chunks.push(Buffer.from(`--${boundary}\r\n`, "utf8"));
     if (part.data) {
-      chunks.push(Buffer.from(`Content-Disposition: form-data; name="${part.name}"; filename="${part.fileName || "audio.pcm"}"\r\n`, "utf8"));
-      chunks.push(Buffer.from(`Content-Type: ${part.contentType || "application/octet-stream"}\r\n\r\n`, "utf8"));
+      chunks.push(
+        Buffer.from(
+          `Content-Disposition: form-data; name="${part.name}"; filename="${part.fileName || "audio.pcm"}"\r\n`,
+          "utf8"
+        )
+      );
+      chunks.push(
+        Buffer.from(
+          `Content-Type: ${part.contentType || "application/octet-stream"}\r\n\r\n`,
+          "utf8"
+        )
+      );
       chunks.push(part.data);
       chunks.push(Buffer.from("\r\n", "utf8"));
     } else {
-      chunks.push(Buffer.from(`Content-Disposition: form-data; name="${part.name}"\r\n\r\n${part.value || ""}\r\n`, "utf8"));
+      chunks.push(
+        Buffer.from(
+          `Content-Disposition: form-data; name="${part.name}"\r\n\r\n${part.value || ""}\r\n`,
+          "utf8"
+        )
+      );
     }
   }
   chunks.push(Buffer.from(`--${boundary}--\r\n`, "utf8"));
-  return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
+  return {
+    body: Buffer.concat(chunks),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
 }
 
 function humanizeOstError(data: any, fallback: string) {
@@ -277,12 +369,24 @@ async function xfyunOstPost(url: string, body: Buffer, contentType: string) {
   const resp = await fetch(url, { method: "POST", headers, body: body as any });
   const text = await resp.text();
   let data: any = null;
-  try { data = JSON.parse(text); } catch {}
+  try {
+    data = JSON.parse(text);
+  } catch {}
   if (!resp.ok) {
-    throw new Error(humanizeOstError(data, `讯飞极速转写 HTTP ${resp.status}: ${text.slice(0, 300)}`));
+    throw new Error(
+      humanizeOstError(
+        data,
+        `讯飞极速转写 HTTP ${resp.status}: ${text.slice(0, 300)}`
+      )
+    );
   }
   if (!data || Number(data.code) !== 0) {
-    throw new Error(humanizeOstError(data, `讯飞极速转写失败: ${data?.message || text.slice(0, 300)}`));
+    throw new Error(
+      humanizeOstError(
+        data,
+        `讯飞极速转写失败: ${data?.message || text.slice(0, 300)}`
+      )
+    );
   }
   return data;
 }
@@ -307,7 +411,11 @@ function extractOstTranscript(result: any) {
   return parts.join("").trim();
 }
 
-async function transcribeWithXfyunOst(pcmPath: string, meetingId: string, durationSec: number) {
+export async function transcribeWithXfyunOst(
+  pcmPath: string,
+  meetingId: string,
+  durationSec: number
+) {
   const appId = process.env.XFYUN_APPID || "";
   if (!appId) throw new Error("讯飞极速语音转写未配置 AppID");
   const requestId = safeMeetingName(meetingId);
@@ -315,46 +423,70 @@ async function transcribeWithXfyunOst(pcmPath: string, meetingId: string, durati
   const upload = multipartBody([
     { name: "app_id", value: appId },
     { name: "request_id", value: requestId },
-    { name: "data", fileName: `${requestId}.pcm`, contentType: "application/octet-stream", data: pcm },
+    {
+      name: "data",
+      fileName: `${requestId}.pcm`,
+      contentType: "application/octet-stream",
+      data: pcm,
+    },
   ]);
-  const uploaded = await xfyunOstPost("https://upload-ost-api.xfyun.cn/file/upload", upload.body, upload.contentType);
+  const uploaded = await xfyunOstPost(
+    "https://upload-ost-api.xfyun.cn/file/upload",
+    upload.body,
+    upload.contentType
+  );
   const audioUrl = uploaded?.data?.url;
   if (!audioUrl) throw new Error("讯飞极速转写上传成功但未返回 audio_url");
 
-  const createPayload = Buffer.from(JSON.stringify({
-    common: { app_id: appId },
-    business: {
-      request_id: requestId,
-      language: "zh_cn",
-      domain: "pro_ost_ed",
-      accent: "mandarin",
-      postproc_on: 1,
-      smoothproc: true,
-      colloqproc: true,
-      language_type: 1,
-      ...(durationSec > 0 ? { duration: durationSec } : {}),
-    },
-    data: {
-      audio_url: audioUrl,
-      audio_src: "http",
-      audio_size: pcm.length,
-      format: "audio/L16;rate=16000",
-      encoding: "raw",
-    },
-  }), "utf8");
-  const created = await xfyunOstPost("https://ost-api.xfyun.cn/v2/ost/pro_create", createPayload, "application/json");
+  const createPayload = Buffer.from(
+    JSON.stringify({
+      common: { app_id: appId },
+      business: {
+        request_id: requestId,
+        language: "zh_cn",
+        domain: "pro_ost_ed",
+        accent: "mandarin",
+        postproc_on: 1,
+        smoothproc: true,
+        colloqproc: true,
+        language_type: 1,
+        ...(durationSec > 0 ? { duration: durationSec } : {}),
+      },
+      data: {
+        audio_url: audioUrl,
+        audio_src: "http",
+        audio_size: pcm.length,
+        format: "audio/L16;rate=16000",
+        encoding: "raw",
+      },
+    }),
+    "utf8"
+  );
+  const created = await xfyunOstPost(
+    "https://ost-api.xfyun.cn/v2/ost/pro_create",
+    createPayload,
+    "application/json"
+  );
   const taskId = created?.data?.task_id;
   if (!taskId) throw new Error("讯飞极速转写创建任务成功但未返回 task_id");
 
-  const deadline = Date.now() + Number(process.env.XFYUN_OST_POLL_TIMEOUT_MS || 180_000);
+  const deadline =
+    Date.now() + Number(process.env.XFYUN_OST_POLL_TIMEOUT_MS || 180_000);
   let lastMessage = "";
   while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 4000));
-    const queryPayload = Buffer.from(JSON.stringify({
-      common: { app_id: appId },
-      business: { task_id: taskId },
-    }), "utf8");
-    const queried = await xfyunOstPost("https://ost-api.xfyun.cn/v2/ost/query", queryPayload, "application/json");
+    await new Promise(resolve => setTimeout(resolve, 4000));
+    const queryPayload = Buffer.from(
+      JSON.stringify({
+        common: { app_id: appId },
+        business: { task_id: taskId },
+      }),
+      "utf8"
+    );
+    const queried = await xfyunOstPost(
+      "https://ost-api.xfyun.cn/v2/ost/query",
+      queryPayload,
+      "application/json"
+    );
     const status = String(queried?.data?.task_status || "");
     lastMessage = queried?.message || status;
     if (status === "3" || status === "4") {
@@ -366,7 +498,7 @@ async function transcribeWithXfyunOst(pcmPath: string, meetingId: string, durati
   throw new Error(`讯飞极速转写超时: ${lastMessage || taskId}`);
 }
 
-async function summarizeMeetingWithOpenClaw(args: {
+export async function summarizeMeetingWithOpenClaw(args: {
   claw: any;
   adoptId: string;
   runtimeAgentId: string;
@@ -382,7 +514,9 @@ async function summarizeMeetingWithOpenClaw(args: {
     channel: "meeting",
     conversationId: args.meetingId,
   });
-  const template = meetingTypeConfig[normalizeMeetingType(args.meetingType)] || meetingTypeConfig.general;
+  const template =
+    meetingTypeConfig[normalizeMeetingType(args.meetingType)] ||
+    meetingTypeConfig.general;
   const prompt = [
     "请基于以下会议转写生成一份企业会议纪要。",
     "",
@@ -413,53 +547,64 @@ async function summarizeMeetingWithOpenClaw(args: {
   const rawProfile = String(args.claw?.permissionProfile || "starter");
   const permissionProfile: PermissionProfile =
     rawProfile === "plus" || rawProfile === "internal" ? rawProfile : "starter";
-  const body = Buffer.from(JSON.stringify(buildChatRequestBody({
-    message: prompt,
-    permissionProfile,
-    brandSystemPrompt: "你是企业会议纪要助手，负责把会议转写整理成准确、可执行的纪要。",
-  })), "utf8");
+  const body = Buffer.from(
+    JSON.stringify(
+      buildChatRequestBody({
+        message: prompt,
+        permissionProfile,
+        brandSystemPrompt:
+          "你是企业会议纪要助手，负责把会议转写整理成准确、可执行的纪要。",
+      })
+    ),
+    "utf8"
+  );
 
   const httpMod = await import("http");
   return await new Promise<string>((resolve, reject) => {
-    const req = httpMod.request({
-      hostname: remoteHost,
-      port: gatewayPort,
-      path: "/v1/chat/completions",
-      method: "POST",
-      timeout: 0,
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": body.length,
-        "Authorization": `Bearer ${gatewayToken}`,
-        "x-openclaw-agent-id": args.runtimeAgentId,
-        "x-openclaw-session-key": sessionKey,
+    const req = httpMod.request(
+      {
+        hostname: remoteHost,
+        port: gatewayPort,
+        path: "/v1/chat/completions",
+        method: "POST",
+        timeout: 0,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": body.length,
+          Authorization: `Bearer ${gatewayToken}`,
+          "x-openclaw-agent-id": args.runtimeAgentId,
+          "x-openclaw-session-key": sessionKey,
+        },
       },
-    }, (res) => {
-      let buffer = "";
-      let out = "";
-      res.on("data", (chunk: Buffer) => {
-        buffer += chunk.toString("utf8");
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (!data || data === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(data);
-            const delta = parsed?.choices?.[0]?.delta?.content || "";
-            if (delta) out += delta;
-          } catch {}
-        }
-      });
-      res.on("end", () => {
-        const text = out.trim();
-        if (!text) reject(new Error("OpenClaw 会议纪要生成结果为空"));
-        else resolve(text);
-      });
-    });
+      res => {
+        let buffer = "";
+        let out = "";
+        res.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString("utf8");
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            if (!data || data === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed?.choices?.[0]?.delta?.content || "";
+              if (delta) out += delta;
+            } catch {}
+          }
+        });
+        res.on("end", () => {
+          const text = out.trim();
+          if (!text) reject(new Error("OpenClaw 会议纪要生成结果为空"));
+          else resolve(text);
+        });
+      }
+    );
     req.on("error", reject);
-    req.setTimeout(180_000, () => req.destroy(new Error("OpenClaw 会议纪要生成超时")));
+    req.setTimeout(180_000, () =>
+      req.destroy(new Error("OpenClaw 会议纪要生成超时"))
+    );
     req.write(body);
     req.end();
   });
@@ -505,51 +650,60 @@ async function askMeetingWithOpenClaw(args: {
   const rawProfile = String(args.claw?.permissionProfile || "starter");
   const permissionProfile: PermissionProfile =
     rawProfile === "plus" || rawProfile === "internal" ? rawProfile : "starter";
-  const body = Buffer.from(JSON.stringify(buildChatRequestBody({
-    message: prompt,
-    permissionProfile,
-    brandSystemPrompt: "你是企业会议后续处理助手，负责把单次会议内容加工成可执行、可复制、可落地的办公材料。",
-  })), "utf8");
+  const body = Buffer.from(
+    JSON.stringify(
+      buildChatRequestBody({
+        message: prompt,
+        permissionProfile,
+        brandSystemPrompt:
+          "你是企业会议后续处理助手，负责把单次会议内容加工成可执行、可复制、可落地的办公材料。",
+      })
+    ),
+    "utf8"
+  );
 
   const httpMod = await import("http");
   return await new Promise<string>((resolve, reject) => {
-    const req = httpMod.request({
-      hostname: remoteHost,
-      port: gatewayPort,
-      path: "/v1/chat/completions",
-      method: "POST",
-      timeout: 0,
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": body.length,
-        "Authorization": `Bearer ${gatewayToken}`,
-        "x-openclaw-agent-id": args.runtimeAgentId,
-        "x-openclaw-session-key": sessionKey,
+    const req = httpMod.request(
+      {
+        hostname: remoteHost,
+        port: gatewayPort,
+        path: "/v1/chat/completions",
+        method: "POST",
+        timeout: 0,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": body.length,
+          Authorization: `Bearer ${gatewayToken}`,
+          "x-openclaw-agent-id": args.runtimeAgentId,
+          "x-openclaw-session-key": sessionKey,
+        },
       },
-    }, (res) => {
-      let buffer = "";
-      let out = "";
-      res.on("data", (chunk: Buffer) => {
-        buffer += chunk.toString("utf8");
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (!data || data === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(data);
-            const delta = parsed?.choices?.[0]?.delta?.content || "";
-            if (delta) out += delta;
-          } catch {}
-        }
-      });
-      res.on("end", () => {
-        const text = out.trim();
-        if (!text) reject(new Error("会议后续处理结果为空"));
-        else resolve(text);
-      });
-    });
+      res => {
+        let buffer = "";
+        let out = "";
+        res.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString("utf8");
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            if (!data || data === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed?.choices?.[0]?.delta?.content || "";
+              if (delta) out += delta;
+            } catch {}
+          }
+        });
+        res.on("end", () => {
+          const text = out.trim();
+          if (!text) reject(new Error("会议后续处理结果为空"));
+          else resolve(text);
+        });
+      }
+    );
     req.on("error", reject);
     req.setTimeout(180_000, () => req.destroy(new Error("会议后续处理超时")));
     req.write(body);
@@ -565,8 +719,14 @@ export function registerVoiceRoutes(app: express.Express) {
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("end", async () => {
         const audioBuffer = Buffer.concat(chunks);
-        if (audioBuffer.length === 0) { res.status(400).json({ error: "No audio data" }); return; }
-        if (audioBuffer.length > 10 * 1024 * 1024) { res.status(413).json({ error: "Audio too large" }); return; }
+        if (audioBuffer.length === 0) {
+          res.status(400).json({ error: "No audio data" });
+          return;
+        }
+        if (audioBuffer.length > 10 * 1024 * 1024) {
+          res.status(413).json({ error: "Audio too large" });
+          return;
+        }
 
         const appId = process.env.XFYUN_APPID || "";
         const apiSecret = process.env.XFYUN_API_SECRET || "";
@@ -583,14 +743,23 @@ export function registerVoiceRoutes(app: express.Express) {
         const tmpOut = `/tmp/voice_${Date.now()}.pcm`;
         writeFileSync(tmpIn, audioBuffer);
         try {
-          execSync(`ffmpeg -y -i ${tmpIn} -ar 16000 -ac 1 -f s16le ${tmpOut} 2>/dev/null`);
+          execSync(
+            `ffmpeg -y -i ${tmpIn} -ar 16000 -ac 1 -f s16le ${tmpOut} 2>/dev/null`
+          );
         } catch (e) {
-          try { unlinkSync(tmpIn); } catch {}
-          res.status(400).json({ error: "音频格式转换失败，请确认 ffmpeg 已安装" });
+          try {
+            unlinkSync(tmpIn);
+          } catch {}
+          res
+            .status(400)
+            .json({ error: "音频格式转换失败，请确认 ffmpeg 已安装" });
           return;
         }
         const pcmBuffer = readFileSync(tmpOut);
-        try { unlinkSync(tmpIn); unlinkSync(tmpOut); } catch {}
+        try {
+          unlinkSync(tmpIn);
+          unlinkSync(tmpOut);
+        } catch {}
 
         // 2) 构建讯飞签名 URL
         const crypto = await import("crypto");
@@ -621,23 +790,58 @@ export function registerVoiceRoutes(app: express.Express) {
             sendTimer = setInterval(() => {
               if (offset >= pcmBuffer.length) {
                 // 最后一帧
-                const lastFrame = offset < pcmBuffer.length ? pcmBuffer.subarray(offset) : Buffer.alloc(0);
-                ws.send(JSON.stringify({
-                  common: frameIdx === 0 ? { app_id: appId } : undefined,
-                  business: frameIdx === 0 ? { language: "zh_cn", domain: "iat", accent: "mandarin", vad_eos: 3000, dwa: "wpgs" } : undefined,
-                  data: { status: 2, format: "audio/L16;rate=16000", encoding: "raw", audio: lastFrame.toString("base64") },
-                }));
+                const lastFrame =
+                  offset < pcmBuffer.length
+                    ? pcmBuffer.subarray(offset)
+                    : Buffer.alloc(0);
+                ws.send(
+                  JSON.stringify({
+                    common: frameIdx === 0 ? { app_id: appId } : undefined,
+                    business:
+                      frameIdx === 0
+                        ? {
+                            language: "zh_cn",
+                            domain: "iat",
+                            accent: "mandarin",
+                            vad_eos: 3000,
+                            dwa: "wpgs",
+                          }
+                        : undefined,
+                    data: {
+                      status: 2,
+                      format: "audio/L16;rate=16000",
+                      encoding: "raw",
+                      audio: lastFrame.toString("base64"),
+                    },
+                  })
+                );
                 clearInterval(sendTimer);
                 return;
               }
               const end = Math.min(offset + FRAME, pcmBuffer.length);
               const frame = pcmBuffer.subarray(offset, end);
               const status = frameIdx === 0 ? 0 : 1;
-              ws.send(JSON.stringify({
-                common: frameIdx === 0 ? { app_id: appId } : undefined,
-                business: frameIdx === 0 ? { language: "zh_cn", domain: "iat", accent: "mandarin", vad_eos: 3000, dwa: "wpgs" } : undefined,
-                data: { status, format: "audio/L16;rate=16000", encoding: "raw", audio: frame.toString("base64") },
-              }));
+              ws.send(
+                JSON.stringify({
+                  common: frameIdx === 0 ? { app_id: appId } : undefined,
+                  business:
+                    frameIdx === 0
+                      ? {
+                          language: "zh_cn",
+                          domain: "iat",
+                          accent: "mandarin",
+                          vad_eos: 3000,
+                          dwa: "wpgs",
+                        }
+                      : undefined,
+                  data: {
+                    status,
+                    format: "audio/L16;rate=16000",
+                    encoding: "raw",
+                    audio: frame.toString("base64"),
+                  },
+                })
+              );
               offset = end;
               frameIdx++;
             }, 40);
@@ -654,7 +858,7 @@ export function registerVoiceRoutes(app: express.Express) {
               }
               const wsArr = msg.data?.result?.ws || [];
               for (const w of wsArr) {
-                for (const cw of (w.cw || [])) {
+                for (const cw of w.cw || []) {
                   textParts.push(cw.w || "");
                 }
               }
@@ -675,7 +879,12 @@ export function registerVoiceRoutes(app: express.Express) {
           });
 
           // 超时保护
-          setTimeout(() => { try { ws.close(); } catch {} resolve(); }, 30000);
+          setTimeout(() => {
+            try {
+              ws.close();
+            } catch {}
+            resolve();
+          }, 30000);
         });
 
         const text = textParts.join("").trim();
@@ -687,41 +896,45 @@ export function registerVoiceRoutes(app: express.Express) {
     }
   });
 
-    // -- 文字转语音（讯飞超拟人语音合成）--
+  // -- 文字转语音（讯飞超拟人语音合成）--
   app.post("/api/claw/voice/tts", async (req, res) => {
     try {
-        let text = String((req.body as any)?.text || "").trim();
-        if (!text) { res.status(400).json({ error: "No text" }); return; }
-        if (text.length > 2000) text = text.slice(0, 2000);
+      let text = String((req.body as any)?.text || "").trim();
+      if (!text) {
+        res.status(400).json({ error: "No text" });
+        return;
+      }
+      if (text.length > 2000) text = text.slice(0, 2000);
 
-        const appId = process.env.XFYUN_APPID || "";
-        const apiSecret = process.env.XFYUN_API_SECRET || "";
-        const apiKey = process.env.XFYUN_API_KEY || "";
-        if (!appId || !apiSecret || !apiKey) {
-          res.status(503).json({ error: "TTS service not configured" });
-          return;
-        }
+      const appId = process.env.XFYUN_APPID || "";
+      const apiSecret = process.env.XFYUN_API_SECRET || "";
+      const apiKey = process.env.XFYUN_API_KEY || "";
+      if (!appId || !apiSecret || !apiKey) {
+        res.status(503).json({ error: "TTS service not configured" });
+        return;
+      }
 
-        const crypto = await import("crypto");
-        const host = "cbm01.cn-huabei-1.xf-yun.com";
-        const wsPath = "/v1/private/mcd9m97e6";
-        const date = new Date().toUTCString();
-        const signOrigin = `host: ${host}\ndate: ${date}\nGET ${wsPath} HTTP/1.1`;
-        const hmac = crypto.createHmac("sha256", apiSecret);
-        hmac.update(signOrigin);
-        const sha = hmac.digest("base64");
-        const authOrigin = `api_key="${apiKey}", algorithm="hmac-sha256", headers="host date request-line", signature="${sha}"`;
-        const authorization = Buffer.from(authOrigin).toString("base64");
-        const wsUrl = `wss://${host}${wsPath}?authorization=${authorization}&date=${encodeURIComponent(date)}&host=${host}`;
+      const crypto = await import("crypto");
+      const host = "cbm01.cn-huabei-1.xf-yun.com";
+      const wsPath = "/v1/private/mcd9m97e6";
+      const date = new Date().toUTCString();
+      const signOrigin = `host: ${host}\ndate: ${date}\nGET ${wsPath} HTTP/1.1`;
+      const hmac = crypto.createHmac("sha256", apiSecret);
+      hmac.update(signOrigin);
+      const sha = hmac.digest("base64");
+      const authOrigin = `api_key="${apiKey}", algorithm="hmac-sha256", headers="host date request-line", signature="${sha}"`;
+      const authorization = Buffer.from(authOrigin).toString("base64");
+      const wsUrl = `wss://${host}${wsPath}?authorization=${authorization}&date=${encodeURIComponent(date)}&host=${host}`;
 
-        const { WebSocket: WS } = await import("ws");
-        const audioParts: Buffer[] = [];
+      const { WebSocket: WS } = await import("ws");
+      const audioParts: Buffer[] = [];
 
-        await new Promise<void>((resolve, reject) => {
-          const ws = new WS(wsUrl);
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WS(wsUrl);
 
-          ws.on("open", () => {
-            ws.send(JSON.stringify({
+        ws.on("open", () => {
+          ws.send(
+            JSON.stringify({
               header: { app_id: appId, status: 2 },
               parameter: {
                 oral: { oral_level: "mid" },
@@ -753,39 +966,56 @@ export function registerVoiceRoutes(app: express.Express) {
                   text: Buffer.from(text, "utf8").toString("base64"),
                 },
               },
-            }));
-          });
-
-          ws.on("message", (raw: any) => {
-            try {
-              const msg = JSON.parse(String(raw));
-              const code = msg.header?.code ?? msg.code;
-              if (code !== undefined && code !== 0) {
-                console.error("[tts] xfyun error:", code, msg.header?.message || msg.message);
-                ws.close();
-                reject(new Error(msg.header?.message || msg.message || "TTS error " + code));
-                return;
-              }
-              const audioData = msg.payload?.audio?.audio || msg.data?.audio;
-              if (audioData) {
-                audioParts.push(Buffer.from(audioData, "base64"));
-              }
-              const status = msg.header?.status ?? msg.payload?.audio?.status ?? msg.data?.status;
-              if (status === 2) {
-                ws.close();
-                resolve();
-              }
-            } catch {}
-          });
-
-          ws.on("error", (err: any) => reject(err));
-          setTimeout(() => { try { ws.close(); } catch {} resolve(); }, 30000);
+            })
+          );
         });
 
-        const audioBuffer = Buffer.concat(audioParts);
-        res.setHeader("Content-Type", "audio/mpeg");
-        res.setHeader("Content-Length", audioBuffer.length);
-        res.send(audioBuffer);
+        ws.on("message", (raw: any) => {
+          try {
+            const msg = JSON.parse(String(raw));
+            const code = msg.header?.code ?? msg.code;
+            if (code !== undefined && code !== 0) {
+              console.error(
+                "[tts] xfyun error:",
+                code,
+                msg.header?.message || msg.message
+              );
+              ws.close();
+              reject(
+                new Error(
+                  msg.header?.message || msg.message || "TTS error " + code
+                )
+              );
+              return;
+            }
+            const audioData = msg.payload?.audio?.audio || msg.data?.audio;
+            if (audioData) {
+              audioParts.push(Buffer.from(audioData, "base64"));
+            }
+            const status =
+              msg.header?.status ??
+              msg.payload?.audio?.status ??
+              msg.data?.status;
+            if (status === 2) {
+              ws.close();
+              resolve();
+            }
+          } catch {}
+        });
+
+        ws.on("error", (err: any) => reject(err));
+        setTimeout(() => {
+          try {
+            ws.close();
+          } catch {}
+          resolve();
+        }, 30000);
+      });
+
+      const audioBuffer = Buffer.concat(audioParts);
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Content-Length", audioBuffer.length);
+      res.send(audioBuffer);
     } catch (err: any) {
       console.error("[tts] error:", err);
       res.status(500).json({ error: err.message || "TTS error" });
@@ -802,7 +1032,9 @@ export function registerVoiceRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       const dirs = ensureMeetingDirs(resolveRuntimeWorkspace(claw, adoptId));
-      const records = readMeetingIndex(dirs.root).map((record) => meetingRecordForResponse(record, adoptId));
+      const records = readMeetingIndex(dirs.root).map(record =>
+        meetingRecordForResponse(record, adoptId)
+      );
       res.json({ records });
     } catch (err: any) {
       console.error("[meeting-notes] list error:", err);
@@ -812,7 +1044,9 @@ export function registerVoiceRoutes(app: express.Express) {
 
   app.post("/api/claw/meeting-notes/process", async (req, res) => {
     try {
-      const adoptId = String(req.query.adoptId || req.headers["x-adopt-id"] || "").trim();
+      const adoptId = String(
+        req.query.adoptId || req.headers["x-adopt-id"] || ""
+      ).trim();
       if (!adoptId) {
         res.status(400).json({ error: "adoptId required" });
         return;
@@ -820,33 +1054,57 @@ export function registerVoiceRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      const audioBuffer = await readRawBody(req, Number(process.env.MEETING_NOTES_MAX_AUDIO_BYTES || 200 * 1024 * 1024));
+      const audioBuffer = await readRawBody(
+        req,
+        Number(process.env.MEETING_NOTES_MAX_AUDIO_BYTES || 200 * 1024 * 1024)
+      );
       if (audioBuffer.length < 100) {
         res.status(400).json({ error: "audio required" });
         return;
       }
 
       const workspace = resolveRuntimeWorkspace(claw, adoptId);
-      const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
+      const runtimeAgentId = resolveRuntimeAgentId(
+        adoptId,
+        String((claw as any).agentId || "")
+      );
       const dirs = ensureMeetingDirs(workspace);
-      const meetingId = safeMeetingName(String(req.query.meetingId || crypto.randomUUID()));
+      const meetingId = safeMeetingName(
+        String(req.query.meetingId || crypto.randomUUID())
+      );
       const meetingDirs = ensureSingleMeetingDirs(workspace, meetingId);
       const createdAt = new Date().toISOString();
-      const durationSec = Math.max(0, Math.round(Number(req.headers["x-meeting-duration"] || req.query.duration || 0) || 0));
-      const meetingType = normalizeMeetingType(String(req.query.meetingType || req.headers["x-meeting-type"] || "general"));
-      const meetingTypeLabel = meetingTypeConfig[meetingType]?.label || meetingTypeConfig.general.label;
-      const contentType = String(req.headers["content-type"] || "audio/webm").toLowerCase();
-      const audioExt = contentType.includes("mpeg") || contentType.includes("mp3")
-        ? "mp3"
-        : contentType.includes("mp4") || contentType.includes("m4a")
-          ? "m4a"
-          : contentType.includes("aac")
-            ? "aac"
-            : contentType.includes("wav")
-              ? "wav"
-              : contentType.includes("ogg")
-                ? "ogg"
-                : "webm";
+      const durationSec = Math.max(
+        0,
+        Math.round(
+          Number(
+            req.headers["x-meeting-duration"] || req.query.duration || 0
+          ) || 0
+        )
+      );
+      const meetingType = normalizeMeetingType(
+        String(
+          req.query.meetingType || req.headers["x-meeting-type"] || "general"
+        )
+      );
+      const meetingTypeLabel =
+        meetingTypeConfig[meetingType]?.label ||
+        meetingTypeConfig.general.label;
+      const contentType = String(
+        req.headers["content-type"] || "audio/webm"
+      ).toLowerCase();
+      const audioExt =
+        contentType.includes("mpeg") || contentType.includes("mp3")
+          ? "mp3"
+          : contentType.includes("mp4") || contentType.includes("m4a")
+            ? "m4a"
+            : contentType.includes("aac")
+              ? "aac"
+              : contentType.includes("wav")
+                ? "wav"
+                : contentType.includes("ogg")
+                  ? "ogg"
+                  : "webm";
       const audioRel = `${meetingDirs.relRoot}/audio.${audioExt}`;
       const pcmRel = `${meetingDirs.relRoot}/audio.pcm`;
       const transcriptRel = `${meetingDirs.relRoot}/transcript.md`;
@@ -860,27 +1118,45 @@ export function registerVoiceRoutes(app: express.Express) {
       writeFileSync(audioPath, audioBuffer);
 
       try {
-        execFileSync("ffmpeg", [
-          "-y",
-          "-i", audioPath,
-          "-ar", "16000",
-          "-ac", "1",
-          "-f", "s16le",
-          pcmPath,
-        ], { timeout: 180_000, stdio: "ignore" });
+        execFileSync(
+          "ffmpeg",
+          [
+            "-y",
+            "-i",
+            audioPath,
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-f",
+            "s16le",
+            pcmPath,
+          ],
+          { timeout: 180_000, stdio: "ignore" }
+        );
       } catch {
-        res.status(400).json({ error: "音频格式转换失败，请确认录音文件可被 ffmpeg 解析" });
+        res
+          .status(400)
+          .json({ error: "音频格式转换失败，请确认录音文件可被 ffmpeg 解析" });
         return;
       }
 
       const pcmBytes = statSync(pcmPath).size;
       const actualDurationSec = pcmBytes / (16000 * 2);
       if (actualDurationSec < 5) {
-        res.status(400).json({ error: "录音太短或没有有效语音，请至少录制 5 秒后再生成会议纪要。" });
+        res
+          .status(400)
+          .json({
+            error: "录音太短或没有有效语音，请至少录制 5 秒后再生成会议纪要。",
+          });
         return;
       }
 
-      const { transcript, taskId } = await transcribeWithXfyunOst(pcmPath, meetingId, durationSec);
+      const { transcript, taskId } = await transcribeWithXfyunOst(
+        pcmPath,
+        meetingId,
+        durationSec
+      );
       const transcriptMd = [
         `# 会议转写 ${meetingId}`,
         "",
@@ -938,10 +1214,20 @@ export function registerVoiceRoutes(app: express.Express) {
         metaPath: metaRel,
         followups: [],
         asr: { provider: "xfyun-ost", taskId },
-        summarizer: { provider: "openclaw", sessionKey: buildRuntimeSessionKey({ runtimeAgentId, channel: "meeting", conversationId: meetingId }) },
+        summarizer: {
+          provider: "openclaw",
+          sessionKey: buildRuntimeSessionKey({
+            runtimeAgentId,
+            channel: "meeting",
+            conversationId: meetingId,
+          }),
+        },
       };
       writeFileSync(metaPath, JSON.stringify(record, null, 2), "utf8");
-      const nextIndex = [record, ...readMeetingIndex(dirs.root).filter((item) => item?.id !== meetingId)].slice(0, 100);
+      const nextIndex = [
+        record,
+        ...readMeetingIndex(dirs.root).filter(item => item?.id !== meetingId),
+      ].slice(0, 100);
       writeMeetingIndex(dirs.root, nextIndex);
 
       res.json({
@@ -956,15 +1242,23 @@ export function registerVoiceRoutes(app: express.Express) {
       console.error("[meeting-notes] process error:", err);
       const message = err?.message || "meeting notes process failed";
       const statusCode =
-        /有效语音|录音太短|audio required|audio too large|音频格式转换失败/.test(message) ? 400 : 500;
+        /有效语音|录音太短|audio required|audio too large|音频格式转换失败/.test(
+          message
+        )
+          ? 400
+          : 500;
       res.status(statusCode).json({ error: message });
     }
   });
 
   app.post("/api/claw/meeting-notes/ask", async (req, res) => {
     try {
-      const adoptId = String(req.query.adoptId || req.headers["x-adopt-id"] || "").trim();
-      const meetingId = safeMeetingName(String((req.body as any)?.meetingId || req.query.meetingId || ""));
+      const adoptId = String(
+        req.query.adoptId || req.headers["x-adopt-id"] || ""
+      ).trim();
+      const meetingId = safeMeetingName(
+        String((req.body as any)?.meetingId || req.query.meetingId || "")
+      );
       const question = String((req.body as any)?.question || "").trim();
       if (!adoptId) {
         res.status(400).json({ error: "adoptId required" });
@@ -988,12 +1282,15 @@ export function registerVoiceRoutes(app: express.Express) {
       const workspace = resolveRuntimeWorkspace(claw, adoptId);
       const dirs = ensureMeetingDirs(workspace);
       const records = readMeetingIndex(dirs.root);
-      const record = records.find((item) => item?.id === meetingId);
+      const record = records.find(item => item?.id === meetingId);
       if (!record) {
         res.status(404).json({ error: "会议纪要不存在" });
         return;
       }
-      const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
+      const runtimeAgentId = resolveRuntimeAgentId(
+        adoptId,
+        String((claw as any).agentId || "")
+      );
       const answer = await askMeetingWithOpenClaw({
         claw,
         runtimeAgentId,
@@ -1023,8 +1320,12 @@ export function registerVoiceRoutes(app: express.Express) {
       ].join("\n");
       writeFileSync(path.join(workspace, outputPath), outputMd, "utf8");
       (followup as any).outputPath = outputPath;
-      (followup as any).outputUrl = `/api/claw/workspace/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(outputPath)}`;
-      record.followups = [followup, ...(Array.isArray(record.followups) ? record.followups : [])].slice(0, 50);
+      (followup as any).outputUrl =
+        `/api/claw/workspace/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(outputPath)}`;
+      record.followups = [
+        followup,
+        ...(Array.isArray(record.followups) ? record.followups : []),
+      ].slice(0, 50);
       writeMeetingRecord(workspace, dirs.root, records, record);
       res.json({ followup });
     } catch (err: any) {
@@ -1035,12 +1336,18 @@ export function registerVoiceRoutes(app: express.Express) {
 
   app.post("/api/claw/meeting-notes/followup/rename", async (req, res) => {
     try {
-      const adoptId = String(req.query.adoptId || req.headers["x-adopt-id"] || "").trim();
-      const meetingId = safeMeetingName(String((req.body as any)?.meetingId || ""));
+      const adoptId = String(
+        req.query.adoptId || req.headers["x-adopt-id"] || ""
+      ).trim();
+      const meetingId = safeMeetingName(
+        String((req.body as any)?.meetingId || "")
+      );
       const followupId = String((req.body as any)?.followupId || "").trim();
       const nextName = safeFileStem(String((req.body as any)?.name || ""));
       if (!adoptId || !meetingId || !followupId || !nextName) {
-        res.status(400).json({ error: "adoptId/meetingId/followupId/name required" });
+        res
+          .status(400)
+          .json({ error: "adoptId/meetingId/followupId/name required" });
         return;
       }
       const claw = await requireClawOwner(req, res, adoptId);
@@ -1048,8 +1355,10 @@ export function registerVoiceRoutes(app: express.Express) {
       const workspace = resolveRuntimeWorkspace(claw, adoptId);
       const dirs = ensureMeetingDirs(workspace);
       const records = readMeetingIndex(dirs.root);
-      const record = records.find((item) => item?.id === meetingId);
-      const followups = Array.isArray(record?.followups) ? record.followups : [];
+      const record = records.find(item => item?.id === meetingId);
+      const followups = Array.isArray(record?.followups)
+        ? record.followups
+        : [];
       const followup = followups.find((item: any) => item?.id === followupId);
       if (!record || !followup) {
         res.status(404).json({ error: "派生结果不存在" });
@@ -1061,7 +1370,10 @@ export function registerVoiceRoutes(app: express.Express) {
       }
       const oldRel = String(followup.outputPath);
       const oldAbs = path.join(workspace, oldRel);
-      if (!oldRel.startsWith(`meeting-notes/${meetingId}/outputs/`) || !existsSync(oldAbs)) {
+      if (
+        !oldRel.startsWith(`meeting-notes/${meetingId}/outputs/`) ||
+        !existsSync(oldAbs)
+      ) {
         res.status(404).json({ error: "派生结果文件不存在" });
         return;
       }
@@ -1087,11 +1399,17 @@ export function registerVoiceRoutes(app: express.Express) {
 
   app.post("/api/claw/meeting-notes/followup/delete", async (req, res) => {
     try {
-      const adoptId = String(req.query.adoptId || req.headers["x-adopt-id"] || "").trim();
-      const meetingId = safeMeetingName(String((req.body as any)?.meetingId || ""));
+      const adoptId = String(
+        req.query.adoptId || req.headers["x-adopt-id"] || ""
+      ).trim();
+      const meetingId = safeMeetingName(
+        String((req.body as any)?.meetingId || "")
+      );
       const followupId = String((req.body as any)?.followupId || "").trim();
       if (!adoptId || !meetingId || !followupId) {
-        res.status(400).json({ error: "adoptId/meetingId/followupId required" });
+        res
+          .status(400)
+          .json({ error: "adoptId/meetingId/followupId required" });
         return;
       }
       const claw = await requireClawOwner(req, res, adoptId);
@@ -1099,20 +1417,31 @@ export function registerVoiceRoutes(app: express.Express) {
       const workspace = resolveRuntimeWorkspace(claw, adoptId);
       const dirs = ensureMeetingDirs(workspace);
       const records = readMeetingIndex(dirs.root);
-      const record = records.find((item) => item?.id === meetingId);
-      const followups = Array.isArray(record?.followups) ? record.followups : [];
+      const record = records.find(item => item?.id === meetingId);
+      const followups = Array.isArray(record?.followups)
+        ? record.followups
+        : [];
       const followup = followups.find((item: any) => item?.id === followupId);
       if (!record || !followup) {
         res.status(404).json({ error: "派生结果不存在" });
         return;
       }
-      if (followup.outputPath && String(followup.outputPath).startsWith(`meeting-notes/${meetingId}/outputs/`)) {
+      if (
+        followup.outputPath &&
+        String(followup.outputPath).startsWith(
+          `meeting-notes/${meetingId}/outputs/`
+        )
+      ) {
         try {
           const fs = await import("fs");
-          fs.rmSync(path.join(workspace, String(followup.outputPath)), { force: true });
+          fs.rmSync(path.join(workspace, String(followup.outputPath)), {
+            force: true,
+          });
         } catch {}
       }
-      record.followups = followups.filter((item: any) => item?.id !== followupId);
+      record.followups = followups.filter(
+        (item: any) => item?.id !== followupId
+      );
       writeMeetingRecord(workspace, dirs.root, records, record);
       res.json({ record: meetingRecordForResponse(record, adoptId) });
     } catch (err: any) {
@@ -1130,25 +1459,29 @@ export function registerVoiceRoutes(app: express.Express) {
       }
       const clipped = transcript.slice(0, 30000);
       const { llmText } = await import("./llm-provider");
-      const summary = await llmText([
-        {
-          role: "system",
-          content: "你是企业会议纪要助手。请根据会议转写生成结构清晰、可执行的中文会议纪要，不要编造转写中没有的信息。",
-        },
-        {
-          role: "user",
-          content: [
-            "请整理以下会议转写，输出 Markdown，包含：",
-            "1. 会议摘要",
-            "2. 关键决策",
-            "3. 待办事项（负责人/截止时间未知就写未明确）",
-            "4. 风险与待确认问题",
-            "",
-            "会议转写：",
-            clipped,
-          ].join("\n"),
-        },
-      ], { maxTokens: 1800, temperature: 0.2 });
+      const summary = await llmText(
+        [
+          {
+            role: "system",
+            content:
+              "你是企业会议纪要助手。请根据会议转写生成结构清晰、可执行的中文会议纪要，不要编造转写中没有的信息。",
+          },
+          {
+            role: "user",
+            content: [
+              "请整理以下会议转写，输出 Markdown，包含：",
+              "1. 会议摘要",
+              "2. 关键决策",
+              "3. 待办事项（负责人/截止时间未知就写未明确）",
+              "4. 风险与待确认问题",
+              "",
+              "会议转写：",
+              clipped,
+            ].join("\n"),
+          },
+        ],
+        { maxTokens: 1800, temperature: 0.2 }
+      );
       res.json({ summary: summary.trim() || "未能生成纪要。" });
     } catch (err: any) {
       console.error("[meeting-notes] summarize error:", err);
@@ -1165,17 +1498,36 @@ export function registerVoiceWsRoutes(server: Server) {
     if (url.pathname !== "/api/claw/voice/rtasr") return;
 
     try {
-      const fakeRes = { setHeader: () => {}, getHeader: () => undefined } as any;
-      const ctx = await createContext({ req: req as any, res: fakeRes, info: {} as any });
-      if (!ctx.user) { socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n"); socket.destroy(); return; }
+      const fakeRes = {
+        setHeader: () => {},
+        getHeader: () => undefined,
+      } as any;
+      const ctx = await createContext({
+        req: req as any,
+        res: fakeRes,
+        info: {} as any,
+      });
+      if (!ctx.user) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
 
       const adoptId = url.searchParams.get("adoptId") || "";
-      if (!adoptId) { socket.write("HTTP/1.1 400 Bad Request\r\n\r\n"); socket.destroy(); return; }
+      if (!adoptId) {
+        socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+        socket.destroy();
+        return;
+      }
       const { getClawByAdoptId } = await import("../db");
       const claw = await getClawByAdoptId(adoptId);
-      if (!claw || claw.userId !== ctx.user.id) { socket.write("HTTP/1.1 403 Forbidden\r\n\r\n"); socket.destroy(); return; }
+      if (!claw || claw.userId !== ctx.user.id) {
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        socket.destroy();
+        return;
+      }
 
-      wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.handleUpgrade(req, socket, head, ws => {
         wss.emit("connection", ws, req, { adoptId, userId: ctx.user!.id });
       });
     } catch (err) {
@@ -1185,96 +1537,120 @@ export function registerVoiceWsRoutes(server: Server) {
     }
   });
 
-  wss.on("connection", (client: WebSocket, _req: IncomingMessage, meta: { adoptId: string; userId: number }) => {
-    const appId = process.env.XFYUN_APPID || "";
-    const apiKey = process.env.XFYUN_API_KEY || "";
-    if (!appId || !apiKey) {
-      client.send(JSON.stringify({ type: "error", error: "讯飞实时转写未配置" }));
-      client.close();
-      return;
-    }
-
-    const upstream = new WebSocket(buildRtasrUrl(appId, apiKey));
-    let upstreamReady = false;
-    let ended = false;
-    let queue = Buffer.alloc(0);
-    let flushTimer: NodeJS.Timeout | null = null;
-    const FRAME_BYTES = 1280;
-
-    const sendClient = (payload: unknown) => {
-      if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(payload));
-    };
-    const cleanup = () => {
-      if (flushTimer) clearInterval(flushTimer);
-      flushTimer = null;
-      try { if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) upstream.close(); } catch {}
-      try { if (client.readyState === WebSocket.OPEN) client.close(); } catch {}
-    };
-    const flushFrame = () => {
-      if (!upstreamReady || upstream.readyState !== WebSocket.OPEN) return;
-      if (queue.length >= FRAME_BYTES) {
-        upstream.send(queue.subarray(0, FRAME_BYTES));
-        queue = queue.subarray(FRAME_BYTES);
+  wss.on(
+    "connection",
+    (
+      client: WebSocket,
+      _req: IncomingMessage,
+      meta: { adoptId: string; userId: number }
+    ) => {
+      const appId = process.env.XFYUN_APPID || "";
+      const apiKey = process.env.XFYUN_API_KEY || "";
+      if (!appId || !apiKey) {
+        client.send(
+          JSON.stringify({ type: "error", error: "讯飞实时转写未配置" })
+        );
+        client.close();
         return;
       }
-      if (ended) {
-        if (queue.length > 0) {
-          upstream.send(queue);
-          queue = Buffer.alloc(0);
-        }
-        upstream.send(Buffer.from(JSON.stringify({ end: true })));
+
+      const upstream = new WebSocket(buildRtasrUrl(appId, apiKey));
+      let upstreamReady = false;
+      let ended = false;
+      let queue = Buffer.alloc(0);
+      let flushTimer: NodeJS.Timeout | null = null;
+      const FRAME_BYTES = 1280;
+
+      const sendClient = (payload: unknown) => {
+        if (client.readyState === WebSocket.OPEN)
+          client.send(JSON.stringify(payload));
+      };
+      const cleanup = () => {
         if (flushTimer) clearInterval(flushTimer);
         flushTimer = null;
-      }
-    };
-
-    upstream.on("open", () => {
-      sendClient({ type: "connecting" });
-    });
-    upstream.on("message", (raw) => {
-      try {
-        const parsed = extractRtasrText(String(raw));
-        if (parsed.code && parsed.code !== "0") {
-          sendClient({ type: "error", error: humanizeRtasrError(parsed.code, parsed.desc || "") });
-          cleanup();
+        try {
+          if (
+            upstream.readyState === WebSocket.OPEN ||
+            upstream.readyState === WebSocket.CONNECTING
+          )
+            upstream.close();
+        } catch {}
+        try {
+          if (client.readyState === WebSocket.OPEN) client.close();
+        } catch {}
+      };
+      const flushFrame = () => {
+        if (!upstreamReady || upstream.readyState !== WebSocket.OPEN) return;
+        if (queue.length >= FRAME_BYTES) {
+          upstream.send(queue.subarray(0, FRAME_BYTES));
+          queue = queue.subarray(FRAME_BYTES);
           return;
         }
-        if (parsed.text) sendClient({ type: "text", text: parsed.text });
-        if (parsed.action === "started") {
-          upstreamReady = true;
-          if (!flushTimer) flushTimer = setInterval(flushFrame, 40);
-          sendClient({ type: "ready" });
+        if (ended) {
+          if (queue.length > 0) {
+            upstream.send(queue);
+            queue = Buffer.alloc(0);
+          }
+          upstream.send(Buffer.from(JSON.stringify({ end: true })));
+          if (flushTimer) clearInterval(flushTimer);
+          flushTimer = null;
         }
-      } catch (err: any) {
-        console.warn("[rtasr] parse warning:", err?.message || err);
-      }
-    });
-    upstream.on("error", (err) => {
-      console.error("[rtasr] upstream error:", err);
-      sendClient({ type: "error", error: err.message || "讯飞实时转写连接失败" });
-      cleanup();
-    });
-    upstream.on("close", () => {
-      sendClient({ type: "done" });
-      cleanup();
-    });
+      };
 
-    client.on("message", (data, isBinary) => {
-      if (isBinary) {
-        queue = Buffer.concat([queue, Buffer.from(data as Buffer)]);
-        return;
-      }
-      try {
-        const msg = JSON.parse(String(data));
-        if (msg?.type === "end") ended = true;
-      } catch {}
-    });
-    client.on("close", () => {
-      ended = true;
-      if (!queue.length) cleanup();
-    });
-    client.on("error", cleanup);
+      upstream.on("open", () => {
+        sendClient({ type: "connecting" });
+      });
+      upstream.on("message", raw => {
+        try {
+          const parsed = extractRtasrText(String(raw));
+          if (parsed.code && parsed.code !== "0") {
+            sendClient({
+              type: "error",
+              error: humanizeRtasrError(parsed.code, parsed.desc || ""),
+            });
+            cleanup();
+            return;
+          }
+          if (parsed.text) sendClient({ type: "text", text: parsed.text });
+          if (parsed.action === "started") {
+            upstreamReady = true;
+            if (!flushTimer) flushTimer = setInterval(flushFrame, 40);
+            sendClient({ type: "ready" });
+          }
+        } catch (err: any) {
+          console.warn("[rtasr] parse warning:", err?.message || err);
+        }
+      });
+      upstream.on("error", err => {
+        console.error("[rtasr] upstream error:", err);
+        sendClient({
+          type: "error",
+          error: err.message || "讯飞实时转写连接失败",
+        });
+        cleanup();
+      });
+      upstream.on("close", () => {
+        sendClient({ type: "done" });
+        cleanup();
+      });
 
-    console.log("[rtasr] connected:", meta.adoptId, "user=", meta.userId);
-  });
+      client.on("message", (data, isBinary) => {
+        if (isBinary) {
+          queue = Buffer.concat([queue, Buffer.from(data as Buffer)]);
+          return;
+        }
+        try {
+          const msg = JSON.parse(String(data));
+          if (msg?.type === "end") ended = true;
+        } catch {}
+      });
+      client.on("close", () => {
+        ended = true;
+        if (!queue.length) cleanup();
+      });
+      client.on("error", cleanup);
+
+      console.log("[rtasr] connected:", meta.adoptId, "user=", meta.userId);
+    }
+  );
 }

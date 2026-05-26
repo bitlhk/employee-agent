@@ -22,6 +22,7 @@ import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer } from "./skills/skill
 
 type UsageBucket = { total: number; days: Record<string, number>; lastTs: string; userId: number };
 type ChatHistoryMessage = { id: string; role: "user" | "assistant"; text: string; timeLabel: string; timestamp: number };
+type HistoryRunMessages = { source: string; runAt: number; messages: ChatHistoryMessage[] };
 
 function normalizeHistoryText(value: unknown): string {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -86,12 +87,208 @@ function extractOpenClawChatMessages(sessionFile: string, maxMessages = 200): Ch
   return messages.slice(-maxMessages);
 }
 
+function chatHistoryMessageFromOpenClawMessage(raw: any, fallbackTimestamp: number, idPrefix: string, index: number): ChatHistoryMessage | null {
+  const role = String(raw?.role || "");
+  if (role !== "user" && role !== "assistant") return null;
+  let text = textFromOpenClawContent(raw?.content, role);
+  if (role === "user") text = stripPlatformLanguagePolicy(text);
+  text = text.trim();
+  if (!text) return null;
+  const timestamp = Number(raw?.timestamp || fallbackTimestamp || 0) || 0;
+  return {
+    id: `hist-${idPrefix}-${index}`,
+    role,
+    text,
+    timeLabel: formatHistoryTimeLabel(timestamp),
+    timestamp,
+  };
+}
+
+function extractTrajectoryRunMessages(trajectoryFile: string, expectedSessionKey: string): HistoryRunMessages | null {
+  if (!trajectoryFile || !existsSync(trajectoryFile)) return null;
+  let matched = false;
+  let runAt = 0;
+  let latestSnapshot: any[] | null = null;
+  let latestSnapshotAt = 0;
+  const source = path.basename(trajectoryFile).replace(/\.trajectory\.jsonl$/, "");
+
+  for (const line of readFileSync(trajectoryFile, "utf8").split("\n")) {
+    if (!line) continue;
+    let event: any;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (event?.sessionKey === expectedSessionKey) matched = true;
+    if (!matched && event?.sessionKey) continue;
+    const eventAt = typeof event?.ts === "string" ? Date.parse(event.ts) : Number(event?.ts || 0);
+    if (Number.isFinite(eventAt) && eventAt > runAt) runAt = eventAt;
+    const snapshot = event?.data?.messagesSnapshot;
+    if (Array.isArray(snapshot)) {
+      latestSnapshot = snapshot;
+      latestSnapshotAt = Number.isFinite(eventAt) && eventAt > 0 ? eventAt : latestSnapshotAt;
+    }
+  }
+
+  if (!matched || !latestSnapshot) return null;
+  const fallbackTimestamp = latestSnapshotAt || runAt;
+  const messages = latestSnapshot
+    .map((message, index) => chatHistoryMessageFromOpenClawMessage(message, fallbackTimestamp, source, index))
+    .filter(Boolean) as ChatHistoryMessage[];
+  if (messages.length === 0) return null;
+  return { source, runAt: runAt || fallbackTimestamp || 0, messages };
+}
+
+function listTrajectoryRunsForSessionKey(sessionsDir: string, sessionKey: string): HistoryRunMessages[] {
+  const runs: HistoryRunMessages[] = [];
+  let entries: ReturnType<typeof readdirSync> = [];
+  try {
+    entries = readdirSync(sessionsDir, { withFileTypes: true }) as any;
+  } catch {
+    return runs;
+  }
+  for (const entry of entries as any[]) {
+    if (!entry.isFile() || !entry.name.endsWith(".trajectory.jsonl")) continue;
+    const run = extractTrajectoryRunMessages(path.join(sessionsDir, entry.name), sessionKey);
+    if (run) runs.push(run);
+  }
+  return runs.sort((a, b) => a.runAt - b.runAt);
+}
+
+function dedupeHistoryMessages(messages: ChatHistoryMessage[], maxMessages: number): ChatHistoryMessage[] {
+  const seen = new Set<string>();
+  const deduped: ChatHistoryMessage[] = [];
+  for (const message of messages) {
+    const normalizedText = normalizeHistoryText(message.text);
+    if (!normalizedText) continue;
+    const timeBucket = message.timestamp > 0 ? String(message.timestamp) : "no-ts";
+    const fingerprint = `${message.role}|${timeBucket}|${normalizedText}`;
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    deduped.push({
+      ...message,
+      id: `hist-merged-${deduped.length}`,
+      timeLabel: formatHistoryTimeLabel(message.timestamp),
+    });
+  }
+  return deduped
+    .sort((a, b) => {
+      if (a.timestamp && b.timestamp && a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+      return 0;
+    })
+    .slice(-maxMessages);
+}
+
+function collectOpenClawChatHistoryMessages(args: {
+  sessionsDir: string;
+  sessionKey: string;
+  currentSessionFile?: string;
+  maxMessages?: number;
+}): ChatHistoryMessage[] {
+  const maxMessages = args.maxMessages || 200;
+  const runs = listTrajectoryRunsForSessionKey(args.sessionsDir, args.sessionKey);
+  const merged: ChatHistoryMessage[] = [];
+  for (const run of runs) merged.push(...run.messages);
+
+  const currentSessionFile = args.currentSessionFile ? path.resolve(args.currentSessionFile) : "";
+  const hasCurrentRun = currentSessionFile
+    ? runs.some((run) => currentSessionFile.endsWith(`${run.source}.jsonl`))
+    : false;
+  if (currentSessionFile && !hasCurrentRun) {
+    merged.push(...extractOpenClawChatMessages(currentSessionFile, maxMessages));
+  }
+
+  return dedupeHistoryMessages(merged, maxMessages);
+}
+
 function parseWebSessionKey(sessionKey: string, runtimeAgentId: string): { conversationId: string; epoch?: number } | null {
   const parts = String(sessionKey || "").split(":");
   if (parts[0] !== "agent" || parts[1] !== runtimeAgentId || parts[2] !== "web" || !parts[3]) return null;
   const epochPart = parts[4] || "";
   const epochMatch = /^e(\d+)$/.exec(epochPart);
   return { conversationId: parts[3], epoch: epochMatch ? Number(epochMatch[1]) : undefined };
+}
+
+const RECOVERED_WEB_CONVERSATION_PREFIX = "hist_";
+
+function recoveredConversationId(sessionId: string): string {
+  return `${RECOVERED_WEB_CONVERSATION_PREFIX}${sessionId}`;
+}
+
+function recoveredSessionIdFromConversationId(conversationId: string): string | null {
+  const value = String(conversationId || "").trim();
+  if (!value.startsWith(RECOVERED_WEB_CONVERSATION_PREFIX)) return null;
+  const sessionId = value.slice(RECOVERED_WEB_CONVERSATION_PREFIX.length);
+  return /^[a-zA-Z0-9._-]{12,80}$/.test(sessionId) ? sessionId : null;
+}
+
+function isRecoverableHistoryMessages(messages: ChatHistoryMessage[]): boolean {
+  const firstUser = messages.find((message) => message.role === "user" && normalizeHistoryText(message.text));
+  if (!firstUser) return false;
+  const firstText = normalizeHistoryText(firstUser.text).toLowerCase();
+  if (!firstText) return false;
+  if (firstText.includes("[openclaw heartbeat poll]")) return false;
+  if (firstText.startsWith("[cron:")) return false;
+  if (firstText.includes("reply with exactly: pong")) return false;
+  if (firstText.includes("smoke测试") || firstText.includes("smoke_ok")) return false;
+  if (firstText.includes("测试流式输出") || firstText.includes("测试前端流式输出")) return false;
+  if (firstText.includes("测试文章") && firstText.includes("不少于")) return false;
+  if (firstText.includes("沙箱验收")) return false;
+  if (firstText.includes("office-ppt-outline") && firstText.includes("smoke")) return false;
+  return true;
+}
+
+function resolveRecoveredSessionFile(sessionsDir: string, conversationId: string): { sessionId: string; sessionFile: string } | null {
+  const sessionId = recoveredSessionIdFromConversationId(conversationId);
+  if (!sessionId) return null;
+  const sessionsRoot = path.resolve(sessionsDir);
+  const sessionFile = path.resolve(path.join(sessionsDir, `${sessionId}.jsonl`));
+  if (!sessionFile.startsWith(sessionsRoot + path.sep) || !existsSync(sessionFile)) return null;
+  return { sessionId, sessionFile };
+}
+
+function listRecoveredWebSessions(args: {
+  sessionsDir: string;
+  runtimeAgentId: string;
+  indexedSessionIds: Set<string>;
+  limit: number;
+}): any[] {
+  const out: any[] = [];
+  let entries: ReturnType<typeof readdirSync> = [];
+  try {
+    entries = readdirSync(args.sessionsDir, { withFileTypes: true }) as any;
+  } catch {
+    return out;
+  }
+  const sessionsRoot = path.resolve(args.sessionsDir);
+  for (const entry of entries as any[]) {
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl") || entry.name.includes(".trajectory")) continue;
+    if (entry.name.includes(".codex-app-server")) continue;
+    const sessionId = entry.name.replace(/\.jsonl$/, "");
+    if (!sessionId || args.indexedSessionIds.has(sessionId)) continue;
+    const sessionFile = path.resolve(path.join(args.sessionsDir, entry.name));
+    if (!sessionFile.startsWith(sessionsRoot + path.sep)) continue;
+    const messages = extractOpenClawChatMessages(sessionFile, 80);
+    if (!isRecoverableHistoryMessages(messages)) continue;
+    const firstTs = messages.find((message) => message.timestamp > 0)?.timestamp || 0;
+    const lastTs = [...messages].reverse().find((message) => message.timestamp > 0)?.timestamp || 0;
+    const st = statSync(sessionFile);
+    const updatedAt = lastTs || st.mtimeMs || 0;
+    const createdAt = firstTs || st.birthtimeMs || updatedAt;
+    const conversationId = recoveredConversationId(sessionId);
+    out.push({
+      conversationId,
+      sessionKey: `agent:${args.runtimeAgentId}:web:${conversationId}`,
+      sessionId,
+      sessionFile,
+      updatedAt,
+      createdAt,
+      messageCount: messages.length,
+      title: "新对话",
+      preview: "",
+      recovered: true,
+    });
+  }
+  return out
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, args.limit);
 }
 
 function addUsageEvent(params: {
@@ -207,11 +404,13 @@ export function registerMiscRoutes(app: express.Express) {
       const byConversation = new Map<string, any>();
       const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
       const resolvedSessionsDir = path.resolve(sessionsDir);
+      const indexedSessionIds = new Set<string>();
       for (const [sessionKey, raw] of Object.entries(rawIndex) as Array<[string, any]>) {
         const parsed = parseWebSessionKey(sessionKey, runtimeAgentId);
         if (!parsed) continue;
         const sessionId = String(raw?.sessionId || "").trim();
         if (!sessionId) continue;
+        indexedSessionIds.add(sessionId);
         const sessionFile = String(raw?.sessionFile || path.join(sessionsDir, `${sessionId}.jsonl`));
         const resolvedSessionFile = path.resolve(sessionFile);
         if (!resolvedSessionFile.startsWith(resolvedSessionsDir + path.sep)) continue;
@@ -231,12 +430,27 @@ export function registerMiscRoutes(app: express.Express) {
           });
         }
       }
+      for (const recovered of listRecoveredWebSessions({
+        sessionsDir,
+        runtimeAgentId,
+        indexedSessionIds,
+        limit,
+      })) {
+        if (!byConversation.has(recovered.conversationId)) {
+          byConversation.set(recovered.conversationId, recovered);
+        }
+      }
 
       const sessions = Array.from(byConversation.values())
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, limit)
         .map((entry) => {
-          const messages = extractOpenClawChatMessages(entry.sessionFile, 80);
+          const messages = collectOpenClawChatHistoryMessages({
+            sessionsDir,
+            sessionKey: entry.sessionKey,
+            currentSessionFile: entry.sessionFile,
+            maxMessages: 80,
+          });
           const firstUser = messages.find((m) => m.role === "user");
           const last = [...messages].reverse().find((m) => normalizeHistoryText(m.text));
           return {
@@ -286,20 +500,26 @@ export function registerMiscRoutes(app: express.Express) {
       }
       const rawIndex = JSON.parse(readFileSync(sessionsPath, "utf8") || "{}") || {};
       const raw = rawIndex[sessionKey];
-      const sessionId = String(raw?.sessionId || "").trim();
+      const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
+      const recovered = raw?.sessionId ? null : resolveRecoveredSessionFile(sessionsDir, parsed.conversationId);
+      const sessionId = String(raw?.sessionId || recovered?.sessionId || "").trim();
       if (!sessionId) {
         res.status(404).json({ error: "session_missing" });
         return;
       }
       const fallbackSessionFile = path.join(openClawAgentDir(runtimeAgentId), "sessions", `${sessionId}.jsonl`);
-      const sessionFile = String(raw?.sessionFile || fallbackSessionFile);
-      const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
+      const sessionFile = String(raw?.sessionFile || recovered?.sessionFile || fallbackSessionFile);
       const resolvedFile = path.resolve(sessionFile);
       if (!resolvedFile.startsWith(path.resolve(sessionsDir) + path.sep)) {
         res.status(403).json({ error: "session_file_not_allowed" });
         return;
       }
-      const messages = extractOpenClawChatMessages(resolvedFile, 200);
+      const messages = collectOpenClawChatHistoryMessages({
+        sessionsDir,
+        sessionKey,
+        currentSessionFile: resolvedFile,
+        maxMessages: 200,
+      });
       res.json({ conversationId: parsed.conversationId, sessionKey, sessionId, messages });
     } catch (error: any) {
       console.warn("[chat-history] messages failed", error?.message || error);
@@ -329,9 +549,21 @@ export function registerMiscRoutes(app: express.Express) {
 
       const sessionsPath = path.join(openClawAgentDir(runtimeAgentId), "sessions", "sessions.json");
       const rawIndex = existsSync(sessionsPath) ? JSON.parse(readFileSync(sessionsPath, "utf8") || "{}") || {} : {};
-      if (!rawIndex[sessionKey]?.sessionId) {
+      const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
+      const recovered = rawIndex[sessionKey]?.sessionId ? null : resolveRecoveredSessionFile(sessionsDir, parsed.conversationId);
+      if (!rawIndex[sessionKey]?.sessionId && !recovered?.sessionId) {
         res.status(404).json({ error: "session_missing" });
         return;
+      }
+      if (!rawIndex[sessionKey]?.sessionId && recovered) {
+        rawIndex[sessionKey] = {
+          sessionId: recovered.sessionId,
+          sessionFile: recovered.sessionFile,
+          updatedAt: statSync(recovered.sessionFile).mtimeMs,
+          sessionStartedAt: statSync(recovered.sessionFile).birthtimeMs,
+          recovered: true,
+        };
+        writeFileSync(sessionsPath, JSON.stringify(rawIndex, null, 2), "utf8");
       }
 
       const currentEpoch = readSessionEpoch(adoptId);

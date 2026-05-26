@@ -76,10 +76,11 @@ export async function fetchWithTimeout(
 export async function readProviderPayload(
   response: Response,
   onEvent?: (event: ProviderStreamEvent) => void,
+  timeoutMs?: number,
 ): Promise<Record<string, unknown>> {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("text/event-stream") && response.body) {
-    return readProviderEventStream(response.body, onEvent);
+    return readProviderEventStream(response.body, onEvent, timeoutMs);
   }
   const raw = await response.text();
   if (!raw.trim()) return {};
@@ -215,6 +216,7 @@ type ProviderPayloadState = {
 async function readProviderEventStream(
   stream: ReadableStream<Uint8Array>,
   onEvent?: (event: ProviderStreamEvent) => void,
+  timeoutMs?: number,
 ): Promise<Record<string, unknown>> {
   const state: ProviderPayloadState = {
     chunks: [],
@@ -226,8 +228,21 @@ async function readProviderEventStream(
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const deadline = timeoutMs && timeoutMs > 0 ? Date.now() + timeoutMs : 0;
   while (true) {
-    const { done, value } = await reader.read();
+    const readPromise = reader.read();
+    const { done, value } = deadline
+      ? await Promise.race([
+        readPromise,
+        new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
+          const remaining = Math.max(1, deadline - Date.now());
+          setTimeout(() => reject(Object.assign(new Error("provider event stream timeout"), { name: "AbortError" })), remaining);
+        }),
+      ]).catch(async (error) => {
+        await reader.cancel().catch(() => {});
+        throw error;
+      })
+      : await readPromise;
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
     const blocks = buffer.split(/\n\n/);
     buffer = blocks.pop() || "";

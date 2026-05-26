@@ -32,6 +32,11 @@ function contentString(value: unknown): string | undefined {
   return joined.length > 0 ? joined : undefined;
 }
 
+function messageText(value: unknown): string | undefined {
+  if (!isObject(value)) return contentString(value);
+  return contentString(value.content) || nonEmptyString(value.text);
+}
+
 function objectValue(value: unknown): JsonObject {
   return isObject(value) ? value : {};
 }
@@ -136,11 +141,22 @@ export function normalizeWsEvent(msg: unknown, expectedSessionKey?: string | nul
   if (!sessionMatches(payload, expectedSessionKey)) return ignored("session_mismatch");
 
   if (event === "chat") {
-    // chat.delta carries a cumulative message snapshot for OpenClaw control UI.
-    // Lingxia consumes streaming text from agent/assistant events instead, so
-    // treating chat.delta as a RuntimeEvent would risk duplicate appends.
-    if (payload.state === "delta") return noop("chat_delta_snapshot");
-    return payload.state === "final" ? events([{ type: "chat_final" }]) : unmatched("unknown_chat_state");
+    if (payload.state === "delta") {
+      const deltaText = nonEmptyString(payload.deltaText);
+      if (deltaText) {
+        return payload.replace === true
+          ? events([{ type: "chat_snapshot", content: deltaText }])
+          : events([{ type: "delta", content: deltaText }]);
+      }
+      const snapshot = messageText(payload.message);
+      return snapshot ? events([{ type: "chat_snapshot", content: snapshot }]) : noop("chat_delta_empty");
+    }
+    if (payload.state === "final") {
+      return events([{ type: "chat_final", content: messageText(payload.message) }]);
+    }
+    if (payload.state === "aborted") return events([{ type: "lifecycle_end" }]);
+    if (payload.state === "error") return events([{ type: "error", message: normalizeErrorMessage(payload.errorMessage) }]);
+    return unmatched("unknown_chat_state");
   }
 
   if (event !== "agent") return ignored("non_runtime_event");
@@ -148,6 +164,19 @@ export function normalizeWsEvent(msg: unknown, expectedSessionKey?: string | nul
   const stream = stringValue(payload.stream);
   const data = objectValue(payload.data);
   const phase = stringValue(data.phase);
+
+  if (stream === "codex_app_server.lifecycle") {
+    if (phase === "turn_start_failed") return events([{ type: "error", message: normalizeErrorMessage(data.error) }]);
+    return noop(`codex_app_server_lifecycle_${phase || "unknown"}`);
+  }
+
+  if (stream === "codex_app_server.item") {
+    return noop(`codex_app_server_item_${phase || "unknown"}`);
+  }
+
+  if (stream === "codex_app_server.guardian" || stream === "codex_app_server.hook" || stream === "codex_app_server.tool") {
+    return noop(stream.replaceAll(".", "_"));
+  }
 
   if (stream === "assistant") {
     const content = nonEmptyString(data.delta);

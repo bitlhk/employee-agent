@@ -13,7 +13,7 @@ import { createContext } from "../_core/context";
 
 type LabUser = { id: number; role: string };
 let lastKillSwitchLogMs = 0;
-const DEFAULT_LAB_AGENT_IDS = ["task-my-wealth", "task-ppt", "task-code", "task-stock"];
+const DEFAULT_LAB_AGENT_IDS = ["task-code", "task-stock"];
 
 const runBodySchema = z.object({
   agentDefinitionIds: z.array(z.string().min(1)).min(1),

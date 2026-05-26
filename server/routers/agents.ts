@@ -34,7 +34,6 @@ const adapterProtocols = [
   "openclaw-chat",
   "hermes-events",
   "stock-agent-v1",
-  "my-wealth-hermes-v1",
   "bond-hermes-v1",
   "credit-risk-hermes-v1",
   "claim-ev-hermes-v1",
@@ -45,7 +44,7 @@ const adapterProtocols = [
 function inferProviderType(input: { id: string; kind?: string; providerType?: string | null }) {
   if (input.providerType) return input.providerType;
   if (input.id === "task-stock") return "http-sse";
-  if (["task-hermes", "task-my-wealth", "task-bond", "task-credit-risk", "task-claim-ev"].includes(input.id)) return "hermes";
+  if (["task-hermes", "task-bond", "task-credit-risk", "task-claim-ev"].includes(input.id)) return "hermes";
   if (input.kind === "local") return "openclaw-local";
   return "openai-compatible";
 }
@@ -53,7 +52,6 @@ function inferProviderType(input: { id: string; kind?: string; providerType?: st
 function inferAdapterProtocol(input: { id: string; kind?: string; adapterProtocol?: string | null }) {
   if (input.adapterProtocol) return input.adapterProtocol;
   if (input.id === "task-stock") return "stock-agent-v1";
-  if (input.id === "task-my-wealth") return "my-wealth-hermes-v1";
   if (input.id === "task-bond") return "bond-hermes-v1";
   if (input.id === "task-credit-risk") return "credit-risk-hermes-v1";
   if (input.id === "task-claim-ev") return "claim-ev-hermes-v1";

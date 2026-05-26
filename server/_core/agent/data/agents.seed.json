@@ -653,6 +653,160 @@
       "retryCount": 1,
       "createdAt": "2026-05-08T00:00:00.000Z",
       "updatedAt": "2026-05-08T00:00:00.000Z"
+    },
+    {
+      "id": "ppt-source-reader",
+      "agentKey": "ppt-source-reader",
+      "displayName": "检索员 · PPT 研究",
+      "shortDescription": "研究型 PPT 检索员，负责围绕汇报主题收集可信来源、事实证据和资料缺口。",
+      "capabilityCategory": "office-productivity",
+      "providerId": "legacy-hermes",
+      "profileRef": "ppt-source-reader",
+      "endpointRef": "LINGXIA_PPT_SOURCE_READER_ENDPOINT",
+      "authRef": "HERMES_HTTP_KEY",
+      "iconName": "Search",
+      "sortOrder": 90,
+      "tagsJson": [
+        "research-ppt",
+        "reader",
+        "managed-hermes-profile"
+      ],
+      "metadata": {
+        "managedHermesProfile": true,
+        "agentTemplateId": "research-ppt",
+        "agentRole": "Reader",
+        "defaultEndpoint": "http://127.0.0.1:8671",
+        "systemPrompt": "You are Reader for research PPT creation. Use read/search capabilities to gather dated, source-grounded evidence for a presentation topic. Output concise Chinese evidence notes with source titles, URLs, dates, key facts, uncertainty, and gaps. Do not write slide content or create files.",
+        "isolation": {
+          "profileScoped": true,
+          "memoryDisabled": true,
+          "mcpPermissionProfileScoped": true
+        }
+      },
+      "enabled": true,
+      "healthStatus": "unknown",
+      "visibilityScope": "platform-global",
+      "visibilityConfigJson": {},
+      "timeoutMs": 300000,
+      "retryCount": 1,
+      "createdAt": "2026-05-21T00:00:00.000Z",
+      "updatedAt": "2026-05-21T00:00:00.000Z"
+    },
+    {
+      "id": "ppt-insight-analyst",
+      "agentKey": "ppt-insight-analyst",
+      "displayName": "分析师 · PPT 研究",
+      "shortDescription": "研究型 PPT 分析师，负责提炼汇报主线、关键判断、风险缺口和受众视角。",
+      "capabilityCategory": "office-productivity",
+      "providerId": "legacy-hermes",
+      "profileRef": "ppt-insight-analyst",
+      "endpointRef": "LINGXIA_PPT_INSIGHT_ANALYST_ENDPOINT",
+      "authRef": "HERMES_HTTP_KEY",
+      "iconName": "LineChart",
+      "sortOrder": 91,
+      "tagsJson": [
+        "research-ppt",
+        "analyst",
+        "managed-hermes-profile"
+      ],
+      "metadata": {
+        "managedHermesProfile": true,
+        "agentTemplateId": "research-ppt",
+        "agentRole": "Analyst",
+        "defaultEndpoint": "http://127.0.0.1:8672",
+        "systemPrompt": "You are Analyst for research PPT creation. Use upstream evidence to build the presentation logic, core arguments, business implications, risks, and missing information. Output Chinese analytical notes. Do not fabricate data, do not create files, and keep all uncertainties visible.",
+        "isolation": {
+          "profileScoped": true,
+          "memoryDisabled": true,
+          "mcpPermissionProfileScoped": true
+        }
+      },
+      "enabled": true,
+      "healthStatus": "unknown",
+      "visibilityScope": "platform-global",
+      "visibilityConfigJson": {},
+      "timeoutMs": 300000,
+      "retryCount": 1,
+      "createdAt": "2026-05-21T00:00:00.000Z",
+      "updatedAt": "2026-05-21T00:00:00.000Z"
+    },
+    {
+      "id": "ppt-outline-writer",
+      "agentKey": "ppt-outline-writer",
+      "displayName": "大纲员 · PPT 蓝图",
+      "shortDescription": "研究型 PPT 大纲员，负责把资料和分析转成可审核 Markdown 大纲与 PPT_BLUEPRINT_JSON。",
+      "capabilityCategory": "office-productivity",
+      "providerId": "legacy-hermes",
+      "profileRef": "ppt-outline-writer",
+      "endpointRef": "LINGXIA_PPT_OUTLINE_WRITER_ENDPOINT",
+      "authRef": "HERMES_HTTP_KEY",
+      "iconName": "Presentation",
+      "sortOrder": 92,
+      "tagsJson": [
+        "research-ppt",
+        "writer",
+        "managed-hermes-profile"
+      ],
+      "metadata": {
+        "managedHermesProfile": true,
+        "agentTemplateId": "research-ppt",
+        "agentRole": "Writer",
+        "defaultEndpoint": "http://127.0.0.1:8673",
+        "systemPrompt": "You are Outline Writer for research PPT creation. Convert upstream Reader and Analyst outputs into a Chinese Markdown slide outline and a strict PPT_BLUEPRINT_JSON fenced code block. Do not create PPTX files. Every slide must include title, key message, bullets, evidence, business implications, recommended actions, visual intent, and speaker notes.",
+        "isolation": {
+          "profileScoped": true,
+          "memoryDisabled": true,
+          "mcpPermissionProfileScoped": true
+        }
+      },
+      "enabled": true,
+      "healthStatus": "unknown",
+      "visibilityScope": "platform-global",
+      "visibilityConfigJson": {},
+      "timeoutMs": 300000,
+      "retryCount": 1,
+      "createdAt": "2026-05-21T00:00:00.000Z",
+      "updatedAt": "2026-05-21T00:00:00.000Z"
+    },
+    {
+      "id": "wind-report-writer",
+      "agentKey": "wind-report-writer",
+      "displayName": "写作员 · 专业报告",
+      "shortDescription": "专业报告写作员，负责把受控金融数据包转成公告解读、公司一页纸、市场复盘等中文交付物。",
+      "capabilityCategory": "finance-research",
+      "providerId": "legacy-hermes",
+      "profileRef": "wind-report-writer",
+      "endpointRef": "LINGXIA_WIND_REPORT_WRITER_ENDPOINT",
+      "authRef": "HERMES_HTTP_KEY",
+      "iconName": "FileText",
+      "sortOrder": 100,
+      "tagsJson": [
+        "wind",
+        "finance",
+        "writer",
+        "managed-hermes-profile"
+      ],
+      "metadata": {
+        "managedHermesProfile": true,
+        "agentTemplateId": "wind-data-report",
+        "agentRole": "Writer",
+        "defaultEndpoint": "http://127.0.0.1:8674",
+        "systemPrompt": "You are Wind Report Writer for enterprise finance workflows. You receive only structured Wind data packs from employee-agent and task-specific output contracts. Produce concise Chinese professional reports. Never fabricate facts, dates, figures, sources, or investment conclusions. Do not call external tools. Do not expose secrets. Do not create files; employee-agent owns artifact generation and storage.",
+        "isolation": {
+          "profileScoped": true,
+          "memoryDisabled": true,
+          "mcpPermissionProfileScoped": true,
+          "windApiKeyNotExposed": true
+        }
+      },
+      "enabled": true,
+      "healthStatus": "unknown",
+      "visibilityScope": "platform-global",
+      "visibilityConfigJson": {},
+      "timeoutMs": 300000,
+      "retryCount": 1,
+      "createdAt": "2026-05-22T00:00:00.000Z",
+      "updatedAt": "2026-05-22T00:00:00.000Z"
     }
   ]
 }

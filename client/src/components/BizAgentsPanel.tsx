@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2, Bot, Presentation, Code2, TrendingUp, Dna, BarChart3, Battery, Compass, Search, FileText, Globe2 } from "lucide-react";
+import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2, Bot, Code2, Dna, BarChart3, Battery, Compass, Search, FileText, Globe2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   isBuiltinBusinessAgentAdapter,
@@ -61,7 +61,6 @@ const ADAPTER_OPTIONS = [
   { value: "openclaw-chat", label: "OpenClaw Chat" },
   { value: "hermes-events", label: "Hermes Events" },
   { value: "stock-agent-v1", label: "Stock Agent v1" },
-  { value: "my-wealth-hermes-v1", label: "个人理财 Hermes v1" },
   { value: "bond-hermes-v1", label: "债券投研 Hermes v1" },
   { value: "credit-risk-hermes-v1", label: "智贷决策 Hermes v1" },
   { value: "claim-ev-hermes-v1", label: "EV 理赔 Hermes v1" },
@@ -72,12 +71,10 @@ const ADAPTER_OPTIONS = [
 const LEGACY_CATEGORY: Record<string, string> = {
   "task-hermes": "core",
   "task-trace": "core",
-  "task-ppt": "tools",
   "task-code": "tools",
   "task-slides": "tools",
   "task-stock": "finance",
   "task-claim-ev": "finance",
-  "task-my-wealth": "finance",
   "task-bond": "finance",
   "task-credit-risk": "finance",
 };
@@ -96,8 +93,8 @@ function normalizeUiTemplate(value?: string | null) {
 }
 
 function defaultUiTemplateFor(id: string, providerType?: string | null, adapterProtocol?: string | null) {
-  if (["task-ppt", "task-code", "task-slides"].includes(id)) return "artifact_generation";
-  if (["task-stock", "task-bond", "task-my-wealth"].includes(id)) return "research_analysis";
+  if (["task-code", "task-slides"].includes(id)) return "artifact_generation";
+  if (["task-stock", "task-bond"].includes(id)) return "research_analysis";
   if (["task-credit-risk", "task-claim-ev"].includes(id)) return "workflow_decision";
   if (String(adapterProtocol || "").includes("bond") || String(adapterProtocol || "").includes("stock")) return "research_analysis";
   if (String(providerType || "") === "hermes") return "research_analysis";
@@ -106,7 +103,6 @@ function defaultUiTemplateFor(id: string, providerType?: string | null, adapterP
 
 function defaultRuntimeFor(id: string, kind: string) {
   if (id === "task-stock") return { providerType: "http-sse", adapterProtocol: "stock-agent-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
-  if (id === "task-my-wealth") return { providerType: "hermes", adapterProtocol: "my-wealth-hermes-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
   if (id === "task-bond") return { providerType: "hermes", adapterProtocol: "bond-hermes-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
   if (id === "task-credit-risk") return { providerType: "hermes", adapterProtocol: "credit-risk-hermes-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
   if (id === "task-claim-ev") return { providerType: "hermes", adapterProtocol: "claim-ev-hermes-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
@@ -160,13 +156,11 @@ function parseJsonForSave(label: string, value: string, expect: "array" | "objec
 
 function agentIcon(id: string, size = 20) {
   const style = { color: "var(--oc-accent)" };
-  if (id === "task-ppt") return <Presentation size={size} style={style} />;
   if (id === "task-code") return <Code2 size={size} style={style} />;
   if (id === "task-hermes") return <Dna size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-trace") return <Bot size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-stock") return <BarChart3 size={size} style={{ color: "var(--oc-danger)" }} />;
   if (id === "task-claim-ev") return <Battery size={size} style={{ color: "#be1e2d" }} />;
-  if (id === "task-my-wealth") return <TrendingUp size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-bond") return <BarChart3 size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-credit-risk") return <Compass size={size} style={{ color: "#be1e2d" }} />;
   return <Bot size={size} style={style} />;
@@ -252,7 +246,7 @@ function adapterOptionsForProvider(providerType: string | null | undefined, curr
     "openai-compatible": ["openai-chat-completions"],
     "openclaw-remote": ["openai-chat-completions", "openclaw-chat"],
     "http-sse": ["stock-agent-v1"],
-    "hermes": ["hermes-events", "my-wealth-hermes-v1", "bond-hermes-v1", "credit-risk-hermes-v1", "claim-ev-hermes-v1"],
+    "hermes": ["hermes-events", "bond-hermes-v1", "credit-risk-hermes-v1", "claim-ev-hermes-v1"],
   };
   const keys = allowed[String(providerType || "")] || ADAPTER_OPTIONS.map((option) => option.value);
   const merged = current && !keys.includes(current) ? [...keys, current] : keys;
@@ -630,7 +624,7 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
         {v.kind === "local" && <>
           <div>
             <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>本地 Agent ID</label>
-            <input value={v.localAgentId || ""} onChange={e => set("localAgentId", e.target.value)} placeholder="task-ppt"
+            <input value={v.localAgentId || ""} onChange={e => set("localAgentId", e.target.value)} placeholder="task-code"
               className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
               style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
           </div>

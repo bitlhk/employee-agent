@@ -21,6 +21,7 @@ const MAX_LIST_DEPTH = 4;
 const MAX_FILES_PER_LIST = 500;
 const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const TASK_WORKBENCH_AUDIO_UPLOAD_BYTES = 32 * 1024 * 1024;
 const MAX_FILES_PER_WORKSPACE = 2000;
 const PROTECTED_ROOT_FILES = new Set([
   "AGENT.md",
@@ -36,10 +37,13 @@ const PROTECTED_ROOT_FILES = new Set([
 // File type whitelist (defense against agent prompt-injection-via-uploaded-file)
 const ALLOWED_EXTENSIONS = new Set([
   "md", "txt", "csv", "json", "yaml", "yml", "xml", "toml", "ini", "conf", "log",
-  "pdf", "docx", "xlsx", "pptx",
+  "pdf", "docx", "xls", "xlsx", "pptx",
   "png", "jpg", "jpeg", "gif", "svg", "webp",
   "html", "htm", "css",
   "zip", "tar", "gz",
+]);
+const TASK_WORKBENCH_AUDIO_EXTENSIONS = new Set([
+  "mp3", "wav", "m4a", "aac", "webm", "ogg", "mp4",
 ]);
 
 function safeFilename(name: string): string {
@@ -50,6 +54,23 @@ function safeFilename(name: string): string {
 function getExt(filename: string): string {
   const i = filename.lastIndexOf(".");
   return i < 0 ? "" : filename.slice(i + 1).toLowerCase();
+}
+
+function isTaskWorkbenchInputUpload(subPath: string): boolean {
+  const normalized = path.posix.normalize(String(subPath || "").replace(/\\/g, "/"));
+  return normalized.startsWith("office/task-workbench/") && normalized.endsWith("/inputs");
+}
+
+function isAllowedUploadExtension(ext: string, subPath: string): boolean {
+  if (ALLOWED_EXTENSIONS.has(ext)) return true;
+  return isTaskWorkbenchInputUpload(subPath) && TASK_WORKBENCH_AUDIO_EXTENSIONS.has(ext);
+}
+
+function uploadLimitFor(ext: string, subPath: string): number {
+  if (isTaskWorkbenchInputUpload(subPath) && TASK_WORKBENCH_AUDIO_EXTENSIONS.has(ext)) {
+    return TASK_WORKBENCH_AUDIO_UPLOAD_BYTES;
+  }
+  return MAX_UPLOAD_BYTES;
 }
 
 function isHermesAdopt(adoptId: string): boolean {
@@ -208,10 +229,11 @@ export function registerFilesRoutes(app: express.Express) {
       const filename = safeFilename(filenameRaw);
       if (!filename) return res.status(400).json({ error: "invalid filename" });
       const ext = getExt(filename);
-      if (!ALLOWED_EXTENSIONS.has(ext)) return res.status(400).json({ error: `file type .${ext} not allowed` });
+      if (!isAllowedUploadExtension(ext, subPath)) return res.status(400).json({ error: `file type .${ext} not allowed` });
       let buf: Buffer;
       try { buf = Buffer.from(contentBase64, "base64"); } catch { return res.status(400).json({ error: "invalid base64" }); }
-      if (buf.length > MAX_UPLOAD_BYTES) return res.status(413).json({ error: `file too large: ${buf.length}` });
+      const maxUploadBytes = uploadLimitFor(ext, subPath);
+      if (buf.length > maxUploadBytes) return res.status(413).json({ error: `file too large: ${buf.length}` });
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       let existingFiles: LinggFileNode[];

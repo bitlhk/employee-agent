@@ -49,13 +49,11 @@ const ENGINE_ICON: Record<string, string> = {
 
 function agentIcon(id: string, size = 16) {
   const style = { color: "var(--oc-accent)" };
-  if (id === "task-ppt") return <Presentation size={size} style={style} />;
   if (id === "task-code") return <Code2 size={size} style={style} />;
   if (id === "task-hermes") return <Dna size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-trace") return <Bot size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-stock") return <BarChart3 size={size} style={{ color: "var(--oc-danger)" }} />;
   if (id === "task-claim-ev") return <Battery size={size} style={{ color: "#be1e2d" }} />;
-  if (id === "task-my-wealth") return <TrendingUp size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-bond") return <BarChart3 size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-credit-risk") return <Compass size={size} style={{ color: "#be1e2d" }} />;
   return <Bot size={size} style={style} />;
@@ -77,12 +75,10 @@ function configuredIcon(icon?: string | null, size = 16) {
 const LEGACY_AGENT_CATEGORY: Record<string, string> = {
   "task-hermes": "core",
   "task-trace": "core",
-  "task-ppt": "tools",
   "task-code": "tools",
   "task-slides": "tools",
   "task-stock": "finance",
   "task-claim-ev": "finance",
-  "task-my-wealth": "finance",
   "task-bond": "finance",
   "task-credit-risk": "finance",
 };
@@ -92,7 +88,6 @@ const LEGACY_AGENT_SUBTITLE: Record<string, string> = {
   "task-trace": "灵枢 · 深度求索",
   "task-stock": "灵犀 · 11策略",
   "task-claim-ev": "灵犀 · EV 理赔决策",
-  "task-my-wealth": "灵犀 · 个人理财",
   "task-bond": "灵犀 · 债券投研",
   "task-credit-risk": "灵犀 · 智贷决策",
 };
@@ -153,8 +148,8 @@ function normalizeUiTemplate(value?: string | null) {
 }
 
 function defaultUiTemplateFor(agent: BusinessAgent) {
-  if (["task-ppt", "task-code", "task-slides"].includes(agent.id)) return "artifact_generation";
-  if (["task-stock", "task-bond", "task-my-wealth"].includes(agent.id)) return "research_analysis";
+  if (["task-code", "task-slides"].includes(agent.id)) return "artifact_generation";
+  if (["task-stock", "task-bond"].includes(agent.id)) return "research_analysis";
   if (["task-credit-risk", "task-claim-ev"].includes(agent.id)) return "workflow_decision";
   return "general_chat";
 }
@@ -910,40 +905,6 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
                 ))}
               </div>
               <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>akshare 中债真实数据 · Hermes 多 persona · 6 工具协作</p>
-            </>
-          ) : agent.id === "task-my-wealth" ? (
-            <>
-              <div className="flex items-center justify-center">
-                <div style={{ position: "relative", width: 88, height: 88 }}>
-                  <div style={{
-                    width: 88, height: 88, borderRadius: "50%",
-                    background: "radial-gradient(circle at 35% 35%, rgba(190,30,45,0.18), rgba(190,30,45,0.05) 60%, transparent 80%)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    <TrendingUp size={48} style={{ color: "#be1e2d" }} />
-                  </div>
-                  <span className="my-wealth-pulse" style={{ position: "absolute", inset: -4, borderRadius: "50%", border: "2px solid rgba(190,30,45,0.35)", pointerEvents: "none" }} />
-                  <style>{`
-                    .my-wealth-pulse { animation: my-wealth-ring 2.5s ease-out infinite; }
-                    @keyframes my-wealth-ring { 0% { transform: scale(0.85); opacity: 1; } 100% { transform: scale(1.35); opacity: 0; } }
-                  `}</style>
-                </div>
-              </div>
-              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵犀 · 个人理财助手</p>
-              <p className="text-xs mt-1.5 max-w-[280px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>您的专属 AI 理财顾问 · 中行 + 招行 双白皮书 grounding</p>
-              <div className="mt-4 mx-auto max-w-[280px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(190,30,45,0.04)", border: "1px solid rgba(190,30,45,0.15)" }}>
-                <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
-                {[
-                  { q: "看看我现在的持仓配置怎么样，按中行白皮书该怎么调？", icon: "📊" },
-                  { q: "查一下贵州茅台现在的价格和最近一个月走势", icon: "📈" },
-                  { q: "易方达蓝筹精选混合最近表现如何？", icon: "💼" },
-                  { q: "现在最新 CPI 是多少？M2 同比呢？", icon: "🌐" },
-                  { q: "如果我现在卖出 5 万元贵州茅台，要交多少税？", icon: "💰" },
-                ].map(({ q, icon }) => (
-                  <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-start gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}><span className="shrink-0">{icon}</span><span>{q}</span></p>
-                ))}
-              </div>
-              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>akshare 开源数据 · Hermes 多 persona · 7 工具协作</p>
             </>
           ) : agent.id === "task-claim-ev" ? (
             <>

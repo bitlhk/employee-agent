@@ -481,7 +481,7 @@ export function ChatInput({
         <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
           <div className="flex items-center gap-1">
             <input ref={fileInputRef} type="file" multiple
-              accept="image/*,.pdf,.txt,.md,.csv,.json,.docx,.xlsx"
+              accept="image/*,.pdf,.txt,.md,.csv,.json,.docx,.xls,.xlsx"
               onChange={handleFileSelect} style={{ display: "none" }} />
             <button
               onClick={() => fileInputRef.current?.click()}

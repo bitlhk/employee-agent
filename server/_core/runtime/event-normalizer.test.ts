@@ -107,7 +107,63 @@ describe("runtime event normalizer", () => {
         state: "delta",
         message: { content: [{ type: "text", text: "pong" }] },
       },
-    }, "agent:a:main")).toEqual({ kind: "noop", reason: "chat_delta_snapshot" });
+    }, "agent:a:main")).toEqual({
+      kind: "events",
+      events: [{ type: "chat_snapshot", content: "pong" }],
+    });
+  });
+
+  it("normalizes OpenClaw 5.12 chat deltas and codex app-server telemetry", () => {
+    expect(wsEvents({
+      type: "event",
+      event: "chat",
+      payload: {
+        sessionKey: "agent:a:main",
+        state: "delta",
+        deltaText: "po",
+      },
+    })).toEqual([{ type: "delta", content: "po" }]);
+
+    expect(wsEvents({
+      type: "event",
+      event: "chat",
+      payload: {
+        sessionKey: "agent:a:main",
+        state: "delta",
+        deltaText: "pong",
+        replace: true,
+      },
+    })).toEqual([{ type: "chat_snapshot", content: "pong" }]);
+
+    expect(wsEvents({
+      type: "event",
+      event: "chat",
+      payload: {
+        sessionKey: "agent:a:main",
+        state: "final",
+        message: { content: [{ type: "text", text: "pong" }] },
+      },
+    })).toEqual([{ type: "chat_final", content: "pong" }]);
+
+    expect(normalizeWsEvent({
+      type: "event",
+      event: "agent",
+      payload: {
+        sessionKey: "agent:a:main",
+        stream: "codex_app_server.lifecycle",
+        data: { phase: "turn_starting" },
+      },
+    }, "agent:a:main")).toEqual({ kind: "noop", reason: "codex_app_server_lifecycle_turn_starting" });
+
+    expect(normalizeWsEvent({
+      type: "event",
+      event: "agent",
+      payload: {
+        sessionKey: "agent:a:main",
+        stream: "codex_app_server.item",
+        data: { phase: "completed", type: "agentMessage" },
+      },
+    }, "agent:a:main")).toEqual({ kind: "noop", reason: "codex_app_server_item_completed" });
   });
 
   it("classifies known WS update no-ops without unmatched warnings", () => {

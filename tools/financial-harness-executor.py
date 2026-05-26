@@ -41,7 +41,7 @@ else:
     SKILL_ROOT = LEGACY_SKILL_ROOT
 MANIFEST_PATH = Path(os.getenv(
     "FIN_HARNESS_MANIFEST_PATH",
-    str(Path(__file__).with_name("agent-manifests.seed.json")),
+    str(Path(__file__).resolve().parent.parent / "server/_core/agent/data/agent-manifests.seed.json"),
 ))
 SCHEMA_ROOT = Path(os.getenv(
     "FIN_HARNESS_SCHEMA_ROOT",
@@ -67,10 +67,29 @@ ROUTER_OUTPUT_SCHEMA = {
     "reason": "short routing reason",
     "clarification_question": "one question when template_id=clarify, otherwise empty",
     "risk_flags": ["unsupported_request | regulated_advice | insufficient_context | ambiguous_deliverable"],
+    "data_requirements": [
+        {
+            "id": "stable requirement id",
+            "type": "financial_news | company_announcements | company_profile | stock_fundamentals | market_snapshot | macro_series | fund_data | bond_data | internal_context",
+            "query": "bounded query for employee-agent to validate and execute later",
+            "top_k": "optional integer, keep small",
+            "reason": "why this data is needed",
+            "required": "optional boolean",
+        }
+    ],
+    "compute_requirements": [
+        {
+            "id": "stable compute id",
+            "type": "none | time_series_metrics | peer_comparison_table | event_window_return | financial_ratio_summary | fund_performance_compare | excel_cleaning_summary",
+            "input_refs": ["data requirement ids"],
+            "parameters": "optional JSON object",
+            "reason": "why this computation is needed",
+        }
+    ],
     "plan": [
         {
-            "stage_id": "sector_reader | comps_analyst | note_writer | news_reader | meeting_profiler | pack_writer",
-            "role": "Reader | Analyst | Writer",
+            "stage_id": "comps_analyst | note_writer | meeting_profiler | pack_writer",
+            "role": "Analyst | Writer",
             "profile": "registered Hermes profile id",
             "input_contract": "short input description",
             "output_contract": "short output description",
@@ -101,8 +120,28 @@ ROUTER_EXAMPLES = [
 ]
 VALID_TEMPLATE_IDS = {"market-researcher", "meeting-prep-agent", "clarify", "reject_or_reframe"}
 VALID_STAGE_PROFILES = {
-    "market-researcher": {"market-sector-reader", "market-comps-spreader", "market-note-writer"},
-    "meeting-prep-agent": {"meeting-news-reader", "meeting-profiler", "meeting-pack-writer"},
+    "market-researcher": {"market-comps-spreader", "market-note-writer"},
+    "meeting-prep-agent": {"meeting-profiler", "meeting-pack-writer"},
+}
+VALID_DATA_REQUIREMENT_TYPES = {
+    "financial_news",
+    "company_announcements",
+    "company_profile",
+    "stock_fundamentals",
+    "market_snapshot",
+    "macro_series",
+    "fund_data",
+    "bond_data",
+    "internal_context",
+}
+VALID_COMPUTE_REQUIREMENT_TYPES = {
+    "none",
+    "time_series_metrics",
+    "peer_comparison_table",
+    "event_window_return",
+    "financial_ratio_summary",
+    "fund_performance_compare",
+    "excel_cleaning_summary",
 }
 
 PROFILE_PORTS = {
@@ -1015,6 +1054,80 @@ def search_pack_lines(search_pack: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def data_pack_lines(data_pack: Any) -> list[str]:
+    if not isinstance(data_pack, dict):
+        return []
+    sections = data_pack.get("sections") if isinstance(data_pack.get("sections"), list) else []
+    source_cards = data_pack.get("sourceCards") if isinstance(data_pack.get("sourceCards"), list) else []
+    gaps = data_pack.get("gaps") if isinstance(data_pack.get("gaps"), list) else []
+    confidence = data_pack.get("confidenceSummary") if isinstance(data_pack.get("confidenceSummary"), dict) else {}
+    markdown = str(data_pack.get("markdown") or "").strip()
+    if not markdown:
+        try:
+            markdown = json.dumps(data_pack, ensure_ascii=False, indent=2)
+        except Exception:
+            markdown = str(data_pack)
+    if not markdown.strip():
+        return []
+    summary_lines = [
+        f"- provider: {data_pack.get('provider') or 'unknown'}",
+        f"- confidence: {confidence.get('level') or 'unknown'}",
+        f"- data sections: {len(sections)}",
+        f"- source cards: {len(source_cards)}",
+        f"- gaps: {len(gaps)}",
+    ]
+    return [
+        "",
+        "# Employee-Agent Controlled Data Pack",
+        "The following data pack was fetched by employee-agent under policy control.",
+        "Use it as the primary evidence source. Do not expose provider secrets or invent unavailable facts.",
+        "",
+        "## Data Pack Summary",
+        *summary_lines,
+        "",
+        "## Data Pack Use Rules",
+        "- Data stage: employee-agent has already fetched controlled evidence; Hermes Reader stages are not part of the main path.",
+        "- Analyst: derive judgments from the data pack plus compute pack; explicitly cite weak evidence and gaps.",
+        "- Writer: write the final artifact from the data pack and upstream analysis; do not turn gaps into facts.",
+        "- If this pack has gaps or low confidence, surface the limitation explicitly in the final output.",
+        "```markdown",
+        truncate(markdown, 18000),
+        "```",
+        "",
+    ]
+
+
+def compute_pack_lines(compute_pack: Any) -> list[str]:
+    if not isinstance(compute_pack, dict):
+        return []
+    markdown = str(compute_pack.get("markdown") or "").strip()
+    if not markdown:
+        try:
+            markdown = json.dumps(compute_pack, ensure_ascii=False, indent=2)
+        except Exception:
+            markdown = str(compute_pack)
+    if not markdown.strip():
+        return []
+    items = compute_pack.get("computeItems") if isinstance(compute_pack.get("computeItems"), list) else []
+    gaps = compute_pack.get("gaps") if isinstance(compute_pack.get("gaps"), list) else []
+    return [
+        "",
+        "# Employee-Agent Controlled Compute Pack",
+        "The following compute pack was produced by employee-agent with whitelisted deterministic calculators.",
+        "Use tables and summaries as controlled analysis aids, not as market advice.",
+        "Do not claim unavailable numeric precision beyond what the pack provides.",
+        "",
+        "## Compute Pack Summary",
+        f"- compute items: {len(items)}",
+        f"- gaps: {len(gaps)}",
+        "",
+        "```markdown",
+        truncate(markdown, 12000),
+        "```",
+        "",
+    ]
+
+
 def normalize_artifact_type(value: Any) -> str | None:
     normalized = str(value or "").strip().lower()
     if normalized in {"doc", "docx", "word", "report", "brief"}:
@@ -1193,6 +1306,8 @@ def role_output_instructions(stage: dict[str, Any]) -> list[str]:
             "",
             "## Role Quality Instructions",
             "- Write in Chinese for an enterprise meeting preparation pack.",
+            "- Output the final document body only. Do not say the file has been written, do not mention ./out paths, and do not summarize your own completion status.",
+            "- Produce a complete leadership-ready pack, not a short status note. Each major section should contain concrete, evidence-linked content.",
             "- Do not use English section titles such as Executive Summary.",
             "- Use this structure exactly: 1. 拜访目标 2. 客户背景与近期动态 3. 交流议题建议 4. 问题清单 5. 机会点与风险提示 6. 资料来源 7. 人工复核提示。",
             "- Preserve source URLs from upstream evidence. Do not add unsourced facts.",
@@ -1204,6 +1319,8 @@ def role_output_instructions(stage: dict[str, Any]) -> list[str]:
             "",
             "## Role Quality Instructions",
             "- Write in Chinese for an enterprise financial research briefing.",
+            "- Output the final document body only. Do not say the file has been written, do not mention ./out paths, and do not summarize your own completion status.",
+            "- Produce a complete leadership-ready brief, not a short status note. Each major section should contain concrete, evidence-linked content.",
             "- Do not use English section titles such as Executive Summary, Key Facts, or Recommendation.",
             "- Use this structure exactly: 1. 核心结论 2. 近期动态 3. 影响分析 4. 风险与不确定性 5. 建议关注 6. 资料来源 7. 人工复核提示。",
             "- Preserve source URLs from upstream evidence. Do not add unsourced facts.",
@@ -1221,6 +1338,8 @@ def build_stage_input(
     *,
     retry_errors: list[str] | None = None,
     search_pack: dict[str, Any] | None = None,
+    data_pack: Any = None,
+    compute_pack: Any = None,
     permission_policy: dict[str, Any] | None = None,
     artifact_type: str = "docx",
 ) -> str:
@@ -1267,6 +1386,8 @@ def build_stage_input(
         *role_output_instructions(stage),
         *(artifact_instruction_lines(artifact_type) if str(stage.get("role") or "").lower() == "writer" else []),
         *schema_instruction(stage),
+        *data_pack_lines(data_pack),
+        *compute_pack_lines(compute_pack),
         *search_pack_lines(search_pack),
         *(["", "## Previous Schema Validation Errors", *[f"- {item}" for item in retry_errors]] if retry_errors else []),
         "",
@@ -1320,6 +1441,64 @@ def extract_json_object(content: str) -> str | None:
     return content[start:end + 1]
 
 
+def normalize_data_requirements(value: Any) -> list[dict[str, Any]]:
+    rows = value if isinstance(value, list) else []
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(rows):
+        if not isinstance(item, dict):
+            continue
+        req_type = str(item.get("type") or "").strip()
+        query = str(item.get("query") or "").strip()
+        if req_type not in VALID_DATA_REQUIREMENT_TYPES or not query:
+            continue
+        try:
+            top_k_raw = item.get("top_k", item.get("topK", None))
+            top_k = int(top_k_raw) if top_k_raw is not None else None
+        except (TypeError, ValueError):
+            top_k = None
+        if top_k is not None:
+            top_k = max(1, min(20, top_k))
+        normalized_item: dict[str, Any] = {
+            "id": str(item.get("id") or f"data_{index + 1}").strip()
+            or f"data_{index + 1}",
+            "type": req_type,
+            "query": query,
+            "reason": str(item.get("reason") or "").strip(),
+            "required": bool(item.get("required", False)),
+        }
+        if top_k is not None:
+            normalized_item["top_k"] = top_k
+        normalized.append(normalized_item)
+    return normalized
+
+
+def normalize_compute_requirements(value: Any) -> list[dict[str, Any]]:
+    rows = value if isinstance(value, list) else []
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(rows):
+        if not isinstance(item, dict):
+            continue
+        req_type = str(item.get("type") or "").strip()
+        if req_type not in VALID_COMPUTE_REQUIREMENT_TYPES:
+            continue
+        input_refs_raw = item.get("input_refs", item.get("inputRefs", []))
+        input_refs = [
+            str(ref).strip()
+            for ref in (input_refs_raw if isinstance(input_refs_raw, list) else [])
+            if str(ref).strip()
+        ]
+        parameters = item.get("parameters")
+        normalized.append({
+            "id": str(item.get("id") or f"compute_{index + 1}").strip()
+            or f"compute_{index + 1}",
+            "type": req_type,
+            "input_refs": input_refs,
+            "parameters": parameters if isinstance(parameters, dict) else {},
+            "reason": str(item.get("reason") or "").strip(),
+        })
+    return normalized
+
+
 def normalize_route_result(result: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
     errors: list[str] = []
     if not isinstance(result, dict):
@@ -1365,6 +1544,8 @@ def normalize_route_result(result: dict[str, Any]) -> tuple[dict[str, Any] | Non
         "reason": str(result.get("reason") or "").strip(),
         "clarification_question": str(result.get("clarification_question") or result.get("clarificationQuestion") or "").strip(),
         "risk_flags": [str(item) for item in result.get("risk_flags") or result.get("riskFlags") or [] if str(item).strip()],
+        "data_requirements": normalize_data_requirements(result.get("data_requirements", result.get("dataRequirements", []))),
+        "compute_requirements": normalize_compute_requirements(result.get("compute_requirements", result.get("computeRequirements", []))),
         "plan": plan,
     }
     if template_id == "clarify" and not normalized["clarification_question"]:
@@ -1386,7 +1567,7 @@ def http_text(url: str, timeout: int = 300) -> str:
         return response.read().decode("utf-8", errors="replace")
 
 
-def run_worker(stage: dict[str, Any], prompt: str, previous: list[dict[str, Any]], session_prefix: str, artifact_type: str = "docx") -> dict[str, Any]:
+def run_worker(stage: dict[str, Any], prompt: str, previous: list[dict[str, Any]], session_prefix: str, artifact_type: str = "docx", data_pack: Any = None, compute_pack: Any = None) -> dict[str, Any]:
     started = time.time()
     profile = str(stage.get("profile") or "")
     port = PROFILE_PORTS.get(profile)
@@ -1434,6 +1615,8 @@ def run_worker(stage: dict[str, Any], prompt: str, previous: list[dict[str, Any]
                 previous,
                 retry_errors=schema_errors if attempt > 0 else None,
                 search_pack=search_pack,
+                data_pack=data_pack,
+                compute_pack=compute_pack,
                 permission_policy=permission_policy,
                 artifact_type=artifact_type,
             )
@@ -1475,6 +1658,25 @@ def run_worker(stage: dict[str, Any], prompt: str, previous: list[dict[str, Any]
             "searchResultCount": len(search_pack.get("results") or []),
             "searchErrors": search_pack.get("errors") if search_pack.get("enabled") else [],
             "sourceResearch": search_pack.get("sourceResearch") if search_pack.get("enabled") else None,
+            "dataPack": {
+                "provider": data_pack.get("provider"),
+                "version": data_pack.get("version"),
+                "requirementCount": len(data_pack.get("requirements", [])),
+                "sectionCount": len(data_pack.get("sections", [])),
+                "evidenceCount": len(data_pack.get("evidenceItems", [])),
+                "gapCount": len(data_pack.get("gaps", [])),
+                "confidenceSummary": data_pack.get("confidenceSummary"),
+                "sections": data_pack.get("sections", []),
+                "sourceCards": data_pack.get("sourceCards", []),
+                "missingInformation": data_pack.get("missingInformation", []),
+            } if isinstance(data_pack, dict) else None,
+            "computePack": {
+                "version": compute_pack.get("version"),
+                "computeCount": len(compute_pack.get("computeItems", [])),
+                "gapCount": len(compute_pack.get("gaps", [])),
+                "computeItems": compute_pack.get("computeItems", []),
+                "gaps": compute_pack.get("gaps", []),
+            } if isinstance(compute_pack, dict) else None,
             "artifactType": artifact_type,
             "permissionPolicy": permission_policy,
             "manifestWorker": stage.get("manifestWorker"),
@@ -1512,20 +1714,27 @@ def route(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "stage_policy": {
             "market-researcher": [
-                {"stage_id": "sector_reader", "role": "Reader", "profile": "market-sector-reader"},
-                {"stage_id": "comps_analyst", "role": "Analyst", "profile": "market-comps-spreader"},
-                {"stage_id": "note_writer", "role": "Writer", "profile": "market-note-writer"},
+                {"stage_id": "comps_analyst", "role": "Analyst", "profile": "market-comps-spreader", "input_contract": "DataPack + ComputePack from employee-agent", "output_contract": "evidence-grounded analysis brief"},
+                {"stage_id": "note_writer", "role": "Writer", "profile": "market-note-writer", "input_contract": "DataPack + ComputePack + analyst output", "output_contract": "final research brief"},
             ],
             "meeting-prep-agent": [
-                {"stage_id": "news_reader", "role": "Reader", "profile": "meeting-news-reader"},
-                {"stage_id": "meeting_profiler", "role": "Analyst", "profile": "meeting-profiler"},
-                {"stage_id": "pack_writer", "role": "Writer", "profile": "meeting-pack-writer"},
+                {"stage_id": "meeting_profiler", "role": "Analyst", "profile": "meeting-profiler", "input_contract": "DataPack + ComputePack from employee-agent", "output_contract": "client meeting analysis brief"},
+                {"stage_id": "pack_writer", "role": "Writer", "profile": "meeting-pack-writer", "input_contract": "DataPack + ComputePack + analyst output", "output_contract": "final meeting preparation pack"},
             ],
         },
         "permission_summary": {
-            "Reader": "collects untrusted public evidence and must output schema-validated facts; no write tools.",
+            "Data": "employee-agent fetches and computes controlled evidence before Hermes workers run; no Hermes Reader stage is used.",
             "Analyst": "analyzes structured upstream evidence; no external search injection and no write tools.",
             "Writer": "writes the final artifact from upstream evidence; no external search MCP.",
+        },
+        "data_requirement_policy": {
+            "owner": "Return data_requirements only. employee-agent validates and fetches data later; do not claim data was fetched.",
+            "required": "For market-researcher and meeting-prep-agent, include 2-4 focused data_requirements unless the request is clarify/reject_or_reframe.",
+            "allowed_types": sorted(VALID_DATA_REQUIREMENT_TYPES),
+            "top_k": "Keep top_k between 3 and 8 unless the user explicitly asks for a broader evidence sweep.",
+            "market-researcher": "Plan a balanced evidence pack: latest financial_news, relevant company_announcements or regulation, market_snapshot for sector context, and company_profile/stock_fundamentals when named companies appear.",
+            "meeting-prep-agent": "Plan a meeting pack: company_profile, latest financial_news, company_announcements, risk or stakeholder context, plus internal_context when the user references uploaded/internal materials.",
+            "purpose": "Each requirement reason must explain the business decision or report section it supports.",
         },
         "confidence_rule": "If confidence is below 0.70, choose clarify and ask one concise question.",
         "output_schema": ROUTER_OUTPUT_SCHEMA,
@@ -1578,9 +1787,93 @@ def stage_started_event(stage: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def is_reader_stage(stage: dict[str, Any]) -> bool:
+    role = str(stage.get("role") or "").strip().lower()
+    profile = str(stage.get("profile") or "").strip().lower()
+    stage_id = str(stage.get("stageId") or stage.get("stage_id") or "").strip().lower()
+    reader_token = re.compile(r"(^|[-_])reader($|[-_])")
+    return role == "reader" or bool(reader_token.search(profile)) or bool(reader_token.search(stage_id))
+
+
+def compact_pack_markdown(pack: Any, title: str, limit: int = 6000) -> str:
+    if not isinstance(pack, dict):
+        return ""
+    markdown = str(pack.get("markdown") or "").strip()
+    if markdown:
+        return truncate(markdown, limit)
+    try:
+        return truncate(json.dumps(pack, ensure_ascii=False, indent=2), limit)
+    except Exception:
+        return truncate(str(pack), limit)
+
+
+def synthetic_stage(
+    *,
+    stage_id: str,
+    role: str,
+    profile: str,
+    output: str,
+    data_pack: Any = None,
+    compute_pack: Any = None,
+) -> dict[str, Any]:
+    return {
+        "stageId": stage_id,
+        "profile": profile,
+        "role": role,
+        "status": "success",
+        "runId": f"{stage_id}-{int(time.time())}",
+        "durationMs": 0,
+        "output": output,
+        "artifacts": [],
+        "usage": {},
+        "skillRefs": [],
+        "searchProviders": [],
+        "searchProvidersAttempted": [],
+        "searchResultCount": 0,
+        "searchErrors": [],
+        "sourceResearch": None,
+        "dataPack": {
+            "provider": data_pack.get("provider"),
+            "version": data_pack.get("version"),
+            "requirementCount": len(data_pack.get("requirements", [])),
+            "sectionCount": len(data_pack.get("sections", [])),
+            "evidenceCount": len(data_pack.get("evidenceItems", [])),
+            "gapCount": len(data_pack.get("gaps", [])),
+            "confidenceSummary": data_pack.get("confidenceSummary"),
+            "sections": data_pack.get("sections", []),
+            "sourceCards": data_pack.get("sourceCards", []),
+            "missingInformation": data_pack.get("missingInformation", []),
+        } if isinstance(data_pack, dict) else None,
+        "computePack": {
+            "version": compute_pack.get("version"),
+            "computeCount": len(compute_pack.get("computeItems", [])),
+            "gapCount": len(compute_pack.get("gaps", [])),
+            "computeItems": compute_pack.get("computeItems", []),
+            "gaps": compute_pack.get("gaps", []),
+        } if isinstance(compute_pack, dict) else None,
+        "artifactType": "markdown",
+        "permissionPolicy": {"warnings": [], "errors": []},
+        "manifestWorker": {
+            "id": profile,
+            "role": role,
+            "trustBoundary": "employee-agent-control-plane",
+            "tools": [],
+            "mcpServers": [],
+            "skills": [],
+            "writeHolder": False,
+        },
+    }
+
+
 def execute(payload: dict[str, Any], event_sink: Any | None = None) -> dict[str, Any]:
     prompt = str(payload.get("prompt") or payload.get("input") or "").strip()
     harness_plan = payload.get("harnessPlan") or payload.get("harness_plan") or {}
+    data_pack = payload.get("financeDataPack") or payload.get("finance_data_pack") or payload.get("dataPack")
+    compute_pack = payload.get("financeComputePack") or payload.get("finance_compute_pack") or payload.get("computePack")
+    if data_pack is None and isinstance(harness_plan, dict):
+        data_pack = harness_plan.get("financeDataPack") or harness_plan.get("dataPack")
+    if compute_pack is None and isinstance(harness_plan, dict):
+        compute_pack = harness_plan.get("financeComputePack") or harness_plan.get("computePack")
     template_id = harness_plan.get("templateId") or harness_plan.get("template_id") if isinstance(harness_plan, dict) else None
     artifact_type = infer_artifact_type(prompt, template_id, payload.get("artifact_type") or payload.get("artifactType") or (harness_plan.get("artifactType") if isinstance(harness_plan, dict) else None))
     stages = harness_plan.get("stages") if isinstance(harness_plan, dict) else None
@@ -1592,8 +1885,34 @@ def execute(payload: dict[str, Any], event_sink: Any | None = None) -> dict[str,
     manifest = manifest_for_plan(harness_plan if isinstance(harness_plan, dict) else {})
     session_prefix = f"fh_{int(time.time())}_{os.getpid()}"
     results: list[dict[str, Any]] = []
+    if isinstance(data_pack, dict):
+        stage = synthetic_stage(
+            stage_id="controlled_data_pack",
+            role="Data",
+            profile="employee-agent-data-pack",
+            output=compact_pack_markdown(data_pack, "DataPack"),
+            data_pack=data_pack,
+        )
+        results.append(stage)
+        if event_sink:
+            event_sink("stage_started", {"event": stage_started_event(stage), "harnessPlan": harness_plan})
+            event_sink("stage_done", {"stage": stage, "harnessPlan": harness_plan})
+    if isinstance(compute_pack, dict):
+        stage = synthetic_stage(
+            stage_id="controlled_compute_pack",
+            role="Compute",
+            profile="employee-agent-compute-pack",
+            output=compact_pack_markdown(compute_pack, "ComputePack"),
+            compute_pack=compute_pack,
+        )
+        results.append(stage)
+        if event_sink:
+            event_sink("stage_started", {"event": stage_started_event(stage), "harnessPlan": harness_plan})
+            event_sink("stage_done", {"stage": stage, "harnessPlan": harness_plan})
     for stage in stages:
         if not isinstance(stage, dict):
+            continue
+        if is_reader_stage(stage):
             continue
         enriched_stage = enrich_stage_from_manifest(stage, manifest)
         if event_sink:
@@ -1601,7 +1920,7 @@ def execute(payload: dict[str, Any], event_sink: Any | None = None) -> dict[str,
                 "event": stage_started_event(enriched_stage),
                 "harnessPlan": harness_plan,
             })
-        result = run_worker(enriched_stage, prompt, results, session_prefix, artifact_type=artifact_type)
+        result = run_worker(enriched_stage, prompt, results, session_prefix, artifact_type=artifact_type, data_pack=data_pack, compute_pack=compute_pack)
         results.append(result)
         if event_sink:
             event_sink("stage_done", {
@@ -1614,6 +1933,25 @@ def execute(payload: dict[str, Any], event_sink: Any | None = None) -> dict[str,
     return {
         "status": status,
         "harnessPlan": harness_plan,
+        "financeDataPack": {
+            "provider": data_pack.get("provider"),
+            "version": data_pack.get("version"),
+            "requirementCount": len(data_pack.get("requirements", [])),
+            "sectionCount": len(data_pack.get("sections", [])),
+            "evidenceCount": len(data_pack.get("evidenceItems", [])),
+            "gapCount": len(data_pack.get("gaps", [])),
+            "confidenceSummary": data_pack.get("confidenceSummary"),
+            "sections": data_pack.get("sections", []),
+            "sourceCards": data_pack.get("sourceCards", []),
+            "missingInformation": data_pack.get("missingInformation", []),
+        } if isinstance(data_pack, dict) else None,
+        "financeComputePack": {
+            "version": compute_pack.get("version"),
+            "computeCount": len(compute_pack.get("computeItems", [])),
+            "gapCount": len(compute_pack.get("gaps", [])),
+            "computeItems": compute_pack.get("computeItems", []),
+            "gaps": compute_pack.get("gaps", []),
+        } if isinstance(compute_pack, dict) else None,
         "stages": results,
         "artifactType": artifact_type,
         "finalOutput": str(results[-1].get("output") or "") if results else "",
@@ -1631,6 +1969,8 @@ def harness_plan_from_route(routed: dict[str, Any], result: dict[str, Any], prom
         "confidenceScore": result.get("confidence"),
         "reason": result.get("reason"),
         "riskFlags": result.get("risk_flags") or [],
+        "dataRequirements": result.get("data_requirements") or [],
+        "computeRequirements": result.get("compute_requirements") or [],
         "stages": [] if template_id in {"clarify", "reject_or_reframe"} else result.get("plan") or [],
     }
 
@@ -1663,6 +2003,8 @@ def run(payload: dict[str, Any], event_sink: Any | None = None) -> dict[str, Any
         "prompt": payload.get("prompt") or payload.get("input") or "",
         "harnessPlan": harness_plan,
         "artifact_type": harness_plan.get("artifactType"),
+        "financeDataPack": payload.get("financeDataPack") or payload.get("finance_data_pack") or payload.get("dataPack"),
+        "financeComputePack": payload.get("financeComputePack") or payload.get("finance_compute_pack") or payload.get("computePack"),
     }, event_sink=event_sink)
     executed["route"] = routed
     executed["harnessPlan"] = harness_plan

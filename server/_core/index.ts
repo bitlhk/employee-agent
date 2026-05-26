@@ -36,7 +36,7 @@ import { registerMemoryRoutes } from "./claw-memory";
 import { registerDownloadRoutes } from "./claw-downloads";
 import { registerFilesRoutes } from "./claw-files";
 import { registerOfficeExcelRoutes } from "./office-excel";
-import { registerOfficePptRoutes } from "./office-ppt";
+import { registerOfficeVideoRoutes } from "./office-video";
 import { registerSandboxRoutes } from "./claw-sandbox";
 import { registerChatStreamRoutes } from "./claw-chat";
 import { registerRecoverRoutes } from "./claw-recover";
@@ -46,14 +46,46 @@ import { registerIframeRoutes } from "./claw-iframe";
 import { registerMiscRoutes } from "./claw-misc";
 import { registerAuditExportRoutes } from "./audit-export-routes";
 import { registerAgentClusterLabRoutes } from "../_routes/agent-cluster-lab";
-import { registerTaskWorkbenchLabRoutes } from "../_routes/task-workbench-lab";
+import { registerOfficeTaskWorkbenchRoutes, registerTaskWorkbenchLabRoutes } from "../_routes/task-workbench-lab";
 import { APP_ROOT } from "./helpers";
+import { sdk } from "./sdk";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
+import { getClawByAdoptId } from "../db";
 import { getClientIp } from "./ip-utils";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+function resolveProtectedClawAdoptId(req: Request): string | null {
+  const host = String(req.hostname || req.headers.host || "").toLowerCase().split(":")[0];
+  const hostMatch = host.match(/^(lgc-[a-z0-9-]+)\.(?:demo\.linggantest\.top|demo\.linggan\.top)$/i);
+  if (hostMatch?.[1]) return hostMatch[1];
+  const pathMatch = String(req.path || "").match(/^\/claw\/(lgc-[a-z0-9-]+)(?:\/|$)/i);
+  return pathMatch?.[1] || null;
+}
+
+async function guardProtectedClawSpa(req: Request, res: Response): Promise<boolean> {
+  if (req.path === "/login" || req.path === "/reset-password") return true;
+  const adoptId = resolveProtectedClawAdoptId(req);
+  if (!adoptId) return true;
+
+  let user: any = null;
+  try {
+    user = await sdk.authenticateRequest(req);
+  } catch {
+    const redirect = encodeURIComponent(`${req.originalUrl || req.url || "/"}`);
+    res.redirect(302, `/login?redirect=${redirect}`);
+    return false;
+  }
+
+  const claw = await getClawByAdoptId(adoptId).catch(() => null);
+  if (!claw || Number((claw as any).userId || 0) !== Number(user?.id || 0)) {
+    res.status(403).send(`<!doctype html><meta charset="utf-8"><title>无权访问</title><body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#0f172a"><main style="min-height:100vh;display:grid;place-items:center;padding:24px"><section style="max-width:420px;border:1px solid #e2e8f0;background:white;border-radius:14px;padding:32px;text-align:center;box-shadow:0 12px 30px rgba(15,23,42,.08)"><h1 style="font-size:22px;margin:0 0 12px">无权访问该工作台</h1><p style="font-size:14px;line-height:1.7;color:#64748b;margin:0">当前账号没有该员工智能体实例的访问权限。请切换到实例所属账号，或返回自己的工作台。</p><a href="/" style="display:inline-block;margin-top:22px;padding:10px 16px;border-radius:10px;background:#0f172a;color:white;text-decoration:none;font-size:14px">返回首页</a></section></main></body>`);
+    return false;
+  }
+  return true;
+}
 
 import {
   setupSecurityHeaders,
@@ -211,7 +243,8 @@ async function startServer() {
   registerDownloadRoutes(app);
   registerFilesRoutes(app);
   registerOfficeExcelRoutes(app);
-  registerOfficePptRoutes(app);
+  registerOfficeVideoRoutes(app);
+  registerOfficeTaskWorkbenchRoutes(app);
   registerSandboxRoutes(app);
   registerChatStreamRoutes(app);
   registerRecoverRoutes(app);
@@ -331,7 +364,7 @@ async function startServer() {
     
     // SPA 路由回退：所有非 API 请求返回 index.html
     // 注意：这个路由必须在静态文件服务之后，确保静态文件优先匹配
-    app.get("*", (req, res, next) => {
+    app.get("*", async (req, res, next) => {
       // 跳过 API 路由和 health 检查
       if (req.path.startsWith("/api") || req.path.startsWith("/health")) {
         return next();
@@ -346,6 +379,10 @@ async function startServer() {
       
       // 如果已经发送了响应（比如静态文件已匹配），直接返回
       if (res.headersSent) {
+        return;
+      }
+
+      if (!(await guardProtectedClawSpa(req, res))) {
         return;
       }
       

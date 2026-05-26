@@ -15,6 +15,7 @@ import { isBuiltinBusinessAgentAdapter } from "@shared/business-agent-presets";
 export function registerBusinessRoutes(app: express.Express) {
   const builtinBusinessAgentPresetsEnabled = () =>
     String(process.env.ENABLE_BUILTIN_BUSINESS_AGENT_PRESETS || "false").toLowerCase() === "true";
+  const retiredLegacyPlazaAgentIds = new Set(["task-my-wealth", "task-ppt"]);
 
   // ── 内部调用 IP 白名单（防止 INTERNAL_API_KEY 兜底字符串泄露后被外网伪造身份）──
   const isInternalCallerIp = (req: express.Request) => {
@@ -264,26 +265,28 @@ export function registerBusinessRoutes(app: express.Express) {
           console.warn("[AGENT-PLAZA][REGISTRY] listDefinitions failed", result.error);
           return res.status(500).json({ error: "failed to load agent registry" });
         }
-        const agents = result.value.map((agent) => ({
-          ...(() => {
-            const metadata = (agent as any).metadata || {};
-            const legacyKind = String(metadata.legacyKind || "").toLowerCase();
-            const kind = legacyKind === "local" || legacyKind === "remote"
-              ? legacyKind
-              : agent.providerId.includes("lingxia-local") || agent.providerId.includes("openclaw") ? "local" : "remote";
-            return {
-              kind,
-              icon: String(metadata.legacyIcon || agent.iconName || "Bot"),
-              sandboxScope: kind === "local" ? "agent" : "remote",
-              remote: kind !== "local",
-            };
-          })(),
-          id: agent.id,
-          name: agent.displayName,
-          description: agent.longDescription || agent.shortDescription || "",
-          model: "agent-registry/v1",
-          healthStatus: agent.healthStatus,
-        }));
+        const agents = result.value
+          .filter((agent) => !retiredLegacyPlazaAgentIds.has(agent.id))
+          .map((agent) => ({
+            ...(() => {
+              const metadata = (agent as any).metadata || {};
+              const legacyKind = String(metadata.legacyKind || "").toLowerCase();
+              const kind = legacyKind === "local" || legacyKind === "remote"
+                ? legacyKind
+                : agent.providerId.includes("lingxia-local") || agent.providerId.includes("openclaw") ? "local" : "remote";
+              return {
+                kind,
+                icon: String(metadata.legacyIcon || agent.iconName || "Bot"),
+                sandboxScope: kind === "local" ? "agent" : "remote",
+                remote: kind !== "local",
+              };
+            })(),
+            id: agent.id,
+            name: agent.displayName,
+            description: agent.longDescription || agent.shortDescription || "",
+            model: "agent-registry/v1",
+            healthStatus: agent.healthStatus,
+          }));
         return res.json({ agents, source: "registry" });
       }
 
@@ -293,6 +296,7 @@ export function registerBusinessRoutes(app: express.Express) {
       if (!userId) return res.status(401).json({ error: "未登录" });
       const profileKeys = await getRequesterAgentProfile(userId);
       const agents = dbAgents
+        .filter((agent: any) => !retiredLegacyPlazaAgentIds.has(String(agent?.id || "")))
         .filter((agent: any) => isAgentAvailableForProfiles(agent, profileKeys))
         .map(publicAgentPayload);
       return res.json({ agents, source: "legacy" });

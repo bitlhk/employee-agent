@@ -153,6 +153,40 @@ export function registerWSProxy(server: Server) {
     let activeUserPrefersChinese = false;
     let pendingAssistantPreamble = "";
     let preambleWindowOpen = false;
+    let lastChatSnapshotText = "";
+    let sawAssistantDelta = false;
+    let deferredClientSendDelayMs = 0;
+
+    const splitLargeDeltaForClient = (content: string): string[] => {
+      const text = String(content || "");
+      if (text.length <= 240) return text ? [text] : [];
+
+      const chunks: string[] = [];
+      let buf = "";
+      const pushBuf = () => {
+        if (!buf) return;
+        chunks.push(buf);
+        buf = "";
+      };
+      const pushLong = (part: string) => {
+        for (let i = 0; i < part.length; i += 180) {
+          chunks.push(part.slice(i, i + 180));
+        }
+      };
+
+      const parts = text.match(/[\s\S]*?(?:[。！？!?；;：:\n]+|\.\s+|,\s+|$)/g)?.filter(Boolean) || [text];
+      for (const part of parts) {
+        if (part.length > 360) {
+          pushBuf();
+          pushLong(part);
+          continue;
+        }
+        if ((buf + part).length > 220) pushBuf();
+        buf += part;
+      }
+      pushBuf();
+      return chunks.length > 0 ? chunks : [text];
+    };
 
     const emitAssistantDelta = (content: string) => {
       if (!content) return;
@@ -163,9 +197,22 @@ export function registerWSProxy(server: Server) {
           console.log("[MEMORY-DEBUG] first delta received");
         }
       }
-      sendToClient({
-        choices: [{ index: 0, delta: { content }, finish_reason: null }],
-      });
+      const chunks = splitLargeDeltaForClient(content);
+      const shouldPace = chunks.length > 1;
+      for (const chunk of chunks) {
+        const frame = {
+          choices: [{ index: 0, delta: { content: chunk }, finish_reason: null }],
+        };
+        if (deferredClientSendDelayMs > 0) {
+          const delay = deferredClientSendDelayMs;
+          setTimeout(() => sendToClient(frame), delay);
+        } else {
+          sendToClient(frame);
+        }
+        if (shouldPace || deferredClientSendDelayMs > 0) {
+          deferredClientSendDelayMs += 45;
+        }
+      }
     };
 
     const flushPendingAssistantPreamble = () => {
@@ -254,6 +301,16 @@ export function registerWSProxy(server: Server) {
       }
     };
 
+    const sendToClientAfterDeltaQueue = (data: object) => {
+      if (deferredClientSendDelayMs <= 0) {
+        sendToClient(data);
+        return;
+      }
+      const delay = deferredClientSendDelayMs + 10;
+      deferredClientSendDelayMs = delay + 1;
+      setTimeout(() => sendToClient(data), delay);
+    };
+
     const emitWorkspaceFiles = () => {
       try {
         const wsDir = openClawWorkspaceDir(meta.agentId);
@@ -304,7 +361,7 @@ export function registerWSProxy(server: Server) {
           gw!.send(JSON.stringify({
             type: "req", id: randomUUID(), method: "connect",
             params: {
-              minProtocol: 3, maxProtocol: 3,
+              minProtocol: 3, maxProtocol: 4,
               client: { id: "openclaw-control-ui", version: "1.0.0", platform: "lingxia", mode: "ui" },
               role: "operator", scopes: SCOPES, auth: { token: GW_TOKEN },
               device: { id: DEV_ID, publicKey: DEV_PUB, signature: sig, signedAt: t, nonce: n },
@@ -360,12 +417,22 @@ export function registerWSProxy(server: Server) {
 
         const normalized = normalizeWsEvent(msg, sessionKey);
         if (normalized.kind === "events") {
+          const rawEvent = typeof msg.event === "string" ? msg.event : "";
+          const rawPayload = msg.payload && typeof msg.payload === "object" ? msg.payload as any : {};
+          const rawStream = typeof rawPayload.stream === "string" ? rawPayload.stream : "";
+          const rawState = typeof rawPayload.state === "string" ? rawPayload.state : "";
           if (sessionKey && activeClientRunId) {
             touchChatRun(sessionKey, activeClientRunId, "ws_event");
           }
           for (const evt of normalized.events) {
             switch (evt.type) {
               case "delta":
+                if (rawEvent === "chat" && rawState === "delta" && sawAssistantDelta) {
+                  break;
+                }
+                if (rawEvent === "agent" && rawStream === "assistant") {
+                  sawAssistantDelta = true;
+                }
                 if (preambleWindowOpen && activeUserPrefersChinese) {
                   pendingAssistantPreamble += evt.content;
                   if (isRoutineEnglishToolPreambleCandidate(pendingAssistantPreamble)) {
@@ -376,6 +443,19 @@ export function registerWSProxy(server: Server) {
                   emitAssistantDelta(evt.content);
                 }
                 break;
+
+              case "chat_snapshot": {
+                if (sawAssistantDelta) {
+                  break;
+                }
+                const snapshot = evt.content;
+                const delta = snapshot.startsWith(lastChatSnapshotText)
+                  ? snapshot.slice(lastChatSnapshotText.length)
+                  : snapshot;
+                lastChatSnapshotText = snapshot;
+                if (delta) emitAssistantDelta(delta);
+                break;
+              }
 
               case "thinking":
                 sendToClient({
@@ -438,8 +518,8 @@ export function registerWSProxy(server: Server) {
                 flushPendingAssistantPreamble();
                 emitWorkspaceFiles();
                 sawLifecycleEnd = true;
-                sendToClient({ __stream_end: true });
-                sendToClient({
+                sendToClientAfterDeltaQueue({ __stream_end: true });
+                sendToClientAfterDeltaQueue({
                   choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
                 });
                 finalizeChatNormal();
@@ -447,12 +527,19 @@ export function registerWSProxy(server: Server) {
 
               case "chat_final":
                 flushPendingAssistantPreamble();
+                if (evt.content && !sawAssistantDelta) {
+                  const delta = evt.content.startsWith(lastChatSnapshotText)
+                    ? evt.content.slice(lastChatSnapshotText.length)
+                    : evt.content;
+                  lastChatSnapshotText = evt.content;
+                  if (delta) emitAssistantDelta(delta);
+                }
                 if (memAcc) {
                   console.log("[MEMORY-DEBUG] chat final, flushing memAcc, buffer len:", memAcc.getBuffer().length);
                   memAcc.flush();
                   memAcc = null;
                 }
-                sendToClient({
+                sendToClientAfterDeltaQueue({
                   choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
                 });
                 markChatRunComplete(String(sessionKey || ""), activeClientRunId, "chat_final");
@@ -577,6 +664,9 @@ export function registerWSProxy(server: Server) {
           activeUserPrefersChinese = userLikelyUsesChinese(rawUserMessage);
           pendingAssistantPreamble = "";
           preambleWindowOpen = activeUserPrefersChinese;
+          lastChatSnapshotText = "";
+          sawAssistantDelta = false;
+          deferredClientSendDelayMs = 0;
           activeClientRunId = normalizeClientRunId((msg as any).clientRunId);
           const runtimeMode = normalizeRuntimeMode((msg as any).runtimeMode);
           if (sessionKey && activeClientRunId) {

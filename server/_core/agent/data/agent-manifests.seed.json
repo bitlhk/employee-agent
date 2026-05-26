@@ -101,7 +101,26 @@
             "read",
             "grep"
           ],
-          "mcpServers": [],
+          "mcpServers": [
+            {
+              "id": "brave",
+              "displayName": "Brave Search",
+              "status": "available",
+              "required": false
+            },
+            {
+              "id": "bocha",
+              "displayName": "Bocha Search",
+              "status": "available",
+              "required": false
+            },
+            {
+              "id": "tavily",
+              "displayName": "Tavily Search",
+              "status": "available",
+              "required": false
+            }
+          ],
           "skills": [],
           "outputSchemaRef": "server/_core/agent/data/schemas/market-sector-reader.schema.json",
           "notes": "Reader consumes untrusted third-party materials and must return schema-validated JSON facts only."
@@ -314,7 +333,26 @@
             "read",
             "grep"
           ],
-          "mcpServers": [],
+          "mcpServers": [
+            {
+              "id": "brave",
+              "displayName": "Brave Search",
+              "status": "available",
+              "required": false
+            },
+            {
+              "id": "bocha",
+              "displayName": "Bocha Search",
+              "status": "available",
+              "required": false
+            },
+            {
+              "id": "tavily",
+              "displayName": "Tavily Search",
+              "status": "available",
+              "required": false
+            }
+          ],
           "skills": [],
           "outputSchemaRef": "server/_core/agent/data/schemas/meeting-news-reader.schema.json",
           "notes": "Reader consumes untrusted inbound news/email-like inputs and must return schema-validated JSON news items only."

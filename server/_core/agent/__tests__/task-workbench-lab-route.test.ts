@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import http from "node:http";
+import { describe, expect, it } from "vitest";
 import { createTaskWorkbenchLabHandlers } from "../../../_routes/task-workbench-lab";
 import type { AgentResult } from "../../../../shared/types/agent";
 import type { TaskRunResult, TaskTemplate, TaskTemplateRunner } from "../../../../shared/types/task-template";
@@ -20,7 +21,7 @@ function mockResponse() {
 }
 
 const baseTemplate: TaskTemplate = {
-  id: "ppt_report_writing",
+  id: "generic_report_writing",
   version: 1,
   status: "active",
   displayName: "PPT 汇报写作",
@@ -29,10 +30,10 @@ const baseTemplate: TaskTemplate = {
   estimatedDurationMs: 90000,
   maxDurationMs: 300000,
   stages: [{
-    id: "ppt_generation",
-    displayName: "生成演示文稿",
-    personaId: "jianye",
-    agentDefinitionId: "task-ppt",
+    id: "outline_writer",
+    displayName: "生成 PPT 蓝图",
+    personaId: "writer",
+    agentDefinitionId: "generic-writer",
     executionMode: "single",
     inputMapping: { original: true },
     expectedOutputs: ["ppt_preview"],
@@ -49,21 +50,21 @@ const baseTemplate: TaskTemplate = {
 
 const baseRun: TaskRunResult = {
   taskRunId: "task-run-1",
-  taskTemplateId: "ppt_report_writing",
+  taskTemplateId: "generic_report_writing",
   taskTemplateVersion: 1,
   taskTemplateChainHash: "hash",
   status: "completed",
   stages: [{
-    stageId: "ppt_generation",
-    personaId: "jianye",
-    agentDefinitionId: "task-ppt",
+    stageId: "outline_writer",
+    personaId: "writer",
+    agentDefinitionId: "generic-writer",
     status: "success",
     durationMs: 100,
     artifacts: [],
     runResult: {
       id: "result-1",
       envelopeVersion: "v1",
-      agentDefinitionId: "task-ppt",
+      agentDefinitionId: "generic-writer",
       status: "success",
       artifacts: [],
       output: "OK",
@@ -138,10 +139,22 @@ describe("task workbench lab route", () => {
     expect(res.body.source).toBe("task-workbench-lab");
     expect(res.body.templates.map((template: any) => template.id)).toEqual([
       "market_research_brief",
+      "excel_fill",
       "meeting_prep_agent",
-      "ai_topic_insight_ppt",
+      "meeting_notes",
+      "wind_announcement_digest",
+      "research_ppt",
+      "video_outline",
     ]);
-    expect(loadedIds).toEqual(["market_research_brief", "meeting_prep_agent", "ai_topic_insight_ppt"]);
+    expect(loadedIds).toEqual([
+      "market_research_brief",
+      "excel_fill",
+      "meeting_prep_agent",
+      "meeting_notes",
+      "wind_announcement_digest",
+      "research_ppt",
+      "video_outline",
+    ]);
   });
 
   it("runs a task and redacts sensitive fields", async () => {
@@ -177,7 +190,7 @@ describe("task workbench lab route", () => {
       }),
     });
 
-    await handlers.routePrompt({ body: { taskTemplateId: "ai_topic_insight_ppt", prompt: "你好" } } as any, res as any);
+    await handlers.routePrompt({ body: { taskTemplateId: "research_ppt", prompt: "你好" } } as any, res as any);
 
     expect(res.statusCode).toBe(200);
     expect(res.body.decision.intent).toBe("chat");
@@ -192,18 +205,18 @@ describe("task workbench lab route", () => {
       routePrompt: async () => ({
         intent: "run_template",
         confidence: "high",
-        selectedTemplateId: "ai_topic_insight_ppt",
+        selectedTemplateId: "research_ppt",
         normalizedGoal: "Sequoia AI Ascent 2026 PPT",
-        userVisiblePlan: ["闻舟检索并筛选可信资料", "墨衡提炼逻辑线与引用依据", "简页生成可预览、可下载的 PPT"],
+        userVisiblePlan: ["检索员筛选可信资料", "分析师提炼逻辑线", "大纲员生成蓝图", "模板渲染器生成 PPTX", "质量校验器检查产物"],
       }),
     });
 
-    await handlers.routePrompt({ body: { taskTemplateId: "ai_topic_insight_ppt", prompt: "把 Sequoia AI Ascent 2026 做成 PPT" } } as any, res as any);
+    await handlers.routePrompt({ body: { taskTemplateId: "research_ppt", prompt: "把 Sequoia AI Ascent 2026 做成 PPT" } } as any, res as any);
 
     expect(res.statusCode).toBe(200);
     expect(res.body.decision.intent).toBe("run_template");
-    expect(res.body.decision.selectedTemplateId).toBe("ai_topic_insight_ppt");
-    expect(res.body.decision.userVisiblePlan).toHaveLength(3);
+    expect(res.body.decision.selectedTemplateId).toBe("research_ppt");
+    expect(res.body.decision.userVisiblePlan).toHaveLength(5);
   });
 
   it("returns 404 when template is missing", async () => {
@@ -225,32 +238,58 @@ describe("task workbench lab route", () => {
     const oldEnabled = process.env.TASK_WORKBENCH_HARNESS_EXECUTOR;
     const oldEndpoint = process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT;
     const oldToken = process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_TOKEN;
+    const oldWindSkillDir = process.env.WIND_MCP_SKILL_DIR;
+    let remoteBody: any = null;
+    const server = http.createServer((req, response) => {
+      expect(req.method).toBe("POST");
+      expect(req.url).toBe("/v1/harness/execute");
+      expect(req.headers.authorization).toBe("Bearer test-token");
+      const chunks: Buffer[] = [];
+      req.on("data", chunk => chunks.push(Buffer.from(chunk)));
+      req.on("end", () => {
+        remoteBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({
+          status: "completed",
+          stages: [{
+            stageId: "comps_analyst",
+            profile: "market-comps-spreader",
+            role: "Analyst",
+            status: "success",
+            runId: "run-1",
+            durationMs: 12,
+            output: "analysis ok",
+            skillRefs: ["comps-analysis"],
+          }, {
+            stageId: "note_writer",
+            profile: "market-note-writer",
+            role: "Writer",
+            status: "success",
+            runId: "run-2",
+            durationMs: 13,
+            output: "remote ok",
+            skillRefs: ["client-report"],
+          }],
+          finalOutput: "remote ok",
+        }));
+      });
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
     process.env.TASK_WORKBENCH_HARNESS_EXECUTOR = "true";
-    process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT = "http://127.0.0.1:18670";
+    process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT = `http://127.0.0.1:${port}`;
     process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_TOKEN = "test-token";
+    process.env.WIND_MCP_SKILL_DIR = "/tmp/not-installed-wind-mcp-skill";
     let localRunnerCalled = false;
-    const fetchMock = vi.spyOn(globalThis, "fetch" as any).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        status: "completed",
-        stages: [{
-          stageId: "sector_reader",
-          profile: "market-sector-reader",
-          role: "Reader",
-          status: "success",
-          runId: "run-1",
-          durationMs: 12,
-          output: "remote ok",
-          skillRefs: ["sector-overview"],
-        }],
-        finalOutput: "remote ok",
-      }),
-    } as any);
     const handlers = createTaskWorkbenchLabHandlers({
       enabled: () => true,
       authenticateUser: async () => ({ id: 2, role: "admin" }),
       createRunner: () => ({
-        loadTemplate: async () => ({ ok: true, value: baseTemplate }),
+        loadTemplate: async () => ({
+          ok: true,
+          value: { ...baseTemplate, id: "market_research_brief" },
+        }),
         runTask: async () => {
           localRunnerCalled = true;
           return { ok: true, value: baseRun };
@@ -266,10 +305,31 @@ describe("task workbench lab route", () => {
           source: "financial_harness",
           runId: "harness-run-1",
           templateId: "market-researcher",
+          dataRequirements: [{
+            id: "d1",
+            type: "internal_context",
+            query: "cross-border payment policy updates",
+            topK: 4,
+            required: true,
+          }],
+          computeRequirements: [{
+            id: "c1",
+            type: "peer_comparison_table",
+            inputRefs: ["d1"],
+            reason: "compare evidence coverage",
+          }],
           stages: [{
             stageId: "sector_reader",
             role: "Reader",
             profile: "market-sector-reader",
+          }, {
+            stageId: "comps_analyst",
+            role: "Analyst",
+            profile: "market-comps-spreader",
+          }, {
+            stageId: "note_writer",
+            role: "Writer",
+            profile: "market-note-writer",
           }],
         },
       },
@@ -277,19 +337,61 @@ describe("task workbench lab route", () => {
 
     expect(res.statusCode).toBe(200);
     expect(localRunnerCalled).toBe(false);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:18670/v1/harness/execute",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({ authorization: "Bearer test-token" }),
-      }),
-    );
+    expect(remoteBody).toBeTruthy();
+    expect(remoteBody.harnessPlan.stages.map((stage: any) => stage.profile)).toEqual([
+      "market-comps-spreader",
+      "market-note-writer",
+    ]);
+    expect(remoteBody.financeDataPack).toEqual(expect.objectContaining({
+      version: "v1.1",
+      provider: "wind-financial-docs",
+      evidenceItems: [],
+      sourceCards: [],
+    }));
+    expect(remoteBody.financeDataPack.requirements).toHaveLength(1);
+    expect(remoteBody.financeDataPack.sections[0]).toEqual(expect.objectContaining({
+      requirementId: "d1",
+      status: "missing",
+    }));
+    expect(remoteBody.financeDataPack.gaps[0]).toEqual(expect.objectContaining({
+      id: "gap_1",
+      requirementId: "d1",
+      severity: "error",
+    }));
+    expect(remoteBody.financeComputePack).toEqual(expect.objectContaining({
+      version: "v1",
+      computeItems: expect.arrayContaining([
+        expect.objectContaining({
+          id: "c1",
+          type: "peer_comparison_table",
+        }),
+      ]),
+    }));
+    expect(remoteBody.financeComputePack.gaps[0]).toEqual(expect.objectContaining({
+      computeId: "c1",
+      severity: "warning",
+    }));
     expect(res.body.taskRun.metadata.remoteHarness.enabled).toBe(true);
-    expect(res.body.taskRun.stages[0].runResult.output).toBe("remote ok");
+    expect(res.body.taskRun.metadata.financeDataPack).toEqual(expect.objectContaining({
+      provider: "wind-financial-docs",
+      requirementCount: 1,
+      gapCount: 1,
+      confidenceSummary: expect.objectContaining({ level: "missing" }),
+    }));
+    expect(res.body.taskRun.metadata.financeComputePack).toEqual(expect.objectContaining({
+      computeCount: 1,
+      gapCount: 1,
+    }));
+    expect(res.body.taskRun.stages.map((stage: any) => stage.agentDefinitionId)).toEqual([
+      "market-comps-spreader",
+      "market-note-writer",
+    ]);
+    expect(res.body.taskRun.stages[1].runResult.output).toBe("remote ok");
 
-    fetchMock.mockRestore();
+    await new Promise<void>(resolve => server.close(() => resolve()));
     process.env.TASK_WORKBENCH_HARNESS_EXECUTOR = oldEnabled;
     process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT = oldEndpoint;
     process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_TOKEN = oldToken;
+    process.env.WIND_MCP_SKILL_DIR = oldWindSkillDir;
   });
 });

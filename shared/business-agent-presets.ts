@@ -3,17 +3,14 @@ export const RESERVED_LEGACY_BUSINESS_AGENT_IDS = [
   "task-bond",
   "task-credit-risk",
   "task-claim-ev",
-  "task-my-wealth",
   "task-hermes",
   "task-trace",
-  "task-ppt",
   "task-code",
   "task-slides",
 ] as const;
 
 export const BUILTIN_BUSINESS_AGENT_ADAPTERS = [
   "stock-agent-v1",
-  "my-wealth-hermes-v1",
   "bond-hermes-v1",
   "credit-risk-hermes-v1",
   "claim-ev-hermes-v1",

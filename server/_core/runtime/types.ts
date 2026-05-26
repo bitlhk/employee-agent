@@ -11,6 +11,7 @@ export type RuntimeFinishReason = "stop" | "length" | "tool_calls" | "function_c
 
 export type RuntimeEvent =
   | { type: "delta"; content: string }
+  | { type: "chat_snapshot"; content: string }
   | { type: "thinking"; content: string }
   | {
       type: "tool_call";
@@ -29,7 +30,7 @@ export type RuntimeEvent =
     }
   | { type: "item_status"; progressText: string }
   | { type: "lifecycle_end" }
-  | { type: "chat_final" }
+  | { type: "chat_final"; content?: string }
   | { type: "stream_done" }
   | { type: "finish_reason"; reason: RuntimeFinishReason }
   | { type: "error"; message: string };

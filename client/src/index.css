@@ -1124,7 +1124,7 @@
   --status-neutral: oklch(0.55 0 0);           /* gray-500 */
   --status-neutral-bg: oklch(0.96 0 0);        /* gray-50 */
   /* Light theme - Corporate Elite */
-  --background: oklch(0.99 0 0);
+  --background: #f8f8f7;
   --foreground: oklch(0.2 0.01 65);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.2 0.01 65);
@@ -1510,6 +1510,7 @@
   --oc-bg:             var(--bg, #0a0c10);
   --oc-bg-elevated:    var(--panel, #0f1114);
   --oc-bg-surface:     var(--card, #181c24);
+  --oc-bg-soft:        color-mix(in oklab, var(--oc-bg-surface) 82%, var(--oc-bg) 18%);
   --oc-bg-hover:       rgba(255,255,255,0.04);
   --oc-bg-active:      rgba(255,255,255,0.08);
   --oc-bg-overlay:     rgba(0,0,0,0.6);
@@ -1553,9 +1554,10 @@
    颜色 Token — 浅色模式覆盖
    ══════════════════════════════════════════════════════════════ */
 :root[data-theme-mode="light"] {
-  --oc-bg:             #f5f5f7;
+  --oc-bg:             #f8f8f7;
   --oc-bg-elevated:    #ffffff;
   --oc-bg-surface:     #ffffff;
+  --oc-bg-soft:        #f3f3f2;
   --oc-bg-hover:       rgba(0,0,0,0.03);
   --oc-bg-active:      rgba(0,0,0,0.06);
   --oc-bg-overlay:     rgba(0,0,0,0.3);
@@ -2432,7 +2434,7 @@ select.settings-input {
 
 /* ---- 亮色模式（Apple 风格）：干净白底 + 精致灰度 ---- */
 :root[data-theme-mode="light"] {
-  --bg:           #f5f5f7;
+  --bg:           #f8f8f7;
   --bg-elevated:  #ffffff;
   --panel:        #ffffff;
   --card:         #ffffff;
@@ -2447,6 +2449,8 @@ select.settings-input {
   --border-hover: rgba(0, 0, 0, 0.18);
 
   --oc-bg:            var(--bg);
+  --oc-bg-surface:    var(--card);
+  --oc-bg-soft:       #f3f3f2;
   --oc-panel:         var(--panel);
   --oc-card:          var(--card);
   --oc-border:        var(--border);
@@ -3223,7 +3227,7 @@ select.settings-input {
 /* 浅色模式下消息列表容器用浅灰底，侧栏保持白色 */
 :root[data-theme-mode="light"] .lingxia-shell main .stealth-scrollbar,
 :root[data-theme-mode="light"] .lingxia-shell main > .overflow-y-auto {
-  background: #F3F4F6 !important;
+  background: var(--oc-bg) !important;
 }
 
 /* ── 修复项 2：用户消息气泡 → 粉红底色 ── */
@@ -3713,13 +3717,13 @@ html:has(:root[data-theme-mode="light"]) body {
 
 /* 浅色：shell + 消息区背景统一浅灰 */
 :root[data-theme-mode="light"] .lingxia-shell {
-  background: #F3F4F6 !important;
+  background: var(--oc-bg) !important;
 }
 :root[data-theme-mode="light"] .lingxia-shell main {
-  background: #F3F4F6 !important;
+  background: var(--oc-bg) !important;
 }
 :root[data-theme-mode="light"] .lingxia-shell .flex-none:last-child {
-  background: #F3F4F6 !important;
+  background: var(--oc-bg) !important;
 }
 
 /* 浅色：输入框卡片阴影调轻 */
@@ -4040,7 +4044,7 @@ html:has(:root[data-theme-mode="light"]) body {
 /* ClawAdmin shell visual standardization */
 body[data-admin-light="true"] {
   color-scheme: light;
-  --bg: #f9fafb;
+  --bg: #f8f8f7;
   --bg-elevated: #ffffff;
   --panel: #ffffff;
   --card: #ffffff;
@@ -4053,7 +4057,7 @@ body[data-admin-light="true"] {
   --border: rgba(17, 24, 39, 0.10);
   --border-strong: rgba(17, 24, 39, 0.14);
   --border-hover: rgba(17, 24, 39, 0.20);
-  --background: oklch(0.99 0 0);
+  --background: #f8f8f7;
   --foreground: oklch(0.2 0.01 65);
   --card-foreground: oklch(0.2 0.01 65);
   --popover-foreground: oklch(0.2 0.01 65);
@@ -4067,8 +4071,9 @@ body[data-admin-light="true"] {
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
   --ring: #dc2626;
-  --oc-bg: #f9fafb;
+  --oc-bg: #f8f8f7;
   --oc-bg-surface: #ffffff;
+  --oc-bg-soft: #f3f3f2;
   --oc-panel: #ffffff;
   --oc-card: #ffffff;
   --oc-border: rgba(17, 24, 39, 0.10);
@@ -4084,7 +4089,7 @@ body[data-admin-light="true"] {
   --admin-red-border: rgba(220, 38, 38, 0.20);
   --admin-ink: #111827;
   --admin-muted: #6b7280;
-  --admin-subtle: #f8fafc;
+  --admin-subtle: #f3f3f2;
   --admin-border: rgba(17, 24, 39, 0.10);
   font-family: var(--oc-font-ui, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif);
   color: var(--admin-ink);
@@ -4117,7 +4122,7 @@ body[data-admin-light="true"] [data-radix-popper-content-wrapper] [role="option"
 /* ClawHome follows the product landing light palette regardless of user theme. */
 body[data-home-light="true"] {
   color-scheme: light;
-  --bg: #f9fafb;
+  --bg: #f8f8f7;
   --bg-elevated: #ffffff;
   --panel: #ffffff;
   --card: #ffffff;
@@ -4130,7 +4135,7 @@ body[data-home-light="true"] {
   --border: rgba(17, 24, 39, 0.10);
   --border-strong: rgba(17, 24, 39, 0.14);
   --border-hover: rgba(17, 24, 39, 0.20);
-  --background: oklch(0.99 0 0);
+  --background: #f8f8f7;
   --foreground: oklch(0.2 0.01 65);
   --card-foreground: oklch(0.2 0.01 65);
   --popover-foreground: oklch(0.2 0.01 65);
@@ -4141,8 +4146,9 @@ body[data-home-light="true"] {
   --accent-foreground: oklch(0.2 0.005 286);
   --primary-foreground: #ffffff;
   --destructive-foreground: #ffffff;
-  --oc-bg: #f9fafb;
+  --oc-bg: #f8f8f7;
   --oc-bg-surface: #ffffff;
+  --oc-bg-soft: #f3f3f2;
   --oc-panel: #ffffff;
   --oc-card: #ffffff;
   --oc-border: rgba(17, 24, 39, 0.10);
@@ -4151,7 +4157,7 @@ body[data-home-light="true"] {
   --oc-text-tertiary: #9ca3af;
 }
 .claw-home-shell {
-  background: linear-gradient(180deg, #ffffff 0%, rgba(249,250,251,0.82) 100%) !important;
+  background: linear-gradient(180deg, #ffffff 0%, rgba(248,248,247,0.90) 100%) !important;
   color: #111827 !important;
 }
 .claw-home-shell header,
@@ -5321,8 +5327,8 @@ body[data-admin-light="true"] .admin-collaboration-tab .divide-y > :not([hidden]
    - hover never lowers text contrast in light mode.
    ============================================================ */
 :root[data-theme-mode="light"] {
-  --lingxia-light-hover-bg: #F8FAFC;
-  --lingxia-light-hover-bg-strong: #F1F5F9;
+  --lingxia-light-hover-bg: #f8f8f7;
+  --lingxia-light-hover-bg-strong: #f3f3f2;
   --lingxia-light-hover-border: #CBD5E1;
   --lingxia-light-hover-text: #111827;
 }

@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import type { CSSProperties } from "react";
 import { OpenClawWSClient } from "@/lib/openclaw-ws";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { toast } from "sonner";
@@ -499,7 +500,7 @@ export default function Home() {
   const toggleLingxiaSection = (s: string) => setLingxiaOpenSections(prev => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
   const [lingxiaTopSettingsOpen, setLingxiaTopSettingsOpen] = useState(false);
 
-  const { user } = useAuth({ redirectOnUnauthenticated: false });
+  const { user, loading: authLoading } = useAuth({ redirectOnUnauthenticated: false });
 
   // ── adoptId 提取：子域名模式 OR 路径模式 ──
   const currentHost = window.location.hostname.toLowerCase();
@@ -513,6 +514,11 @@ export default function Home() {
   // 合并：子域名优先，路径兜底
   const resolvedAdoptId = adoptIdFromHost || adoptIdFromPath;
   const isLingxiaSubdomain = !!resolvedAdoptId;
+  useEffect(() => {
+    if (!resolvedAdoptId || authLoading || user) return;
+    const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.location.href = `/login?redirect=${encodeURIComponent(redirect)}`;
+  }, [resolvedAdoptId, authLoading, user]);
   const userStorageId = user?.id != null ? String(user.id) : "";
   const [webConversationId, setWebConversationId] = useState("");
   useEffect(() => {
@@ -541,17 +547,17 @@ export default function Home() {
   const isJiuwenRuntime = String(resolvedAdoptId || "").startsWith("lgj-");
   const isDirectHttpRuntime = isHermesRuntime || isJiuwenRuntime;
 
-  const { data: clawByAdoptId, isLoading: clawByAdoptLoading } = trpc.claw.getByAdoptId.useQuery(
+  const { data: clawByAdoptId, isLoading: clawByAdoptLoading, error: clawByAdoptError } = trpc.claw.getByAdoptId.useQuery(
     { adoptId: resolvedAdoptId || "" },
-    { enabled: !!resolvedAdoptId, retry: false }
+    { enabled: !!resolvedAdoptId && !!user, retry: false }
   );
   const { data: clawSettings, refetch: refetchClawSettings } = trpc.claw.getSettings.useQuery(
     { adoptId: resolvedAdoptId || "" },
-    { enabled: !!resolvedAdoptId, retry: false }
+    { enabled: !!resolvedAdoptId && !!user, retry: false }
   );
   const { data: availableModels } = trpc.claw.getAvailableModels.useQuery(
     resolvedAdoptId ? { adoptId: resolvedAdoptId } : undefined,
-    { retry: false, refetchInterval: 30000, refetchOnWindowFocus: true, refetchOnMount: true }
+    { enabled: !!resolvedAdoptId && !!user, retry: false, refetchInterval: 30000, refetchOnWindowFocus: true, refetchOnMount: true }
   );
   // 模型兜底：优先用户在前端选过的偏好（claw-model-overrides.json），其次 isDefault，最后第一个
   // 修复刷新后下拉强制回 GLM5.1 但 OpenClaw 实际跑用户上次选的 model 的前后端不一致 bug
@@ -1820,7 +1826,7 @@ export default function Home() {
     }, 1200);
 
     let runtimeTimer: number | null = null;
-    if (resolvedAdoptId) {
+    if (resolvedAdoptId && user) {
       runtimeTimer = window.setTimeout(() => {
         fetch(`/api/claw/runtime-info?adoptId=${encodeURIComponent(resolvedAdoptId)}`)
           .then(r => r.json())
@@ -1833,7 +1839,7 @@ export default function Home() {
       clearTimeout(versionTimer);
       if (runtimeTimer !== null) clearTimeout(runtimeTimer);
     };
-  }, [isLingxiaSubdomain, resolvedAdoptId]);
+  }, [isLingxiaSubdomain, resolvedAdoptId, user]);
 
   // 员工智能体聊天消息区：仅在接近底部时自动跟随
   const lingxiaMsgsEndRef = useRef<HTMLDivElement>(null);
@@ -1879,6 +1885,40 @@ export default function Home() {
     const Cmp = sidebarIconMap[navKey];
     return <Cmp size={14} className="sidebar-item-icon" style={{ color: "var(--oc-text-secondary)" }} />;
   };
+
+  const accessGateShell = (title: string, desc: string, action?: any) => (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-6">
+      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <BrandIcon size={36} animate={false} />
+        <h1 className="mt-5 text-xl font-semibold text-slate-950">{title}</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-500">{desc}</p>
+        {action ? <div className="mt-6">{action}</div> : null}
+      </div>
+    </div>
+  );
+
+  if (resolvedAdoptId && (authLoading || (!!user && clawByAdoptLoading))) {
+    return accessGateShell("正在校验访问权限", "请稍候，系统正在确认你是否可以访问该工作台。");
+  }
+
+  if (resolvedAdoptId && !authLoading && !user) {
+    return accessGateShell("请先登录", "登录后才能访问员工智能体工作台，未登录状态不会展示实例页面。");
+  }
+
+  if (resolvedAdoptId && user && (clawByAdoptError || (!clawByAdoptLoading && !clawByAdoptId))) {
+    return accessGateShell(
+      "无权访问该工作台",
+      "当前账号没有该员工智能体实例的访问权限。请切换到实例所属账号，或返回自己的工作台。",
+      <button
+        type="button"
+        onClick={() => setLocationCoop("/")}
+        className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+      >
+        返回首页
+      </button>,
+    );
+  }
+
   if (isLingxiaSubdomain) {
     return (
       <>
@@ -1889,7 +1929,15 @@ export default function Home() {
         {collabOpen && <CollabDrawer onClose={() => setCollabOpen(false)} adoptId={resolvedAdoptId || ""} />}
 
         {/* ── Body ── */}
-        <div className="flex-1 min-h-0 flex overflow-hidden">
+        <div
+          className="flex-1 min-h-0 flex overflow-hidden"
+          style={
+            {
+              "--lingxia-sidebar-width": `${sidebarCollapsed ? 72 : sidebarWidth}px`,
+              "--lingxia-topbar-height": "52px",
+            } as CSSProperties
+          }
+        >
 
           {/* ── 左侧：折叠面板，对齐 OpenClaw sidebar ── */}
           <aside className="relative flex-none flex flex-col overflow-hidden shrink-0 hide-all-scrollbars" style={{ width: sidebarCollapsed ? 72 : sidebarWidth, background: "var(--oc-panel)", borderRight: "1px solid var(--border)", transition: "width 0.2s ease" }}>

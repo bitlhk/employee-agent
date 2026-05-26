@@ -201,7 +201,7 @@ export function TenantAuditTab() {
             <Label className="text-xs text-gray-500 mb-1 block">Agent ID</Label>
             <Input
               type="text"
-              placeholder="例：task-ppt"
+              placeholder="例：task-code"
               value={filterAgentId}
               onChange={(e) => setFilterAgentId(e.target.value)}
               className="h-8 text-xs"

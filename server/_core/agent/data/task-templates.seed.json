@@ -20,9 +20,7 @@
           "inputMapping": {
             "original": true
           },
-          "expectedOutputs": [
-            "markdown_report"
-          ],
+          "expectedOutputs": ["markdown_report"],
           "timeoutMs": 180000,
           "onFailure": "stop"
         },
@@ -35,13 +33,9 @@
           "executionMode": "single",
           "inputMapping": {
             "original": true,
-            "fromStages": [
-              "sector_reader"
-            ]
+            "fromStages": ["sector_reader"]
           },
-          "expectedOutputs": [
-            "markdown_report"
-          ],
+          "expectedOutputs": ["markdown_report"],
           "timeoutMs": 180000,
           "onFailure": "retry_once_then_stop"
         },
@@ -54,23 +48,15 @@
           "executionMode": "single",
           "inputMapping": {
             "original": true,
-            "fromStages": [
-              "sector_reader",
-              "comps_analyst"
-            ]
+            "fromStages": ["sector_reader", "comps_analyst"]
           },
-          "expectedOutputs": [
-            "markdown_report"
-          ],
+          "expectedOutputs": ["markdown_report"],
           "timeoutMs": 240000,
           "onFailure": "retry_once_then_stop"
         }
       ],
       "outputPolicy": {
-        "allowedArtifactTypes": [
-          "markdown_report",
-          "file_download"
-        ],
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
         "disclaimers": [
           "ai_generated_label",
           "investment_advisory",
@@ -103,9 +89,7 @@
           "inputMapping": {
             "original": true
           },
-          "expectedOutputs": [
-            "markdown_report"
-          ],
+          "expectedOutputs": ["markdown_report"],
           "timeoutMs": 180000,
           "onFailure": "stop"
         },
@@ -118,13 +102,9 @@
           "executionMode": "single",
           "inputMapping": {
             "original": true,
-            "fromStages": [
-              "news_reader"
-            ]
+            "fromStages": ["news_reader"]
           },
-          "expectedOutputs": [
-            "markdown_report"
-          ],
+          "expectedOutputs": ["markdown_report"],
           "timeoutMs": 180000,
           "onFailure": "retry_once_then_stop"
         },
@@ -137,27 +117,16 @@
           "executionMode": "single",
           "inputMapping": {
             "original": true,
-            "fromStages": [
-              "news_reader",
-              "profile_analyst"
-            ]
+            "fromStages": ["news_reader", "profile_analyst"]
           },
-          "expectedOutputs": [
-            "markdown_report"
-          ],
+          "expectedOutputs": ["markdown_report"],
           "timeoutMs": 240000,
           "onFailure": "retry_once_then_stop"
         }
       ],
       "outputPolicy": {
-        "allowedArtifactTypes": [
-          "markdown_report",
-          "file_download"
-        ],
-        "disclaimers": [
-          "ai_generated_label",
-          "fact_check_required"
-        ],
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": ["ai_generated_label", "fact_check_required"],
         "citationRequired": true,
         "saveToWorkspaceDefault": false
       },
@@ -166,84 +135,309 @@
       "updatedBy": 2
     },
     {
-      "id": "ai_topic_insight_ppt",
+      "id": "meeting_notes",
       "version": 1,
       "status": "active",
-      "displayName": "\u70ed\u70b9\u8bdd\u9898 PPT \u751f\u6210",
-      "shortDescription": "\u8f93\u5165 AI / \u91d1\u878d\u79d1\u6280\u70ed\u70b9\u4e3b\u9898\uff0c\u81ea\u52a8\u68c0\u7d22\u6700\u65b0\u8d44\u6599\u3001\u63d0\u70bc\u903b\u8f91\u7ebf\uff0c\u5e76\u751f\u6210\u53ef\u9884\u89c8\u3001\u53ef\u4e0b\u8f7d\u7684 PPT\u3002",
-      "category": "presentation",
-      "estimatedDurationMs": 240000,
+      "displayName": "会议纪要",
+      "shortDescription": "上传会议录音或粘贴会议转写，生成会议摘要、关键决策、待办事项和待确认问题。",
+      "category": "general",
+      "estimatedDurationMs": 180000,
       "maxDurationMs": 600000,
       "stages": [
         {
-          "id": "source_research",
+          "id": "audio_transcriber",
           "stageType": "source_research",
-          "displayName": "\u68c0\u7d22\u5458\u68c0\u7d22\u6700\u65b0\u8d44\u6599",
+          "displayName": "转写员读取录音或会议文本",
           "personaId": "reader",
-          "agentDefinitionId": "wenzhou-source-research",
+          "agentDefinitionId": "meeting-audio-transcriber",
           "executionMode": "single",
           "inputMapping": {
             "original": true
           },
-          "expectedOutputs": [
-            "markdown_report"
-          ],
-          "timeoutMs": 90000,
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 240000,
           "onFailure": "stop"
         },
         {
-          "id": "research_review",
-          "displayName": "\u5206\u6790\u5e08\u63d0\u70bc\u89c2\u70b9\u4e0e\u5927\u7eb2",
-          "personaId": "analyst",
-          "agentDefinitionId": "task-my-wealth",
+          "id": "notes_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "写作员生成会议纪要",
+          "personaId": "writer",
+          "agentDefinitionId": "meeting-notes-writer",
           "executionMode": "single",
           "inputMapping": {
             "original": true,
-            "fromStages": [
-              "source_research"
-            ]
+            "fromStages": ["audio_transcriber"]
           },
-          "expectedOutputs": [
-            "markdown_report"
-          ],
+          "expectedOutputs": ["markdown_report", "file_download"],
+          "timeoutMs": 240000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": ["ai_generated_label", "fact_check_required"],
+        "citationRequired": false,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-24T00:00:00.000Z",
+      "updatedAt": "2026-05-24T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "excel_fill",
+      "version": 1,
+      "status": "active",
+      "displayName": "Excel 填表",
+      "shortDescription": "上传 Excel 和背景资料，先生成可审核的填表方案，再写回一个新的 Excel 副本。",
+      "category": "general",
+      "estimatedDurationMs": 180000,
+      "maxDurationMs": 600000,
+      "stages": [
+        {
+          "id": "excel_planner",
+          "stageType": "source_research",
+          "displayName": "分析员生成填表方案",
+          "personaId": "analyst",
+          "agentDefinitionId": "excel-fill-planner",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 240000,
+          "onFailure": "stop"
+        },
+        {
+          "id": "excel_writer",
+          "stageType": "agent",
+          "displayName": "执行员写回 Excel 副本",
+          "personaId": "writer",
+          "agentDefinitionId": "excel-fill-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["excel_planner"]
+          },
+          "expectedOutputs": ["file_download", "markdown_report"],
+          "timeoutMs": 300000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": [
+          "markdown_report",
+          "file_download",
+          "xlsx_table"
+        ],
+        "disclaimers": ["ai_generated_label", "fact_check_required"],
+        "citationRequired": false,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-24T00:00:00.000Z",
+      "updatedAt": "2026-05-24T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "wind_announcement_digest",
+      "version": 1,
+      "status": "active",
+      "displayName": "公告解读",
+      "shortDescription": "输入公司、股票或公告主题，读取公告和财经新闻，生成事实摘要、影响路径、风险和后续跟踪清单。",
+      "category": "stock_research",
+      "estimatedDurationMs": 180000,
+      "maxDurationMs": 600000,
+      "stages": [
+        {
+          "id": "wind_announcement_reader",
+          "stageType": "source_research",
+          "displayName": "检索员读取万得公告与财经新闻数据",
+          "personaId": "reader",
+          "agentDefinitionId": "wind-announcement-reader",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 180000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "impact_analyst",
+          "stageType": "llm_synthesis",
+          "displayName": "专业写作员生成公告影响解读",
+          "personaId": "writer",
+          "agentDefinitionId": "wind-report-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["wind_announcement_reader"]
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 240000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": [
+          "ai_generated_label",
+          "investment_advisory",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-22T00:00:00.000Z",
+      "updatedAt": "2026-05-22T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "research_ppt",
+      "version": 1,
+      "status": "active",
+      "displayName": "\u7814\u7a76\u578b PPT \u5236\u4f5c",
+      "shortDescription": "\u8f93\u5165\u4e3b\u9898\u3001\u6750\u6599\u6216\u6c47\u62a5\u8981\u6c42\uff0c\u6309\u68c0\u7d22\u3001\u5206\u6790\u3001\u5927\u7eb2\u3001\u6a21\u677f\u6e32\u67d3\u3001\u8d28\u91cf\u6821\u9a8c\u94fe\u8def\u751f\u6210\u53ef\u9884\u89c8\u548c\u53ef\u4e0b\u8f7d\u7684 PPT\u3002",
+      "category": "presentation",
+      "estimatedDurationMs": 300000,
+      "maxDurationMs": 900000,
+      "stages": [
+        {
+          "id": "source_reader",
+          "stageType": "source_research",
+          "displayName": "\u68c0\u7d22\u5458\u6536\u96c6\u8d44\u6599\u4e0e\u6765\u6e90",
+          "personaId": "reader",
+          "agentDefinitionId": "ppt-source-reader",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 240000,
+          "onFailure": "stop"
+        },
+        {
+          "id": "insight_analyst",
+          "stageType": "llm_synthesis",
+          "displayName": "\u5206\u6790\u5e08\u63d0\u70bc\u903b\u8f91\u4e3b\u7ebf",
+          "personaId": "analyst",
+          "agentDefinitionId": "ppt-insight-analyst",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["source_reader"]
+          },
+          "expectedOutputs": ["markdown_report"],
           "timeoutMs": 180000,
           "onFailure": "retry_once_then_stop"
         },
         {
-          "id": "ppt_generation",
-          "displayName": "\u5199\u4f5c\u5458\u751f\u6210\u6f14\u793a\u6587\u7a3f",
+          "id": "outline_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "\u5927\u7eb2\u5458\u751f\u6210 PPT \u84dd\u56fe",
           "personaId": "writer",
-          "agentDefinitionId": "task-ppt",
+          "agentDefinitionId": "ppt-outline-writer",
           "executionMode": "single",
           "inputMapping": {
             "original": true,
-            "fromStages": [
-              "research_review"
-            ]
+            "fromStages": ["source_reader", "insight_analyst"]
           },
-          "expectedOutputs": [
-            "ppt_preview",
-            "markdown_report"
-          ],
-          "timeoutMs": 360000,
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 240000,
           "onFailure": "retry_once_then_stop"
+        },
+        {
+          "id": "template_renderer",
+          "stageType": "agent",
+          "displayName": "\u6a21\u677f\u6e32\u67d3\u5668\u751f\u6210 PPTX",
+          "personaId": "renderer",
+          "agentDefinitionId": "ppt-template-renderer",
+          "executionMode": "single",
+          "inputMapping": {
+            "fromStages": ["outline_writer"]
+          },
+          "expectedOutputs": ["ppt_preview", "file_download"],
+          "timeoutMs": 180000,
+          "onFailure": "stop"
+        },
+        {
+          "id": "quality_checker",
+          "stageType": "agent",
+          "displayName": "\u8d28\u91cf\u6821\u9a8c\u5668\u68c0\u67e5\u4ea7\u7269",
+          "personaId": "checker",
+          "agentDefinitionId": "ppt-quality-checker",
+          "executionMode": "single",
+          "inputMapping": {
+            "fromStages": ["template_renderer"]
+          },
+          "expectedOutputs": ["summary_artifact"],
+          "timeoutMs": 60000,
+          "onFailure": "partial_success"
         }
       ],
       "outputPolicy": {
         "allowedArtifactTypes": [
           "ppt_preview",
           "markdown_report",
-          "file_download"
+          "file_download",
+          "summary_artifact"
         ],
-        "disclaimers": [
-          "ai_generated_label",
-          "fact_check_required"
-        ],
+        "disclaimers": ["ai_generated_label", "fact_check_required"],
         "citationRequired": true,
         "saveToWorkspaceDefault": false
       },
-      "createdAt": "2026-05-04T14:40:00.000Z",
-      "updatedAt": "2026-05-08T00:00:00.000Z",
+      "createdAt": "2026-05-21T00:00:00.000Z",
+      "updatedAt": "2026-05-21T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "video_outline",
+      "version": 1,
+      "status": "active",
+      "displayName": "视频提纲",
+      "shortDescription": "输入公开视频链接和提纲要求，读取可用文字资料并生成学习、汇报或 PPT 章节提纲。",
+      "category": "general",
+      "estimatedDurationMs": 180000,
+      "maxDurationMs": 600000,
+      "stages": [
+        {
+          "id": "video_source_reader",
+          "stageType": "source_research",
+          "displayName": "检索员读取视频信息与可用文字资料",
+          "personaId": "reader",
+          "agentDefinitionId": "video-outline-reader",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 240000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "outline_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "写作员生成视频提纲",
+          "personaId": "writer",
+          "agentDefinitionId": "video-outline-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["video_source_reader"]
+          },
+          "expectedOutputs": ["markdown_report", "file_download"],
+          "timeoutMs": 300000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": ["ai_generated_label", "fact_check_required"],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-24T00:00:00.000Z",
+      "updatedAt": "2026-05-24T00:00:00.000Z",
       "updatedBy": 2
     }
   ]

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BarChart3, Bot, CheckCircle2, Code2, FileText, Loader2, Play, ShieldCheck, WalletCards, XCircle } from "lucide-react";
+import { AlertTriangle, BarChart3, Bot, CheckCircle2, Code2, Loader2, Play, ShieldCheck, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 type BusinessAgent = {
@@ -32,22 +32,10 @@ type ClusterRun = {
   errorSummary?: string;
 };
 
-const MVP_AGENT_IDS = ["task-my-wealth", "task-ppt", "task-code", "task-stock"] as const;
+const MVP_AGENT_IDS = ["task-code", "task-stock"] as const;
 const MAX_SELECTED = 3;
 
 const FALLBACK_AGENTS: Record<string, BusinessAgent> = {
-  "task-my-wealth": {
-    id: "task-my-wealth",
-    name: "个人财富解释助手",
-    description: "财富管理、资产配置和材料解读的教育型助手，不提供个性化买卖建议。",
-    remote: true,
-  },
-  "task-ppt": {
-    id: "task-ppt",
-    name: "PPT 汇报助手",
-    description: "面向企业汇报材料的结构规划、内容生成和演示文稿产出助手。",
-    remote: true,
-  },
   "task-code": {
     id: "task-code",
     name: "代码开发助手",
@@ -62,17 +50,15 @@ const FALLBACK_AGENTS: Record<string, BusinessAgent> = {
   },
 };
 
-const AGENT_ICONS: Record<string, typeof WalletCards> = {
-  "task-my-wealth": WalletCards,
-  "task-ppt": FileText,
+const AGENT_ICONS: Record<string, typeof Bot> = {
   "task-code": Code2,
   "task-stock": BarChart3,
 };
 
 const QUICK_PROMPTS = [
-  "请分别说明你会如何帮助完成一份金融汇报，不要生成文件。",
+  "请分别说明你会如何帮助完成一个研发和数据分析任务，不要生成文件。",
   "请用三句话说明你能完成什么任务，不要生成文件。",
-  "请分别从财富解释、股票分析和汇报制作角度，给我一份银行客户资产配置沟通材料的工作思路。",
+  "请从代码开发和股票分析两个角度，给我一份任务拆解建议。",
 ];
 
 function statusLabel(status: string) {
@@ -105,7 +91,7 @@ function formatElapsed(ms: number | null) {
 export function AgentClusterLabPage() {
   const [agents, setAgents] = useState<Record<string, BusinessAgent>>(FALLBACK_AGENTS);
   const [loadingAgents, setLoadingAgents] = useState(true);
-  const [selected, setSelected] = useState<string[]>(["task-my-wealth", "task-ppt"]);
+  const [selected, setSelected] = useState<string[]>(["task-code", "task-stock"]);
   const [prompt, setPrompt] = useState(QUICK_PROMPTS[0]);
   const [running, setRunning] = useState(false);
   const [run, setRun] = useState<ClusterRun | null>(null);
