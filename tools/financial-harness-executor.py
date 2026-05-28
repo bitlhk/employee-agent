@@ -63,6 +63,8 @@ WRITE_TOOLS = {"write", "edit", "bash", "shell", "delete", "move"}
 PUBLIC_SEARCH_SERVERS = {"brave", "bocha", "tavily", "web-search"}
 ROUTER_OUTPUT_SCHEMA = {
     "template_id": "market-researcher | meeting-prep-agent | clarify | reject_or_reframe",
+    "skill_spec_id": "market-research-brief | client-meeting-prep | announcement-digest | fund-compare | peer-comps-analysis | earnings-commentary | company-one-page-memo | macro-data-brief | credit-analysis | bond-rate-outlook",
+    "execution_lane": "official_spec | alice_exploration",
     "confidence": "number between 0 and 1",
     "reason": "short routing reason",
     "clarification_question": "one question when template_id=clarify, otherwise empty",
@@ -142,6 +144,64 @@ VALID_COMPUTE_REQUIREMENT_TYPES = {
     "financial_ratio_summary",
     "fund_performance_compare",
     "excel_cleaning_summary",
+}
+
+FINANCE_SKILL_SPECS = {
+    "announcement-digest": {
+        "lane": "official_spec",
+        "allowed_data": ["company_announcements", "financial_news"],
+        "allowed_compute": ["none"],
+    },
+    "market-research-brief": {
+        "lane": "official_spec",
+        "allowed_data": ["financial_news", "company_announcements", "company_profile", "stock_fundamentals", "market_snapshot", "macro_series", "fund_data", "bond_data"],
+        "allowed_compute": ["none", "time_series_metrics", "peer_comparison_table", "financial_ratio_summary"],
+    },
+    "client-meeting-prep": {
+        "lane": "official_spec",
+        "allowed_data": ["financial_news", "company_announcements", "company_profile", "stock_fundamentals", "market_snapshot", "fund_data", "bond_data", "internal_context"],
+        "allowed_compute": ["none", "time_series_metrics", "peer_comparison_table", "financial_ratio_summary"],
+    },
+    "fund-compare": {
+        "lane": "official_spec",
+        "allowed_data": ["fund_data", "financial_news", "market_snapshot"],
+        "allowed_compute": ["fund_performance_compare", "time_series_metrics"],
+    },
+    "peer-comps-analysis": {
+        "lane": "official_spec",
+        "allowed_data": ["company_profile", "stock_fundamentals", "market_snapshot", "financial_news", "company_announcements"],
+        "allowed_compute": ["peer_comparison_table", "financial_ratio_summary", "time_series_metrics"],
+    },
+    "earnings-commentary": {
+        "lane": "official_spec",
+        "allowed_data": ["company_announcements", "stock_fundamentals", "financial_news", "company_profile"],
+        "allowed_compute": ["financial_ratio_summary", "time_series_metrics"],
+    },
+    "company-one-page-memo": {
+        "lane": "alice_exploration",
+        "allowed_data": ["company_profile", "stock_fundamentals", "company_announcements", "financial_news"],
+        "allowed_compute": ["financial_ratio_summary", "peer_comparison_table"],
+    },
+    "macro-data-brief": {
+        "lane": "alice_exploration",
+        "allowed_data": ["macro_series", "financial_news", "market_snapshot"],
+        "allowed_compute": ["time_series_metrics"],
+    },
+    "credit-analysis": {
+        "lane": "alice_exploration",
+        "allowed_data": ["bond_data", "company_profile", "stock_fundamentals", "company_announcements", "financial_news"],
+        "allowed_compute": ["financial_ratio_summary", "time_series_metrics"],
+    },
+    "bond-rate-outlook": {
+        "lane": "alice_exploration",
+        "allowed_data": ["bond_data", "macro_series", "market_snapshot", "financial_news"],
+        "allowed_compute": ["time_series_metrics"],
+    },
+}
+
+DEFAULT_SKILL_SPEC_BY_TEMPLATE = {
+    "market-researcher": "market-research-brief",
+    "meeting-prep-agent": "client-meeting-prep",
 }
 
 PROFILE_PORTS = {
@@ -1499,6 +1559,22 @@ def normalize_compute_requirements(value: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def normalize_skill_spec_id(value: Any, template_id: str) -> str:
+    candidate = str(value or "").strip()
+    if candidate in FINANCE_SKILL_SPECS:
+        return candidate
+    return DEFAULT_SKILL_SPEC_BY_TEMPLATE.get(template_id, "")
+
+
+def normalize_execution_lane(value: Any, skill_spec_id: str) -> str:
+    candidate = str(value or "").strip()
+    if candidate in {"official_spec", "alice_exploration"}:
+        return candidate
+    if skill_spec_id in FINANCE_SKILL_SPECS:
+        return str(FINANCE_SKILL_SPECS[skill_spec_id].get("lane") or "")
+    return ""
+
+
 def normalize_route_result(result: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
     errors: list[str] = []
     if not isinstance(result, dict):
@@ -1538,8 +1614,18 @@ def normalize_route_result(result: dict[str, Any]) -> tuple[dict[str, Any] | Non
             })
         plan = normalized_plan
 
+    skill_spec_id = normalize_skill_spec_id(
+        result.get("skill_spec_id", result.get("skillSpecId")),
+        template_id,
+    )
+    execution_lane = normalize_execution_lane(
+        result.get("execution_lane", result.get("executionLane")),
+        skill_spec_id,
+    )
     normalized = {
         "template_id": template_id,
+        "skill_spec_id": skill_spec_id,
+        "execution_lane": execution_lane,
         "confidence": confidence,
         "reason": str(result.get("reason") or "").strip(),
         "clarification_question": str(result.get("clarification_question") or result.get("clarificationQuestion") or "").strip(),
@@ -1711,6 +1797,13 @@ def route(payload: dict[str, Any]) -> dict[str, Any]:
             "meeting-prep-agent": "Use for preparing a client/company/person meeting pack, agenda, question list, stakeholder background, or visit briefing.",
             "clarify": "Use when the request is too broad, lacks financial/business context, or does not specify whether the user wants a research brief or meeting pack.",
             "reject_or_reframe": "Use for trading instructions, regulated investment advice, suitability decisions, privacy-invasive requests, or guaranteed outcomes.",
+        },
+        "skill_spec_policy": {
+            "owner": "Return skill_spec_id and execution_lane. The selected spec controls which data and compute requirements are allowed.",
+            "default_mapping": DEFAULT_SKILL_SPEC_BY_TEMPLATE,
+            "specs": FINANCE_SKILL_SPECS,
+            "p0_rule": "For now, market-researcher should normally use market-research-brief and meeting-prep-agent should normally use client-meeting-prep.",
+            "alice_rule": "Alice exploration specs are listed for future governance but should not be selected unless the available template and product entry explicitly allow them.",
         },
         "stage_policy": {
             "market-researcher": [

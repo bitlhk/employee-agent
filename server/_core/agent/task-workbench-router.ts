@@ -1,10 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { callLLM, type LLMProvider } from "../llm-provider";
+import {
+  FINANCE_SKILL_SPEC_IDS,
+  defaultFinanceSkillSpecForHarnessTemplate,
+  getFinanceSkillSpec,
+  isFinanceSkillSpecId,
+} from "./finance-skill-specs";
 
 export const taskWorkbenchHarnessPlanStageSchema = z.object({
   stageId: z.string().min(1),
-  role: z.enum(["Reader", "Analyst", "Writer"]),
+  role: z.enum(["Reader", "Analyst", "Writer", "Data", "Compute", "Alice", "Reviewer"]),
   profile: z.string().min(1),
   inputContract: z.string().optional(),
   outputContract: z.string().optional(),
@@ -65,6 +71,8 @@ export const taskWorkbenchHarnessPlanSchema = z.object({
     "clarify",
     "reject_or_reframe",
   ]),
+  skillSpecId: z.enum(FINANCE_SKILL_SPEC_IDS).optional(),
+  executionLane: z.enum(["official_spec", "alice_exploration"]).optional(),
   confidenceScore: z.number().min(0).max(1).optional(),
   reason: z.string().optional(),
   riskFlags: z.array(z.string()).optional(),
@@ -85,6 +93,14 @@ export const taskWorkbenchRouterDecisionSchema = z.object({
       "market_research_brief",
       "meeting_prep_agent",
       "wind_announcement_digest",
+      "fund_compare",
+      "peer_comps_analysis",
+      "theme_leader_analysis",
+      "earnings_commentary",
+      "company_one_page_memo",
+      "macro_data_brief",
+      "credit_analysis",
+      "bond_rate_outlook",
       "video_outline",
       "meeting_notes",
       "excel_fill",
@@ -169,8 +185,18 @@ function isGreetingOrMeta(prompt: string) {
 }
 
 function isUnsupported(prompt: string) {
-  return /(替我|帮我)?(下单|买入|卖出|交易|转账|付款|提现|发邮件|群发|发送给客户|删除生产|重置生产|执行交易)/.test(
-    prompt
+  const text = trimPrompt(prompt);
+  if (
+    /(下单|买入|卖出|转账|付款|提现|发邮件|群发|发送给客户|删除生产|重置生产|执行交易)/.test(
+      text
+    )
+  ) {
+    return true;
+  }
+  return (
+    /(替我|帮我|直接|自动|立即).{0,10}(交易下单|下单交易|委托交易|实盘交易|挂单)/.test(
+      text
+    ) || /(交易|委托|挂单).{0,8}(下单|执行|账户|实盘)/.test(text)
   );
 }
 
@@ -248,6 +274,61 @@ function looksLikeShortQuestion(prompt: string) {
   );
 }
 
+const SELECTED_TEMPLATE_LOCK_IDS = [
+  "market_research_brief",
+  "meeting_prep_agent",
+  "wind_announcement_digest",
+  "fund_compare",
+  "peer_comps_analysis",
+  "theme_leader_analysis",
+  "earnings_commentary",
+  "company_one_page_memo",
+  "macro_data_brief",
+  "credit_analysis",
+  "bond_rate_outlook",
+  "video_outline",
+  "meeting_notes",
+  "excel_fill",
+  "research_ppt",
+] as const;
+
+function isLockableTemplateId(
+  templateId: unknown
+): templateId is TaskWorkbenchRouterDecision["selectedTemplateId"] {
+  return SELECTED_TEMPLATE_LOCK_IDS.includes(templateId as any);
+}
+
+function visiblePlanForTemplate(
+  templateId: TaskWorkbenchRouterDecision["selectedTemplateId"]
+) {
+  if (templateId === "market_research_brief") return MARKET_RESEARCH_PLAN;
+  if (templateId === "meeting_prep_agent") return MEETING_PREP_PLAN;
+  if (templateId === "wind_announcement_digest") return WIND_ANNOUNCEMENT_PLAN;
+  if (templateId === "video_outline") return VIDEO_OUTLINE_PLAN;
+  if (templateId === "meeting_notes") return MEETING_NOTES_PLAN;
+  if (templateId === "excel_fill") return EXCEL_FILL_PLAN;
+  if (
+    templateId &&
+    [
+      "fund_compare",
+      "peer_comps_analysis",
+      "theme_leader_analysis",
+      "earnings_commentary",
+      "company_one_page_memo",
+      "macro_data_brief",
+      "credit_analysis",
+      "bond_rate_outlook",
+    ].includes(templateId)
+  ) {
+    return [
+      "调取受控金融数据或官方专业能力",
+      "生成结构化分析与风险提示",
+      "输出可预览和可下载的研究材料",
+    ];
+  }
+  return DEFAULT_PLAN;
+}
+
 export function routeTaskWorkbenchPromptByRules(
   input: RouteInput
 ): TaskWorkbenchRouterDecision {
@@ -279,6 +360,22 @@ export function routeTaskWorkbenchPromptByRules(
     };
   }
 
+  // If the user entered through a concrete Office Space card, keep that
+  // capability selected. Words like "材料/PPT/汇报" should not silently jump a
+  // finance workflow into research_ppt.
+  if (
+    isLockableTemplateId(input.selectedTemplateId) &&
+    !looksLikeShortQuestion(prompt)
+  ) {
+    return {
+      intent: "run_template",
+      confidence: "medium",
+      selectedTemplateId: input.selectedTemplateId,
+      normalizedGoal: prompt,
+      userVisiblePlan: visiblePlanForTemplate(input.selectedTemplateId),
+    };
+  }
+
   if (hasPptSignal(prompt)) {
     return {
       intent: "run_template",
@@ -289,11 +386,7 @@ export function routeTaskWorkbenchPromptByRules(
     };
   }
 
-  if (
-    input.selectedTemplateId === "video_outline" &&
-    hasResearchSignal(prompt) &&
-    !looksLikeShortQuestion(prompt)
-  ) {
+  if (input.selectedTemplateId === "video_outline" && hasResearchSignal(prompt)) {
     return {
       intent: "run_template",
       confidence: "medium",
@@ -620,14 +713,42 @@ function normalizeComputeRequirements(
 function normalizeHarnessRole(
   value: unknown
 ): TaskWorkbenchHarnessPlanStage["role"] | null {
-  if (value === "Reader" || value === "Analyst" || value === "Writer")
+  if (
+    value === "Reader" ||
+    value === "Analyst" ||
+    value === "Writer" ||
+    value === "Data" ||
+    value === "Compute" ||
+    value === "Alice" ||
+    value === "Reviewer"
+  )
     return value;
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
   if (normalized === "reader") return "Reader";
   if (normalized === "analyst") return "Analyst";
   if (normalized === "writer") return "Writer";
+  if (normalized === "data") return "Data";
+  if (normalized === "compute") return "Compute";
+  if (normalized === "alice") return "Alice";
+  if (normalized === "reviewer") return "Reviewer";
   return null;
+}
+
+function normalizeFinanceSkillSpecId(
+  value: unknown,
+  templateId: "market-researcher" | "meeting-prep-agent" | "clarify" | "reject_or_reframe"
+) {
+  if (isFinanceSkillSpecId(value)) return value;
+  return defaultFinanceSkillSpecForHarnessTemplate(templateId)?.id;
+}
+
+function normalizeFinanceExecutionLane(
+  value: unknown,
+  skillSpecId?: (typeof FINANCE_SKILL_SPEC_IDS)[number]
+) {
+  if (value === "official_spec" || value === "alice_exploration") return value;
+  return skillSpecId ? getFinanceSkillSpec(skillSpecId).lane : undefined;
 }
 
 function normalizeHarnessPlan(input: {
@@ -640,6 +761,8 @@ function normalizeHarnessPlan(input: {
   confidence?: unknown;
   reason?: unknown;
   riskFlags?: unknown;
+  skillSpecId?: unknown;
+  executionLane?: unknown;
   dataRequirements?: unknown;
   computeRequirements?: unknown;
   plan?: unknown;
@@ -675,10 +798,16 @@ function normalizeHarnessPlan(input: {
           : undefined,
     });
   }
+  const skillSpecId = normalizeFinanceSkillSpecId(
+    input.skillSpecId,
+    input.templateId
+  );
   return taskWorkbenchHarnessPlanSchema.parse({
     source: "financial_harness",
     runId: input.runId,
     templateId: input.templateId,
+    skillSpecId,
+    executionLane: normalizeFinanceExecutionLane(input.executionLane, skillSpecId),
     confidenceScore:
       typeof input.confidence === "number" && Number.isFinite(input.confidence)
         ? input.confidence
@@ -751,6 +880,10 @@ async function routeWithFinancialHarness(
     reason?: unknown;
     clarification_question?: unknown;
     risk_flags?: unknown;
+    skill_spec_id?: unknown;
+    skillSpecId?: unknown;
+    execution_lane?: unknown;
+    executionLane?: unknown;
     data_requirements?: unknown;
     dataRequirements?: unknown;
     compute_requirements?: unknown;
@@ -777,6 +910,8 @@ async function routeWithFinancialHarness(
     confidence: parsed.confidence,
     reason: parsed.reason,
     riskFlags: parsed.risk_flags,
+    skillSpecId: parsed.skill_spec_id ?? parsed.skillSpecId,
+    executionLane: parsed.execution_lane ?? parsed.executionLane,
     dataRequirements: parsed.data_requirements ?? parsed.dataRequirements,
     computeRequirements:
       parsed.compute_requirements ?? parsed.computeRequirements,
@@ -797,6 +932,8 @@ async function routeWithFinancialHarness(
         mode: "financial_harness",
         runId,
         templateId,
+        skillSpecId: harnessPlan.skillSpecId,
+        executionLane: harnessPlan.executionLane,
         reason: parsed.reason,
         riskFlags: parsed.risk_flags,
         harnessPlan,
@@ -816,6 +953,8 @@ async function routeWithFinancialHarness(
         mode: "financial_harness",
         runId,
         templateId,
+        skillSpecId: harnessPlan.skillSpecId,
+        executionLane: harnessPlan.executionLane,
         reason: parsed.reason,
         riskFlags: parsed.risk_flags,
         harnessPlan,
@@ -857,39 +996,16 @@ function normalizeDecision(
   fallbackPrompt: string
 ): TaskWorkbenchRouterDecision {
   if (decision.intent === "run_template") {
-    const selectedTemplateId =
-      decision.selectedTemplateId === "market_research_brief"
-        ? "market_research_brief"
-        : decision.selectedTemplateId === "meeting_prep_agent"
-          ? "meeting_prep_agent"
-          : decision.selectedTemplateId === "wind_announcement_digest"
-            ? "wind_announcement_digest"
-            : decision.selectedTemplateId === "video_outline"
-              ? "video_outline"
-              : decision.selectedTemplateId === "meeting_notes"
-                ? "meeting_notes"
-                : decision.selectedTemplateId === "excel_fill"
-                  ? "excel_fill"
-                  : "research_ppt";
+    const selectedTemplateId = isLockableTemplateId(decision.selectedTemplateId)
+      ? decision.selectedTemplateId
+      : "research_ppt";
     return {
       ...decision,
       selectedTemplateId,
       normalizedGoal: decision.normalizedGoal || fallbackPrompt,
       userVisiblePlan: decision.userVisiblePlan?.length
         ? decision.userVisiblePlan
-        : selectedTemplateId === "market_research_brief"
-          ? MARKET_RESEARCH_PLAN
-          : selectedTemplateId === "meeting_prep_agent"
-            ? MEETING_PREP_PLAN
-            : selectedTemplateId === "wind_announcement_digest"
-              ? WIND_ANNOUNCEMENT_PLAN
-              : selectedTemplateId === "video_outline"
-                ? VIDEO_OUTLINE_PLAN
-                : selectedTemplateId === "meeting_notes"
-                  ? MEETING_NOTES_PLAN
-                  : selectedTemplateId === "excel_fill"
-                    ? EXCEL_FILL_PLAN
-                    : DEFAULT_PLAN,
+        : visiblePlanForTemplate(selectedTemplateId),
     };
   }
   return decision;
@@ -921,6 +1037,14 @@ export async function routeTaskWorkbenchPrompt(
     ruleDecision.intent === "run_template" &&
     (ruleDecision.selectedTemplateId === "research_ppt" ||
       ruleDecision.selectedTemplateId === "wind_announcement_digest" ||
+      ruleDecision.selectedTemplateId === "fund_compare" ||
+      ruleDecision.selectedTemplateId === "peer_comps_analysis" ||
+      ruleDecision.selectedTemplateId === "theme_leader_analysis" ||
+      ruleDecision.selectedTemplateId === "earnings_commentary" ||
+      ruleDecision.selectedTemplateId === "company_one_page_memo" ||
+      ruleDecision.selectedTemplateId === "macro_data_brief" ||
+      ruleDecision.selectedTemplateId === "credit_analysis" ||
+      ruleDecision.selectedTemplateId === "bond_rate_outlook" ||
       ruleDecision.selectedTemplateId === "video_outline" ||
       ruleDecision.selectedTemplateId === "meeting_notes" ||
       ruleDecision.selectedTemplateId === "excel_fill")

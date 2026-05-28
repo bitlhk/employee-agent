@@ -293,11 +293,555 @@
       "updatedBy": 2
     },
     {
+      "id": "fund_compare",
+      "version": 1,
+      "status": "active",
+      "displayName": "公募基金对比",
+      "shortDescription": "基于 Wind MCP 基金数据生成收益、风险、持仓和风格对比报告。",
+      "category": "stock_research",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 600000,
+      "stages": [
+        {
+          "id": "controlled_data_pack",
+          "stageType": "source_research",
+          "displayName": "调取基金数据与市场背景",
+          "personaId": "data",
+          "agentDefinitionId": "employee-agent-finance-data",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 180000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "controlled_compute_pack",
+          "stageType": "agent",
+          "displayName": "生成基金对比计算摘要",
+          "personaId": "compute",
+          "agentDefinitionId": "employee-agent-finance-compute",
+          "executionMode": "single",
+          "inputMapping": {
+            "fromStages": ["controlled_data_pack"]
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 120000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "finance_report_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "写作员生成基金对比报告",
+          "personaId": "writer",
+          "agentDefinitionId": "wind-report-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["controlled_data_pack", "controlled_compute_pack"]
+          },
+          "expectedOutputs": ["markdown_report", "file_download"],
+          "timeoutMs": 300000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": [
+          "ai_generated_label",
+          "investment_advisory",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-26T00:00:00.000Z",
+      "updatedAt": "2026-05-26T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "peer_comps_analysis",
+      "version": 1,
+      "status": "active",
+      "displayName": "同业比选",
+      "shortDescription": "基于 Wind MCP 财务、行情、公告和新闻数据生成同业对比分析。",
+      "category": "stock_research",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 600000,
+      "stages": [
+        {
+          "id": "controlled_data_pack",
+          "stageType": "source_research",
+          "displayName": "调取公司与同业数据",
+          "personaId": "data",
+          "agentDefinitionId": "employee-agent-finance-data",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 180000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "controlled_compute_pack",
+          "stageType": "agent",
+          "displayName": "生成同业对比计算摘要",
+          "personaId": "compute",
+          "agentDefinitionId": "employee-agent-finance-compute",
+          "executionMode": "single",
+          "inputMapping": {
+            "fromStages": ["controlled_data_pack"]
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 120000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "finance_report_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "写作员生成同业比选报告",
+          "personaId": "writer",
+          "agentDefinitionId": "wind-report-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["controlled_data_pack", "controlled_compute_pack"]
+          },
+          "expectedOutputs": ["markdown_report", "file_download"],
+          "timeoutMs": 300000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": [
+          "ai_generated_label",
+          "investment_advisory",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-26T00:00:00.000Z",
+      "updatedAt": "2026-05-26T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "theme_leader_analysis",
+      "version": 1,
+      "status": "active",
+      "displayName": "题材龙头",
+      "shortDescription": "基于 Wind MCP 题材、行情、公司和新闻数据识别龙头、中军、跟随股与掉队股。",
+      "category": "stock_research",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 600000,
+      "stages": [
+        {
+          "id": "controlled_data_pack",
+          "stageType": "source_research",
+          "displayName": "调取题材与候选标的资料",
+          "personaId": "data",
+          "agentDefinitionId": "employee-agent-finance-data",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 180000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "controlled_compute_pack",
+          "stageType": "agent",
+          "displayName": "生成题材强弱计算摘要",
+          "personaId": "compute",
+          "agentDefinitionId": "employee-agent-finance-compute",
+          "executionMode": "single",
+          "inputMapping": {
+            "fromStages": ["controlled_data_pack"]
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 120000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "finance_report_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "写作员生成题材龙头分析",
+          "personaId": "writer",
+          "agentDefinitionId": "wind-report-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["controlled_data_pack", "controlled_compute_pack"]
+          },
+          "expectedOutputs": ["markdown_report", "file_download"],
+          "timeoutMs": 300000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": [
+          "ai_generated_label",
+          "investment_advisory",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-27T00:00:00.000Z",
+      "updatedAt": "2026-05-27T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "earnings_commentary",
+      "version": 1,
+      "status": "active",
+      "displayName": "财报点评",
+      "shortDescription": "基于 Wind MCP 财报、公告、新闻和财务数据生成财报点评。",
+      "category": "stock_research",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 600000,
+      "stages": [
+        {
+          "id": "controlled_data_pack",
+          "stageType": "source_research",
+          "displayName": "调取财报与公告数据",
+          "personaId": "data",
+          "agentDefinitionId": "employee-agent-finance-data",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 180000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "controlled_compute_pack",
+          "stageType": "agent",
+          "displayName": "生成财务指标计算摘要",
+          "personaId": "compute",
+          "agentDefinitionId": "employee-agent-finance-compute",
+          "executionMode": "single",
+          "inputMapping": {
+            "fromStages": ["controlled_data_pack"]
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 120000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "finance_report_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "写作员生成财报点评",
+          "personaId": "writer",
+          "agentDefinitionId": "wind-report-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["controlled_data_pack", "controlled_compute_pack"]
+          },
+          "expectedOutputs": ["markdown_report", "file_download"],
+          "timeoutMs": 300000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": [
+          "ai_generated_label",
+          "investment_advisory",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-26T00:00:00.000Z",
+      "updatedAt": "2026-05-26T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "company_one_page_memo",
+      "version": 1,
+      "status": "active",
+      "displayName": "公司一页纸",
+      "shortDescription": "基于 Wind 数据包和写作员生成上市公司一页纸研究材料。",
+      "category": "stock_research",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 900000,
+      "stages": [
+        {
+          "id": "controlled_data_pack",
+          "stageType": "source_research",
+          "displayName": "调取公司与财务数据",
+          "personaId": "data",
+          "agentDefinitionId": "employee-agent-finance-data",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 180000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "controlled_compute_pack",
+          "stageType": "agent",
+          "displayName": "生成一页纸计算摘要",
+          "personaId": "compute",
+          "agentDefinitionId": "employee-agent-finance-compute",
+          "executionMode": "single",
+          "inputMapping": {
+            "fromStages": ["controlled_data_pack"]
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 120000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "finance_report_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "写作员生成公司一页纸",
+          "personaId": "writer",
+          "agentDefinitionId": "wind-report-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["controlled_data_pack", "controlled_compute_pack"]
+          },
+          "expectedOutputs": ["markdown_report", "file_download"],
+          "timeoutMs": 300000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": [
+          "ai_generated_label",
+          "investment_advisory",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-26T00:00:00.000Z",
+      "updatedAt": "2026-05-26T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "macro_data_brief",
+      "version": 1,
+      "status": "active",
+      "displayName": "宏观数据解读",
+      "shortDescription": "基于 Wind 宏观数据包和写作员生成宏观指标解读材料。",
+      "category": "stock_research",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 900000,
+      "stages": [
+        {
+          "id": "controlled_data_pack",
+          "stageType": "source_research",
+          "displayName": "调取宏观指标数据",
+          "personaId": "data",
+          "agentDefinitionId": "employee-agent-finance-data",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 180000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "controlled_compute_pack",
+          "stageType": "agent",
+          "displayName": "生成宏观计算摘要",
+          "personaId": "compute",
+          "agentDefinitionId": "employee-agent-finance-compute",
+          "executionMode": "single",
+          "inputMapping": {
+            "fromStages": ["controlled_data_pack"]
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 120000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "finance_report_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "写作员生成宏观解读",
+          "personaId": "writer",
+          "agentDefinitionId": "wind-report-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["controlled_data_pack", "controlled_compute_pack"]
+          },
+          "expectedOutputs": ["markdown_report", "file_download"],
+          "timeoutMs": 300000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": [
+          "ai_generated_label",
+          "investment_advisory",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-26T00:00:00.000Z",
+      "updatedAt": "2026-05-26T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "credit_analysis",
+      "version": 1,
+      "status": "active",
+      "displayName": "信用分析",
+      "shortDescription": "基于 Wind 数据包和写作员生成债券发行主体信用分析材料。",
+      "category": "stock_research",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 900000,
+      "stages": [
+        {
+          "id": "controlled_data_pack",
+          "stageType": "source_research",
+          "displayName": "调取主体与债券数据",
+          "personaId": "data",
+          "agentDefinitionId": "employee-agent-finance-data",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 180000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "controlled_compute_pack",
+          "stageType": "agent",
+          "displayName": "生成信用指标计算摘要",
+          "personaId": "compute",
+          "agentDefinitionId": "employee-agent-finance-compute",
+          "executionMode": "single",
+          "inputMapping": {
+            "fromStages": ["controlled_data_pack"]
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 120000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "finance_report_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "写作员生成信用分析",
+          "personaId": "writer",
+          "agentDefinitionId": "wind-report-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["controlled_data_pack", "controlled_compute_pack"]
+          },
+          "expectedOutputs": ["markdown_report", "file_download"],
+          "timeoutMs": 300000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": [
+          "ai_generated_label",
+          "investment_advisory",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-26T00:00:00.000Z",
+      "updatedAt": "2026-05-26T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
+      "id": "bond_rate_outlook",
+      "version": 1,
+      "status": "active",
+      "displayName": "债券利率研判",
+      "shortDescription": "基于 Wind 数据包和写作员生成债券利率走势研判材料。",
+      "category": "stock_research",
+      "estimatedDurationMs": 240000,
+      "maxDurationMs": 900000,
+      "stages": [
+        {
+          "id": "controlled_data_pack",
+          "stageType": "source_research",
+          "displayName": "调取利率与宏观数据",
+          "personaId": "data",
+          "agentDefinitionId": "employee-agent-finance-data",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 180000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "controlled_compute_pack",
+          "stageType": "agent",
+          "displayName": "生成利率指标计算摘要",
+          "personaId": "compute",
+          "agentDefinitionId": "employee-agent-finance-compute",
+          "executionMode": "single",
+          "inputMapping": {
+            "fromStages": ["controlled_data_pack"]
+          },
+          "expectedOutputs": ["markdown_report"],
+          "timeoutMs": 120000,
+          "onFailure": "partial_success"
+        },
+        {
+          "id": "finance_report_writer",
+          "stageType": "llm_synthesis",
+          "displayName": "写作员生成利率研判",
+          "personaId": "writer",
+          "agentDefinitionId": "wind-report-writer",
+          "executionMode": "single",
+          "inputMapping": {
+            "original": true,
+            "fromStages": ["controlled_data_pack", "controlled_compute_pack"]
+          },
+          "expectedOutputs": ["markdown_report", "file_download"],
+          "timeoutMs": 300000,
+          "onFailure": "retry_once_then_stop"
+        }
+      ],
+      "outputPolicy": {
+        "allowedArtifactTypes": ["markdown_report", "file_download"],
+        "disclaimers": [
+          "ai_generated_label",
+          "investment_advisory",
+          "fact_check_required"
+        ],
+        "citationRequired": true,
+        "saveToWorkspaceDefault": false
+      },
+      "createdAt": "2026-05-26T00:00:00.000Z",
+      "updatedAt": "2026-05-26T00:00:00.000Z",
+      "updatedBy": 2
+    },
+    {
       "id": "research_ppt",
       "version": 1,
       "status": "active",
       "displayName": "\u7814\u7a76\u578b PPT \u5236\u4f5c",
-      "shortDescription": "\u8f93\u5165\u4e3b\u9898\u3001\u6750\u6599\u6216\u6c47\u62a5\u8981\u6c42\uff0c\u6309\u68c0\u7d22\u3001\u5206\u6790\u3001\u5927\u7eb2\u3001\u6a21\u677f\u6e32\u67d3\u3001\u8d28\u91cf\u6821\u9a8c\u94fe\u8def\u751f\u6210\u53ef\u9884\u89c8\u548c\u53ef\u4e0b\u8f7d\u7684 PPT\u3002",
+      "shortDescription": "\u8f93\u5165\u4e3b\u9898\u3001\u6750\u6599\u6216\u6c47\u62a5\u8981\u6c42\uff0c\u6309\u8054\u7f51\u7814\u7a76\u3001\u5927\u7eb2\u534f\u4f5c\u3001\u6a21\u677f\u6e32\u67d3\u3001\u8d28\u91cf\u6821\u9a8c\u94fe\u8def\u751f\u6210\u53ef\u9884\u89c8\u548c\u53ef\u4e0b\u8f7d\u7684 PPT\u3002",
       "category": "presentation",
       "estimatedDurationMs": 300000,
       "maxDurationMs": 900000,
@@ -305,9 +849,9 @@
         {
           "id": "source_reader",
           "stageType": "source_research",
-          "displayName": "\u68c0\u7d22\u5458\u6536\u96c6\u8d44\u6599\u4e0e\u6765\u6e90",
+          "displayName": "OpenClaw 联网研究并生成资料包",
           "personaId": "reader",
-          "agentDefinitionId": "ppt-source-reader",
+          "agentDefinitionId": "openclaw-research-ppt",
           "executionMode": "single",
           "inputMapping": {
             "original": true
@@ -317,30 +861,15 @@
           "onFailure": "stop"
         },
         {
-          "id": "insight_analyst",
+          "id": "outline_writer",
           "stageType": "llm_synthesis",
-          "displayName": "\u5206\u6790\u5e08\u63d0\u70bc\u903b\u8f91\u4e3b\u7ebf",
-          "personaId": "analyst",
-          "agentDefinitionId": "ppt-insight-analyst",
+          "displayName": "OpenClaw 生成 PPT 蓝图",
+          "personaId": "writer",
+          "agentDefinitionId": "openclaw-research-ppt",
           "executionMode": "single",
           "inputMapping": {
             "original": true,
             "fromStages": ["source_reader"]
-          },
-          "expectedOutputs": ["markdown_report"],
-          "timeoutMs": 180000,
-          "onFailure": "retry_once_then_stop"
-        },
-        {
-          "id": "outline_writer",
-          "stageType": "llm_synthesis",
-          "displayName": "\u5927\u7eb2\u5458\u751f\u6210 PPT \u84dd\u56fe",
-          "personaId": "writer",
-          "agentDefinitionId": "ppt-outline-writer",
-          "executionMode": "single",
-          "inputMapping": {
-            "original": true,
-            "fromStages": ["source_reader", "insight_analyst"]
           },
           "expectedOutputs": ["markdown_report"],
           "timeoutMs": 240000,

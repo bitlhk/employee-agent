@@ -97,10 +97,33 @@ export function registerWSProxy(server: Server) {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
     if (url.pathname !== "/api/claw/ws") return;
 
+    const upgradeStart = Date.now();
+    const logUpgradeTiming = (stage: string, extra?: Record<string, unknown>) => {
+      console.log("[WS] upgrade timing", {
+        stage,
+        ms: Date.now() - upgradeStart,
+        adoptId: url.searchParams.get("adoptId") || "",
+        hasCookie: Boolean(req.headers.cookie),
+        host: req.headers.host,
+        origin: req.headers.origin,
+        ...extra,
+      });
+    };
+
     try {
+      logUpgradeTiming("start");
       const fakeRes = { setHeader: () => {}, getHeader: () => undefined } as any;
       const ctx = await createContext({ req: req as any, res: fakeRes, info: {} as any });
-      if (!ctx.user) { socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n"); socket.destroy(); return; }
+      logUpgradeTiming("context", { userId: ctx.user?.id });
+      if (!ctx.user) {
+        console.warn("[WS] rejected unauthenticated upgrade", {
+          path: url.pathname,
+          hasCookie: Boolean(req.headers.cookie),
+          host: req.headers.host,
+          origin: req.headers.origin,
+        });
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n"); socket.destroy(); return;
+      }
 
       const adoptId = url.searchParams.get("adoptId") || "";
       if (!adoptId) { socket.write("HTTP/1.1 400 Bad Request\r\n\r\n"); socket.destroy(); return; }
@@ -115,12 +138,23 @@ export function registerWSProxy(server: Server) {
 
       const { getClawByAdoptId } = await import("../db");
       const claw = await getClawByAdoptId(adoptId);
-      if (!claw || claw.userId !== ctx.user.id) { socket.write("HTTP/1.1 403 Forbidden\r\n\r\n"); socket.destroy(); return; }
+      logUpgradeTiming("claw_loaded", { ownerUserId: claw?.userId });
+      if (!claw || claw.userId !== ctx.user.id) {
+        console.warn("[WS] rejected forbidden upgrade", {
+          adoptId,
+          userId: ctx.user.id,
+          ownerUserId: claw?.userId,
+          host: req.headers.host,
+          origin: req.headers.origin,
+        });
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n"); socket.destroy(); return;
+      }
 
       const { existsSync } = await import("fs");
       const dbAgent = String((claw as any).agentId || "").trim();
       const trialId = `trial_${adoptId}`;
       const agentId = existsSync(openClawAgentDir(trialId)) ? trialId : dbAgent;
+      logUpgradeTiming("handle_upgrade", { agentId });
 
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req, { adoptId, agentId, userId: ctx.user!.id, channel, conversationId });
@@ -138,6 +172,7 @@ export function registerWSProxy(server: Server) {
     let ready = false;
     let sessionKey: string | null = null;
     let pending: string[] = [];
+    const pendingBrowserMessages: string[] = [];
     let lastUserSendMs: number = 0;
     let memAcc: ResponseAccumulator | null = null;
 
@@ -301,6 +336,17 @@ export function registerWSProxy(server: Server) {
       }
     };
 
+    // Acknowledge the browser WebSocket as soon as the HTTP upgrade completes.
+    // OpenClaw Gateway/session readiness is tracked separately below; otherwise
+    // a slow Gateway handshake makes the browser misclassify WS as unavailable.
+    sendToClient({
+      type: "connected",
+      agentId: meta.agentId,
+      channel: meta.channel,
+      conversationId: meta.conversationId,
+      ready: false,
+    });
+
     const sendToClientAfterDeltaQueue = (data: object) => {
       if (deferredClientSendDelayMs <= 0) {
         sendToClient(data);
@@ -376,7 +422,10 @@ export function registerWSProxy(server: Server) {
           sessionKey = msg.payload?.key;
           ready = true;
           console.log("[WS] ready:", meta.adoptId, "session:", sessionKey);
-          sendToClient({ type: "connected", agentId: meta.agentId, sessionKey, channel: meta.channel, conversationId: meta.conversationId });
+          sendToClient({ type: "connected", agentId: meta.agentId, sessionKey, channel: meta.channel, conversationId: meta.conversationId, ready: true });
+          for (const rawPending of pendingBrowserMessages.splice(0)) {
+            client.emit("message", Buffer.from(rawPending));
+          }
           for (const p of pending) gw!.send(p);
           pending = [];
           return;
@@ -652,7 +701,17 @@ export function registerWSProxy(server: Server) {
     client.on("message", async (raw: Buffer) => {
       try {
         const msg = JSON.parse(raw.toString());
-        if (msg.type === "chat" && sessionKey) {
+        if (msg.type === "chat") {
+          if (!sessionKey) {
+            pendingBrowserMessages.push(raw.toString());
+            sendToClient({
+              __status: "正在初始化 OpenClaw 会话",
+              _event: "agent_status",
+              kind: "progress",
+              label: "正在初始化 OpenClaw 会话",
+            });
+            return;
+          }
           const rawUserMessage = String(msg.message || "");
           const gatewayMessage = buildRuntimeUserMessage(rawUserMessage);
           lastUserSendMs = Date.now();
@@ -690,6 +749,12 @@ export function registerWSProxy(server: Server) {
               return;
             }
           }
+          sendToClient({
+            __status: "已连接 OpenClaw，正在处理请求",
+            _event: "agent_status",
+            kind: "progress",
+            label: "已连接 OpenClaw，正在处理请求",
+          });
           // 每次用户发消息，创建新的记忆缓冲器
           if (memAcc) memAcc.flush(); // flush 上一轮
           memAcc = new ResponseAccumulator(meta.userId, "main-chat", rawUserMessage);

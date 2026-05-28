@@ -1,16 +1,22 @@
 import {
   BarChart3,
   Bot,
+  Building2,
+  CircleDollarSign,
   Code2,
   Database,
   FileSpreadsheet,
   FileText,
   FileSearch,
+  Landmark,
   Mic2,
   MoreHorizontal,
   Presentation,
   Search,
+  Scale,
+  ShieldCheck,
   Sparkles,
+  Target,
   TrendingUp,
   Video,
   type LucideIcon,
@@ -30,6 +36,14 @@ export const TASK_ICONS: Record<string, LucideIcon> = {
   research_ppt: Presentation,
   video_outline: Video,
   wind_announcement_digest: FileSearch,
+  fund_compare: CircleDollarSign,
+  peer_comps_analysis: Building2,
+  theme_leader_analysis: Target,
+  earnings_commentary: FileText,
+  company_one_page_memo: Landmark,
+  macro_data_brief: TrendingUp,
+  credit_analysis: ShieldCheck,
+  bond_rate_outlook: Scale,
   ppt_report_writing: Presentation,
   stock_ppt_report: TrendingUp,
 };
@@ -42,6 +56,14 @@ export const TASK_DISPLAY_OVERRIDES: Record<string, string> = {
   research_ppt: "幻灯片",
   video_outline: "视频提纲",
   wind_announcement_digest: "公告解读",
+  fund_compare: "基金对比",
+  peer_comps_analysis: "同业比选",
+  theme_leader_analysis: "题材龙头",
+  earnings_commentary: "财报点评",
+  company_one_page_memo: "公司一页纸",
+  macro_data_brief: "宏观解读",
+  credit_analysis: "信用分析",
+  bond_rate_outlook: "利率研判",
 };
 
 export const TASK_DESCRIPTION_OVERRIDES: Record<string, string> = {
@@ -59,6 +81,22 @@ export const TASK_DESCRIPTION_OVERRIDES: Record<string, string> = {
     "读取公开视频链接和可用文字资料，生成适合复习、汇报或转 PPT 的结构化提纲。",
   wind_announcement_digest:
     "读取公告和财经新闻，生成公告事实摘要、影响路径、风险与跟踪清单。",
+  fund_compare:
+    "读取基金档案、业绩、持仓和市场背景，生成基金对比与风险收益分析。",
+  peer_comps_analysis:
+    "读取公司画像、财务指标、行情和新闻，生成同业公司横向比选材料。",
+  theme_leader_analysis:
+    "基于受控金融数据识别题材龙头、中军、跟随股与掉队股，生成题材跟踪框架。",
+  earnings_commentary:
+    "读取财报公告、财务指标和市场解读，生成财报点评与待复核清单。",
+  company_one_page_memo:
+    "基于 Wind 数据包和写作员生成上市公司一页纸研究材料。",
+  macro_data_brief:
+    "基于 Wind 宏观数据包解读宏观指标、趋势结构和市场影响。",
+  credit_analysis:
+    "基于 Wind 数据包分析主体资质、财务健康度、现金流和信用风险。",
+  bond_rate_outlook:
+    "基于 Wind 数据包从交易、策略、配置视角研判债券利率走势。",
 };
 
 export const TASK_PLACEHOLDERS: Record<string, string> = {
@@ -76,6 +114,22 @@ export const TASK_PLACEHOLDERS: Record<string, string> = {
     "输入公开视频链接和提纲要求，例如：分析这个视频的主要内容，生成学习提纲。",
   wind_announcement_digest:
     "输入公司、股票或公告主题，例如：解读宁德时代最新公告对业绩和估值的影响。",
+  fund_compare:
+    "输入 2-5 只基金名称或代码，以及对比目标，例如：比较收益、回撤和持仓风格。",
+  peer_comps_analysis:
+    "输入目标公司和可比公司，或说明行业范围，例如：比较几家银行的业务质量和估值。",
+  theme_leader_analysis:
+    "输入题材、板块或热点主题，例如：分析 CPO 板块的龙头股。",
+  earnings_commentary:
+    "输入公司名称、股票代码和财报期间，例如：点评某公司最新季度财报。",
+  company_one_page_memo:
+    "输入上市公司名称或代码，例如：生成宁德时代公司一页纸。",
+  macro_data_brief:
+    "输入宏观指标、时间窗口和关注方向，例如：解读最新 CPI 对债市的影响。",
+  credit_analysis:
+    "输入债券发行主体、城投平台或公司名称，例如：分析某城投主体信用风险。",
+  bond_rate_outlook:
+    "输入利率品种、期限和时间窗口，例如：研判未来一个月 10 年国债利率走势。",
   ppt_report_writing: "输入汇报主题、受众和风格要求。",
   stock_ppt_report: "输入股票、报告用途和关注维度。",
 };
@@ -123,6 +177,54 @@ export const TASK_QUICK_PROMPTS: Record<string, string[]> = {
     "梳理某上市公司年报中的核心变化和投资者关注问题。",
     "解读一家公司回购公告对市场预期的影响。",
   ],
+  fund_compare: [
+    "对比易方达蓝筹精选、兴全合润和富国天惠的收益、回撤和持仓风格。",
+    "比较两只沪深 300 指数基金的跟踪误差、费率和规模变化。",
+    "筛选适合稳健配置的债券基金，并说明主要风险。",
+    "生成 3 只主动权益基金的领导汇报版对比材料。",
+  ],
+  peer_comps_analysis: [
+    "比较招商银行、宁波银行和平安银行的业务质量、估值和风险差异。",
+    "分析三家新能源车企的收入结构、盈利能力和估值位置。",
+    "为某行业挑选 3-5 家可比公司并生成对比分析。",
+    "梳理银行 IT 厂商的同业格局、增长驱动和估值分歧。",
+  ],
+  theme_leader_analysis: [
+    "分析 CPO 板块的龙头股，区分龙头、中军、跟随股和掉队股。",
+    "识别 AI 算力题材的核心标的、驱动逻辑和后续观察点。",
+    "判断机器人板块当前处于启动、强化、扩散还是退潮阶段。",
+    "梳理低空经济题材内部角色分层和风险信号。",
+  ],
+  earnings_commentary: [
+    "点评贵州茅台最新季度财报，突出收入、利润率和现金流变化。",
+    "分析宁德时代财报中超预期或低于预期的关键指标。",
+    "生成某上市公司年报点评，列出核心变化和后续跟踪点。",
+    "梳理一家银行财报中的净息差、资产质量和资本充足率变化。",
+  ],
+  company_one_page_memo: [
+    "生成宁德时代公司一页纸，覆盖业务、财务、催化和风险。",
+    "快速整理贵州茅台的一页纸投资研究材料。",
+    "生成招商银行公司速览，突出核心投资逻辑和风险。",
+    "为首次覆盖某上市公司生成一页纸研究备忘录。",
+  ],
+  macro_data_brief: [
+    "解读最新 CPI 和 PPI 数据对债市、权益和汇率的影响。",
+    "分析 PMI 变化背后的生产、需求和价格结构。",
+    "生成本月社融数据解读，突出信贷结构和市场影响。",
+    "梳理最新 GDP 数据的结构亮点、压力和后续观察指标。",
+  ],
+  credit_analysis: [
+    "分析某城投平台的信用风险，关注现金流、债务和区域财政。",
+    "生成某房地产发行主体的信用分析和风险提示。",
+    "评估一家银行二级资本债发行主体的信用资质。",
+    "梳理某国企债券主体的评级对标、偿债能力和风险因素。",
+  ],
+  bond_rate_outlook: [
+    "研判未来一个月 10 年国债利率走势，分别给出交易和配置视角。",
+    "分析近期资金面、通胀和供给对债券利率的影响。",
+    "生成二季度债券利率走势研判，突出核心变量和风险情景。",
+    "从交易视角分析 5 年国债收益率的短期机会和风险。",
+  ],
 };
 
 export const TASK_QUICK_PROMPT_LABELS: Record<string, string[]> = {
@@ -133,6 +235,14 @@ export const TASK_QUICK_PROMPT_LABELS: Record<string, string[]> = {
   research_ppt: ["智能体趋势", "金融AI", "产品方案", "部署方案"],
   video_outline: ["学习提纲", "汇报摘要", "课程笔记", "PPT结构"],
   wind_announcement_digest: ["公告影响", "风险跟踪", "年报解读", "回购解读"],
+  fund_compare: ["主动权益", "指数基金", "债券基金", "对比材料"],
+  peer_comps_analysis: ["银行同业", "新能源车", "可比公司", "IT厂商"],
+  theme_leader_analysis: ["CPO", "AI算力", "机器人", "低空经济"],
+  earnings_commentary: ["季报点评", "业绩分析", "年报点评", "银行财报"],
+  company_one_page_memo: ["宁德时代", "贵州茅台", "招商银行", "首次覆盖"],
+  macro_data_brief: ["CPI/PPI", "PMI", "社融", "GDP"],
+  credit_analysis: ["城投信用", "地产主体", "银行资本债", "国企债券"],
+  bond_rate_outlook: ["10年国债", "资金面", "季度研判", "5年国债"],
 };
 
 export const QUICK_PROMPT_ICONS = [

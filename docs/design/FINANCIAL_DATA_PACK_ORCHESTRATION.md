@@ -1,7 +1,7 @@
 # Financial Data Pack Orchestration
 
 Date: 2026-05-25
-Status: Draft for P0 implementation
+Status: Draft for P0/P1 implementation
 Related:
 - `docs/design/WORKBENCH_ABILITY_HOME_DESIGN.md`
 - `docs/design/WORKBENCH_ABILITY_HOME_IMPLEMENTATION_PLAN.md`
@@ -18,14 +18,26 @@ The P0 scope is:
 - market research brief
 - client meeting preparation
 
-The main path is not Alice and not unrestricted Hermes tool use.
+The P1 finance workbench should add two governed capability lanes:
+
+- **Spec-managed official capabilities**: high-frequency, auditable workflows
+  implemented by employee-agent + Financial Harness + bounded Hermes
+  analyst/writer profiles.
+- **Alice exploration capabilities**: complex Wind official workflows called as
+  a labeled single-stage professional experiment path. These can be promoted to
+  Spec-managed workflows only after demand, quality, and governance are proven.
+
+The main path is not unrestricted Hermes tool use and not arbitrary Python
+execution. Alice is allowed only for explicitly configured exploration specs.
 
 ```text
 user request
   -> employee-agent task runner
+  -> financial-harness route / SkillSpec selection
   -> DataPackBuilder
   -> FinancialDataProviderRouter
   -> WindFinancialDataProvider / AkShareFinancialDataProvider / InternalDataProvider
+  -> optional controlled ComputePack
   -> Hermes analyst / writer profiles
   -> preview / download / audit
 ```
@@ -64,12 +76,44 @@ Wind workflow skills are useful as domain playbooks:
 
 They should not be copied into Hermes as unrestricted runtime skills for P0.
 
+For P1, selected Wind skills should be converted into internal `FinanceSkillSpec`
+records. A spec captures the methodology without granting runtime privileges:
+
+- intent and example prompts
+- allowed data requirement types
+- default data slots
+- allowed compute requirement types
+- whether public search is allowed
+- whether Alice direct-run is allowed
+- analyst/writer profile contracts
+- output sections and risk policy
+
+This keeps the financial methodology close to Financial Harness planning while
+leaving credentialed execution under employee-agent.
+
 ### 2.3 Alice Is Selective, Not Default
 
 Alice can be used for complex or highly packaged professional tasks, or as a
 quality benchmark. It should not be the default runtime for bank-facing standard
 workflows because the main product needs controlled data lineage, auditability,
 repeatable output format, and user/workspace isolation.
+
+When Harness selects an Alice exploration spec, the runtime can be a direct
+single-stage path:
+
+```text
+user request
+  -> financial-harness route selects alice_spec_id
+  -> employee-agent policy gate validates Alice is allowed for this tenant/spec
+  -> employee-agent calls Wind Alice
+  -> employee-agent stores Alice output / attachments as AliceArtifact
+  -> unified workbench renders the single stage and final artifact
+```
+
+Even in this direct path, Alice does not receive employee-agent internal
+credentials beyond the approved Alice connector call. Employee-agent still owns
+authorization, task ownership, preview/download access, audit records, timeout,
+and error redaction.
 
 ### 2.4 Multiple Data Providers, One Data Pack Contract
 
@@ -161,6 +205,77 @@ This keeps intelligence in planning while keeping all privileged execution under
 employee-agent.
 
 ## 3. Abstractions
+
+### 3.0 Finance Skill Spec
+
+`FinanceSkillSpec` is owned by the Financial Harness planning layer and enforced
+by employee-agent. It is the bridge between Wind skill methodology and our
+controlled execution.
+
+```ts
+type FinanceSkillSpec = {
+  id: string;
+  name: string;
+  lane: "official_spec" | "alice_exploration";
+  source:
+    | "wind_official_skill"
+    | "windclaw_skill"
+    | "community_skill"
+    | "internal";
+  sourceName?: string;
+  intentExamples: string[];
+  allowedDataRequirements: DataRequirement["type"][];
+  defaultDataPlan: Array<{
+    slot: string;
+    type: DataRequirement["type"];
+    required: boolean;
+    reason: string;
+  }>;
+  allowedComputeRequirements: ComputeRequirement["type"][];
+  publicSearchPolicy: "disabled" | "fallback" | "optional";
+  alicePolicy: "disabled" | "exploration_direct";
+  analystProfile?: string;
+  writerProfile?: string;
+  outputSections: string[];
+  riskPolicy: string[];
+};
+```
+
+Harness responsibilities:
+
+- select exactly one spec or ask for clarification
+- fill bounded `dataRequirements` from the spec's allowed data slots
+- fill bounded `computeRequirements` from the spec's allowed compute types
+- decide whether public search is needed only when the spec permits it
+- select Alice direct-run only when `alicePolicy` permits it
+
+Employee-agent responsibilities:
+
+- validate the selected spec exists and is enabled for the tenant/workspace
+- reject requirements outside the spec
+- execute provider/search/compute/Alice calls
+- record DataPack / ComputePack / AliceArtifact audit metadata
+- render final artifacts through the unified workbench shell
+
+Initial spec-managed official capabilities:
+
+| Spec | Data source | Compute need | Notes |
+|---|---|---:|---|
+| `announcement-digest` 公告解读 | Wind MCP announcements/news | low | already implemented; first standard capability |
+| `market-research-brief` 市场研究简报 | Wind MCP + optional public search fallback | low/medium | do not force compute into broad research |
+| `client-meeting-prep` 客户会议准备 | Wind MCP + uploaded/internal material later | low/medium | future CRM/private data integration |
+| `fund-compare` 公募基金对比 | Wind MCP fund data | high | best Phase 6 compute validation |
+| `peer-comps-analysis` 同业比选/可比公司分析 | Wind MCP financials/quote/news | high | valuation and operating metric tables |
+| `earnings-commentary` 财报点评 | Wind MCP financial statements/announcements/news | high | YoY/QoQ and margin/ cash-flow analysis |
+
+Initial Alice exploration capabilities:
+
+| Spec | Why Alice first |
+|---|---|
+| `company-one-page-memo` 上市公司一页纸投资报告 | Wind official workflow is already highly packaged |
+| `macro-data-brief` 宏观数据解读 | official indicator interpretation and macro framing |
+| `credit-analysis` 信用分析 | specialized and higher-risk methodology |
+| `bond-rate-outlook` 债券利率走势研判 | complex rate-strategy workflow |
 
 ### 3.1 Data Pack Builder
 
@@ -273,6 +388,8 @@ type FinancialHarnessPlan = {
   source: "financial_harness";
   runId: string;
   templateId: "market-researcher" | "meeting-prep-agent";
+  skillSpecId?: string;
+  executionLane?: "official_spec" | "alice_exploration";
   confidenceScore: number;
   reason: string;
   riskFlags: string[];
@@ -316,7 +433,7 @@ type ComputeRequirement = {
 
 type HarnessStage = {
   stageId: string;
-  role: "Analyst" | "Writer" | "Reviewer";
+  role: "Data" | "Compute" | "Analyst" | "Writer" | "Alice" | "Reviewer";
   profile: string;
 };
 ```
@@ -575,6 +692,11 @@ Recommended sections:
 
 ## 7. Implementation Phases
 
+The current Singapore deployment has already moved part of the way toward
+Phase D by using DataPack/ComputePack with analyst/writer stages. The remaining
+work should now be organized around specs and direct Alice governance instead
+of adding arbitrary compute to every finance task.
+
 ### Phase A: Keep Current Harness Stable, Add Plan Contract
 
 - Do not remove the existing reader profiles yet.
@@ -653,7 +775,8 @@ Validation:
 
 ### Phase E: Controlled Compute Requirements
 
-- Extend planner output to include `compute_requirements`.
+- Extend planner output to include `compute_requirements` from the selected
+  `FinanceSkillSpec`.
 - Add an employee-agent compute policy gate.
 - Add allowlisted compute templates only, for example:
   - `time_series_metrics`
@@ -662,6 +785,8 @@ Validation:
   - `financial_ratio_summary`
   - `fund_performance_compare`
 - Persist compute input, sanitized code/template id, outputs, and errors.
+- Do not run compute for broad market research unless the selected spec and
+  request require it.
 
 Validation:
 
@@ -669,6 +794,70 @@ Validation:
 - unsupported compute type is rejected and shown as a gap
 - approved compute emits a visible stage and auditable result
 - no network or filesystem escape from the compute runtime
+
+### Phase E1: Finance SkillSpec Registry
+
+- Add spec registry files for:
+  - `announcement-digest`
+  - `market-research-brief`
+  - `client-meeting-prep`
+  - `fund-compare`
+  - `peer-comps-analysis`
+  - `earnings-commentary`
+  - `company-one-page-memo`
+  - `macro-data-brief`
+  - `credit-analysis`
+  - `bond-rate-outlook`
+- Update Financial Harness route contract to return `skillSpecId` and
+  `executionLane`.
+- Keep existing market/meeting flows functional while spec ids are introduced.
+
+Validation:
+
+- current announcement, market research, and meeting prep tasks still complete
+- route-only smoke returns a spec id for each supported prompt
+- unsupported or ambiguous prompts still clarify instead of guessing
+- employee-agent rejects unknown spec ids or requirements not allowed by spec
+
+### Phase E2: Spec-Managed Official Capabilities
+
+- Migrate existing official capabilities under specs:
+  - announcement digest
+  - market research brief
+  - client meeting prep
+- Add new official specs one by one:
+  - fund comparison
+  - peer / comparable company analysis
+  - earnings commentary
+- Use DataPack and ComputePack only according to the selected spec.
+
+Validation:
+
+- fund comparison produces performance / risk comparison tables
+- peer comps produces operating / valuation comparison tables
+- earnings commentary produces YoY/QoQ and margin/cash-flow deltas
+- market research remains narrative-first and does not force unnecessary compute
+
+### Phase E3: Alice Exploration Direct-Run
+
+- Add Alice exploration specs:
+  - company one-page memo
+  - macro data brief
+  - credit analysis
+  - bond rate outlook
+- If Harness selects one of these specs, execute a single Alice stage through
+  employee-agent.
+- Persist the result as `AliceArtifact` with source, status, duration, output
+  text, attachments, and error metadata.
+- Render through the same workbench shell as a one-stage professional task.
+
+Validation:
+
+- Alice task has one visible stage such as "调用 Wind Alice"
+- output and attachments are previewable/downloadable
+- history records the Alice spec id and connector call metadata
+- failure is shown as a controlled error/gap, not a broken task
+- Alice direct-run is blocked unless the spec and tenant allow it
 
 ### Phase F: Hermes Prompt Update
 

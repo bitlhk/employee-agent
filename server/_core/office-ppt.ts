@@ -47,6 +47,8 @@ type PptBlueprintBullet = {
 type PptBlueprintSlide = {
   pageNo?: number | string;
   type?: string;
+  pageRole?: string;
+  designPattern?: string;
   title: string;
   keyMessage?: string;
   bullets: PptBlueprintBullet[];
@@ -826,13 +828,22 @@ function splitTitle(title: string) {
 }
 
 function slideKind(slide: PptBlueprintSlide, index: number, total: number) {
-  const intent = `${slide.type || ""} ${slide.visualIntent || ""} ${slide.title || ""}`.toLowerCase();
-  const visual = `${slide.visualIntent || ""} ${slide.notes || ""}`.toLowerCase();
-  const pageType = `${slide.type || ""}`.toLowerCase();
+  const intent = `${slide.pageRole || ""} ${slide.designPattern || ""} ${slide.type || ""} ${slide.visualIntent || ""} ${slide.title || ""}`.toLowerCase();
+  const visual = `${slide.designPattern || ""} ${slide.visualIntent || ""} ${slide.notes || ""}`.toLowerCase();
+  const pageType = `${slide.pageRole || ""} ${slide.designPattern || ""} ${slide.type || ""}`.toLowerCase();
   const dataItems = visualItems(slide, "").filter((item) => item.label || item.value || item.note);
   if (index === 0 || /cover/.test(intent)) return "cover";
+  if (/thesis/.test(intent)) return "summary";
+  if (/evidence-boundary/.test(intent)) return "table";
+  if (/concept-breakdown/.test(intent)) return "process";
+  if (/analogy-map/.test(intent)) return "compare";
+  if (/scenario-matrix/.test(intent)) return "matrix";
+  if (/capability-stack/.test(intent)) return "kpi";
+  if (/risk-controls/.test(intent)) return "kpi";
+  if (/decision-summary/.test(intent)) return "summary";
   if (/agenda/.test(intent)) return "agenda";
-  if (/summary/.test(intent)) return "summary";
+  if (/executive-summary|executive|summary/.test(intent)) return "summary";
+  if (/three-points|three_points|三观点|三点|三条/.test(intent)) return "kpi";
   if (/timeline|roadmap|路标|路线图|里程碑|第\d|周|month|quarter/.test(visual) || /roadmap|timeline|路线图|路标|行动路线/.test(pageType)) return "timeline";
   if (/table|治理|清单|分级|列表/.test(visual) || /table|governance|risk|治理|风险/.test(pageType)) return "table";
   if (/matrix|2x2|quadrant|四象限|矩阵|价值.*风险|优先级/.test(visual) || /scenario|priority|场景|优先级/.test(pageType)) return "matrix";
@@ -840,7 +851,8 @@ function slideKind(slide: PptBlueprintSlide, index: number, total: number) {
   if (dataItems.length >= 4 && /风险|价值|优先|象限|矩阵/.test(dataItems.map((item) => `${item.label}${item.value}${item.note}`).join(" "))) return "matrix";
   if (index === 0 || /cover|封面/.test(intent)) return "cover";
   if (/agenda|目录/.test(intent)) return "agenda";
-  if (/summary|结论|总结|结束/.test(intent)) return "summary";
+  if (/executive-summary|executive|summary|结论|总结|结束/.test(intent)) return "summary";
+  if (/three-points|three_points|三观点|三点|三条/.test(intent)) return "kpi";
   if (/kpi|metric|number|数字|指标/.test(intent)) return "kpi";
   if (/timeline|roadmap|时间轴|里程碑|路线图/.test(intent)) return "timeline";
   if (/matrix|2x2|四象限|矩阵|swot/.test(intent)) return "matrix";
@@ -849,6 +861,16 @@ function slideKind(slide: PptBlueprintSlide, index: number, total: number) {
   if (/process|flow|timeline|步骤|流程|路径|计划/.test(intent)) return "process";
   if (/table|matrix|表格|矩阵/.test(intent)) return "table";
   return "content";
+}
+
+function displayLimitForKind(kind: string) {
+  if (kind === "process") return 4;
+  if (kind === "compare") return 6;
+  if (kind === "summary") return 4;
+  if (kind === "matrix") return 4;
+  if (kind === "kpi") return 4;
+  if (kind === "table") return 5;
+  return 5;
 }
 
 function addFooter(slide: any, pageNo: number, total: number, theme: { muted: string; accent: string }) {
@@ -875,13 +897,13 @@ function addCitationFooter(slide: any, item: PptBlueprintSlide, theme: { muted: 
 function addSlideTitle(slide: any, item: PptBlueprintSlide, theme: { text: string; muted: string; accent: string }) {
   const title = splitTitle(item.title);
   if (title.label) {
-    slide.addText(title.label, { x: 0.75, y: 0.42, w: 1.2, h: 0.28, fontFace: "Microsoft YaHei", fontSize: 9, bold: true, color: "FFFFFF", margin: 0.04, align: "center", fill: { color: theme.accent }, breakLine: false });
-    slide.addText(title.main, { x: 2.1, y: 0.36, w: 10.2, h: 0.45, fontFace: "Microsoft YaHei", fontSize: 21, bold: true, color: theme.text, fit: "shrink" });
+    slide.addText(title.label, { x: 0.75, y: 0.42, w: 1.2, h: 0.28, fontFace: "Microsoft YaHei", fontSize: 8.5, bold: true, color: "FFFFFF", margin: 0.04, align: "center", fill: { color: theme.accent }, breakLine: false });
+    slide.addText(title.main, { x: 2.1, y: 0.36, w: 10.2, h: 0.45, fontFace: "Microsoft YaHei", fontSize: 18.5, bold: true, color: theme.text, fit: "shrink" });
   } else {
-    slide.addText(title.main, { x: 0.75, y: 0.34, w: 11.6, h: 0.52, fontFace: "Microsoft YaHei", fontSize: 22, bold: true, color: theme.text, fit: "shrink" });
+    slide.addText(title.main, { x: 0.75, y: 0.34, w: 11.6, h: 0.52, fontFace: "Microsoft YaHei", fontSize: 19, bold: true, color: theme.text, fit: "shrink" });
   }
   if (item.keyMessage) {
-    slide.addText(item.keyMessage, { x: 0.77, y: 0.96, w: 11.75, h: 0.32, fontFace: "Microsoft YaHei", fontSize: 10, color: theme.muted, fit: "shrink" });
+    slide.addText(item.keyMessage, { x: 0.77, y: 0.94, w: 11.75, h: 0.36, fontFace: "Microsoft YaHei", fontSize: 9, color: theme.muted, fit: "shrink" });
   }
 }
 
@@ -907,7 +929,7 @@ function displayBullets(slide: PptBlueprintSlide, fallback = "待补充") {
 
 function bulletText(slide: PptBlueprintSlide, fallback = "待补充") {
   const rows = displayBullets(slide, fallback);
-  return rows.slice(0, 5).map((item) => `• ${compactText(item.text, 95)}`).join("\n");
+  return rows.slice(0, 4).map((item) => `• ${compactText(item.text, 72)}`).join("\n");
 }
 
 function visualItems(slide: PptBlueprintSlide, fallback = "待补充") {
@@ -1106,28 +1128,33 @@ export function renderDeckHtml(args: {
   };
   const slides = args.blueprint.slides.map((slide, index) => {
     const title = splitTitle(slide.title);
-    const bullets = displayBullets(slide).slice(0, 5);
     const refs = collectCitationRefs(slide);
     const kind = slideKind(slide, index, args.blueprint.slides.length);
-    const visualRows = visualItems(slide).slice(0, 6);
+    const displayLimit = displayLimitForKind(kind);
+    const bullets = displayBullets(slide).slice(0, displayLimit);
+    const visualRows = visualItems(slide).slice(0, displayLimit);
     const visual = kind === "process"
       ? `<div class="process">${bullets.map((item, i) => `<div class="step"><b>${i + 1}</b><span>${htmlEscape(item.text)}</span></div>`).join("")}</div>`
       : kind === "compare"
         ? `<div class="compare"><div>${bullets.filter((_, i) => i % 2 === 0).map((item) => `<p>${htmlEscape(item.text)}</p>`).join("")}</div><div>${bullets.filter((_, i) => i % 2 === 1).map((item) => `<p>${htmlEscape(item.text)}</p>`).join("")}</div></div>`
         : kind === "bar"
           ? `<div class="bars">${visualRows.map((row) => `<div><span>${htmlEscape(row.label)}</span><i style="width:${Math.max(16, numericValue(row.value, 3) * 22)}%"></i><em>${htmlEscape(row.value)}</em></div>`).join("")}</div>`
-          : `<div class="cards">${visualRows.slice(0, 4).map((row) => `<section><b>${htmlEscape(row.label)}</b><strong>${htmlEscape(row.value)}</strong><p>${htmlEscape(row.note)}</p></section>`).join("")}</div>`;
-    return `<article class="slide ${kind}">
+          : `<div class="cards">${visualRows.map((row) => `<section><b>${htmlEscape(row.label)}</b><strong>${htmlEscape(row.value)}</strong><p>${htmlEscape(row.note)}</p></section>`).join("")}</div>`;
+    const visualFirst = ["kpi", "matrix", "timeline", "process", "bar"].includes(kind);
+    const content = kind === "cover"
+      ? `<main class="cover-main"><h1>${htmlEscape(title.main || args.blueprint.title)}</h1><p>${htmlEscape(args.blueprint.subtitle || slide.keyMessage || "")}</p><ul>${bullets.map((item) => `<li>${htmlEscape(item.text)}</li>`).join("")}</ul></main>`
+      : visualFirst
+        ? `<main class="main-visual"><div class="insight-strip">${bullets.slice(0, 3).map((item) => `<p>${htmlEscape(item.text)}</p>`).join("")}</div>${visual}</main>`
+        : `<main><ul class="bullets">${bullets.map((item) => `<li>${htmlEscape(item.text)}</li>`).join("")}</ul>${visual}</main>`;
+    return `<div class="slide-frame"><article class="slide ${kind}">
       <header>
         ${title.label ? `<span>${htmlEscape(title.label)}</span>` : ""}
         <h2>${htmlEscape(title.main)}</h2>
         ${slide.keyMessage ? `<p>${htmlEscape(slide.keyMessage)}</p>` : ""}
       </header>
-      ${kind === "cover"
-        ? `<main class="cover-main"><h1>${htmlEscape(title.main || args.blueprint.title)}</h1><p>${htmlEscape(args.blueprint.subtitle || slide.keyMessage || "")}</p><ul>${bullets.map((item) => `<li>${htmlEscape(item.text)}</li>`).join("")}</ul></main>`
-        : `<main><ul class="bullets">${bullets.map((item) => `<li>${htmlEscape(item.text)}</li>`).join("")}</ul>${visual}</main>`}
+      ${content}
       ${refs.length ? `<footer>${refs.map((ref) => htmlEscape(ref)).join(" · ")}</footer>` : `<footer>${index + 1}/${args.blueprint.slides.length}</footer>`}
-    </article>`;
+    </article></div>`;
   }).join("\n");
 
   return `<!doctype html>
@@ -1141,20 +1168,25 @@ export function renderDeckHtml(args: {
   * { box-sizing: border-box; }
   body { margin:0; background:#eef2f7; color:var(--text); font-family:"Microsoft YaHei","Noto Sans SC",Arial,sans-serif; }
   .deck { display:grid; gap:28px; padding:32px; justify-content:center; }
+  .slide-frame { width:1280px; aspect-ratio:16/9; container-type:inline-size; overflow:hidden; }
   .slide { width:1280px; height:720px; background:white; border-radius:14px; box-shadow:0 18px 50px rgba(15,23,42,.12); padding:48px 58px; position:relative; overflow:hidden; }
   .slide::before { content:""; position:absolute; left:0; top:0; bottom:0; width:12px; background:var(--accent); }
   header { display:grid; grid-template-columns:auto 1fr; column-gap:18px; align-items:center; }
   header span { background:var(--accent); color:#fff; font-size:18px; font-weight:700; padding:7px 14px; border-radius:4px; }
-  h2 { margin:0; font-size:34px; line-height:1.18; letter-spacing:0; }
-  header p { grid-column:1 / -1; margin:18px 0 0; font-size:18px; color:var(--muted); }
-  main { margin-top:40px; display:grid; grid-template-columns:1fr 1.05fr; gap:34px; align-items:start; }
-  .bullets { margin:0; padding-left:24px; font-size:22px; line-height:1.72; }
+  h2 { margin:0; font-size:30px; line-height:1.16; letter-spacing:0; }
+  header p { grid-column:1 / -1; margin:14px 0 0; font-size:16px; color:var(--muted); }
+  main { margin-top:30px; display:grid; grid-template-columns:.92fr 1.08fr; gap:28px; align-items:start; }
+  .main-visual { grid-template-columns:1fr; gap:18px; }
+  .bullets { margin:0; padding-left:22px; font-size:19px; line-height:1.55; }
   .bullets li::marker { color:var(--accent); }
-  .cards { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
-  .cards section, .compare div, .step { border:1px solid var(--line); border-radius:10px; background:#fff; padding:18px; min-height:106px; }
-  .cards b { display:block; color:var(--accent); font-size:18px; margin-bottom:8px; }
-  .cards strong { display:block; font-size:24px; margin-bottom:8px; }
-  .cards p { margin:0; color:var(--muted); font-size:15px; line-height:1.5; }
+  .insight-strip { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .insight-strip p { margin:0; border:1px solid var(--line); border-radius:8px; padding:12px 14px; color:var(--text); font-size:15px; line-height:1.35; background:#fff; }
+  .cards { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .main-visual .cards { grid-template-columns:repeat(3,1fr); }
+  .cards section, .compare div, .step { border:1px solid var(--line); border-radius:9px; background:#fff; padding:15px; min-height:92px; }
+  .cards b { display:block; color:var(--accent); font-size:16px; margin-bottom:6px; }
+  .cards strong { display:block; font-size:20px; margin-bottom:6px; }
+  .cards p { margin:0; color:var(--muted); font-size:13px; line-height:1.42; }
   .compare { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
   .compare p { margin:0 0 14px; font-size:20px; line-height:1.45; }
   .process { grid-column:1 / -1; display:grid; grid-template-columns:repeat(4,1fr); gap:18px; }
@@ -1165,9 +1197,9 @@ export function renderDeckHtml(args: {
   .bars i { height:18px; border-radius:999px; background:linear-gradient(90deg,var(--accent),var(--accent2)); }
   .bars em { font-style:normal; color:var(--muted); text-align:right; }
   .cover-main { display:block; margin-top:118px; max-width:880px; }
-  .cover-main h1 { font-size:50px; line-height:1.15; margin:0 0 22px; }
-  .cover-main p { font-size:22px; color:var(--muted); margin:0 0 46px; }
-  .cover-main ul { font-size:22px; line-height:1.7; }
+  .cover-main h1 { font-size:44px; line-height:1.12; margin:0 0 20px; }
+  .cover-main p { font-size:19px; color:var(--muted); margin:0 0 40px; }
+  .cover-main ul { font-size:19px; line-height:1.55; }
   footer { position:absolute; left:58px; right:58px; bottom:30px; border-top:1px solid var(--line); padding-top:12px; color:var(--muted); font-size:13px; text-align:right; }
 </style>
 </head>
@@ -1219,9 +1251,16 @@ export function buildQualityReport(args: {
     if (title && !actual.includes(normalizeDeckText(title, 80))) {
       findings.push({ severity: "error", pageNo: index + 1, message: `missing title: ${title}` });
     }
-    const expectedBullets = displayBullets(slide).slice(0, 5);
-    expectedBullets.forEach((item) => {
-      const expected = normalizeDeckText(item.text, 38);
+    const kind = slideKind(slide, index, args.blueprint.slides.length);
+    const displayLimit = displayLimitForKind(kind);
+    const visualRows = visualItems(slide).slice(0, displayLimit);
+    const expectedRows = (
+      visualRows.length && ["bar", "kpi", "matrix", "summary", "timeline"].includes(kind)
+        ? visualRows.map(row => row.value || row.label || row.note).filter(Boolean)
+        : displayBullets(slide).slice(0, displayLimit).map(item => item.text)
+    );
+    expectedRows.forEach((item) => {
+      const expected = normalizeDeckText(item, 38);
       if (expected && !actual.includes(expected)) {
         findings.push({ severity: "warning", pageNo: index + 1, message: `bullet may be missing or heavily truncated: ${expected}` });
       }
@@ -1256,9 +1295,10 @@ function renderSlideSvg(args: {
   const fontFamily = `"WenQuanYi Zen Hei","Noto Sans SC","Microsoft YaHei",Arial,sans-serif`;
   const kind = slideKind(args.slide, args.index, args.total);
   const title = splitTitle(args.slide.title || args.deckTitle || "PPT 制作");
-  const bullets = displayBullets(args.slide).slice(0, 7);
+  const displayLimit = displayLimitForKind(kind);
+  const bullets = displayBullets(args.slide).slice(0, displayLimit);
   const refs = collectCitationRefs(args.slide);
-  const visualRows = visualItems(args.slide).slice(0, 6);
+  const visualRows = visualItems(args.slide).slice(0, displayLimit);
   const header = kind === "cover" ? "" : `
     ${title.label ? `<rect x="74" y="45" width="116" height="34" rx="4" fill="${accent}"/><text x="132" y="68" text-anchor="middle" font-size="18" font-weight="700" fill="#fff">${svgEscape(title.label)}</text>` : ""}
     ${svgTextBlock({ text: title.main, x: title.label ? 210 : 74, y: 72, widthChars: title.label ? 42 : 54, maxLines: 1, size: 34, weight: 700, color: text })}
@@ -1297,8 +1337,8 @@ function renderSlideSvg(args: {
         <line x1="112" y1="${y + 24}" x2="112" y2="${y + 58}" stroke="${border}" stroke-width="2" ${i === rows.length - 1 ? 'opacity="0"' : ""}/>`;
     }).join("");
   } else if (kind === "kpi") {
-    const rows = visualRows.length ? visualRows : bullets.slice(0, 6).map((item, index) => ({ label: `指标 ${index + 1}`, value: item.text, note: "" }));
-    body = rows.slice(0, 6).map((row, i) => {
+    const rows = visualRows.length ? visualRows : bullets.slice(0, displayLimit).map((item, index) => ({ label: `指标 ${index + 1}`, value: item.text, note: "" }));
+    body = rows.slice(0, displayLimit).map((row, i) => {
       const x = 82 + (i % 3) * 370;
       const y = 200 + Math.floor(i / 3) * 178;
       const color = i % 2 ? accent2 : accent;
@@ -1309,10 +1349,10 @@ function renderSlideSvg(args: {
         ${svgTextBlock({ text: row.note, x: x + 28, y: y + 116, widthChars: 18, maxLines: 1, size: 13, color: muted })}`;
     }).join("");
   } else if (kind === "timeline") {
-    const rows = visualRows.length ? visualRows : bullets.slice(0, 5).map((item, index) => ({ label: `阶段 ${index + 1}`, value: item.text, note: "" }));
-    const timelineRows = rows.slice(0, 5);
+    const rows = visualRows.length ? visualRows : bullets.slice(0, displayLimit).map((item, index) => ({ label: `阶段 ${index + 1}`, value: item.text, note: "" }));
+    const timelineRows = rows.slice(0, displayLimit);
     body = `<line x1="128" y1="334" x2="1130" y2="334" stroke="${border}" stroke-width="4"/>` + timelineRows.map((row, i) => {
-      const x = rows.length > 1 ? 128 + i * (1002 / Math.max(1, rows.slice(0, 5).length - 1)) : 620;
+      const x = rows.length > 1 ? 128 + i * (1002 / Math.max(1, rows.slice(0, displayLimit).length - 1)) : 620;
       const up = i % 2 === 0;
       const boxY = up ? 176 : 382;
       const color = i % 2 ? accent2 : accent;
@@ -1375,13 +1415,13 @@ function renderSlideSvg(args: {
       + renderConceptIllustration({ slide: args.slide, x: 92, y: 548, w: 1060, h: 92, accent, accent2, border, muted, text });
   } else if (kind === "summary") {
     const summaryRows = visualRows.length
-      ? visualRows.slice(0, 6).map((row) => ({
+      ? visualRows.slice(0, displayLimit).map((row) => ({
         label: row.label,
         value: row.value,
         note: row.note,
         text: `${row.label}${row.value ? `：${row.value}` : ""}`,
       }))
-      : bullets.slice(0, 6).map((item) => ({ label: "", value: item.text, note: "", text: item.text }));
+      : bullets.slice(0, displayLimit).map((item) => ({ label: "", value: item.text, note: "", text: item.text }));
     const summaryCols = summaryRows.length <= 4 ? 2 : 3;
     const cardW = summaryCols === 2 ? 500 : 335;
     const cardH = summaryCols === 2 ? 112 : 92;
@@ -1401,11 +1441,11 @@ function renderSlideSvg(args: {
     }).join("") + renderConceptIllustration({ slide: args.slide, x: 92, y: 500, w: 1060, h: 120, accent, accent2, border, muted, text });
   } else if (kind === "table") {
     const rows = (visualRows.length
-      ? visualRows.slice(0, 6).map((row) => ({
+      ? visualRows.slice(0, displayLimit).map((row) => ({
         label: row.label,
         text: `${row.value || row.label}${row.note ? `: ${row.note}` : ""}`,
       }))
-      : bullets.slice(0, 6));
+      : bullets.slice(0, displayLimit));
     body = `<rect x="92" y="176" width="1060" height="${58 + rows.length * 52}" rx="14" fill="#fff" stroke="${border}"/>
       <rect x="92" y="176" width="1060" height="50" rx="14" fill="#f1f5f9"/>
       <text x="130" y="222" font-size="18" font-weight="700" fill="${muted}">维度</text>
@@ -1419,9 +1459,9 @@ function renderSlideSvg(args: {
       ${renderInsightStrip({ bullets: supportingInsightRows(args.slide, bullets, 3), x: 116, y: 570, w: 1010, accent, accent2, muted, text })}
       ${renderConceptIllustration({ slide: args.slide, x: 92, y: 548, w: 1060, h: 92, accent, accent2, border, muted, text })}`;
   } else {
-    const cards = visualRows.length ? visualRows.slice(0, 6) : bullets.slice(0, 6).map((item, index) => ({ label: `要点 ${index + 1}`, value: "", note: item.text }));
+    const cards = visualRows.length ? visualRows.slice(0, displayLimit) : bullets.slice(0, displayLimit).map((item, index) => ({ label: `要点 ${index + 1}`, value: "", note: item.text }));
     body = `
-      <g>${bullets.slice(0, 6).map((item, i) => `<circle cx="98" cy="${205 + i * 48}" r="5" fill="${i % 2 ? accent2 : accent}"/>${svgTextBlock({ text: item.text, x: 118, y: 213 + i * 48, widthChars: 32, maxLines: 1, size: 18, color: text })}`).join("")}</g>
+      <g>${bullets.slice(0, displayLimit).map((item, i) => `<circle cx="98" cy="${205 + i * 48}" r="5" fill="${i % 2 ? accent2 : accent}"/>${svgTextBlock({ text: item.text, x: 118, y: 213 + i * 48, widthChars: 32, maxLines: 1, size: 18, color: text })}`).join("")}</g>
       <g>${cards.map((row, i) => {
         const x = 700 + (i % 2) * 250;
         const y = 185 + Math.floor(i / 2) * 112;
@@ -1521,11 +1561,11 @@ export async function generatePptxFromBlueprint(args: {
       slide.addShape("rect", { x: 0, y: 0, w: 0.16, h: WIDE_SLIDE.h, fill: { color: theme.accent }, line: { color: theme.accent } });
       slide.addShape("rect", { x: 0.6, y: 0.72, w: 1.0, h: 0.08, fill: { color: theme.accent }, line: { color: theme.accent } });
       const title = splitTitle(item.title || args.blueprint.title || "PPT 制作");
-      slide.addText(title.label || "汇报材料", { x: 0.72, y: 1.25, w: 2.2, h: 0.36, fontFace: "Microsoft YaHei", fontSize: 13, bold: true, color: theme.accent });
-      slide.addText(title.main || args.blueprint.title || "PPT 制作", { x: 0.72, y: 1.7, w: 10.8, h: 0.95, fontFace: "Microsoft YaHei", fontSize: 34, bold: true, color: theme.text, fit: "shrink" });
-      slide.addText(args.blueprint.subtitle || item.keyMessage || "由灵感员工智能体生成", { x: 0.75, y: 2.82, w: 9.8, h: 0.36, fontFace: "Microsoft YaHei", fontSize: 13, color: theme.muted, fit: "shrink" });
+      slide.addText(title.label || "汇报材料", { x: 0.72, y: 1.25, w: 2.2, h: 0.36, fontFace: "Microsoft YaHei", fontSize: 11.5, bold: true, color: theme.accent });
+      slide.addText(title.main || args.blueprint.title || "PPT 制作", { x: 0.72, y: 1.7, w: 10.8, h: 0.95, fontFace: "Microsoft YaHei", fontSize: 29, bold: true, color: theme.text, fit: "shrink" });
+      slide.addText(args.blueprint.subtitle || item.keyMessage || "由灵感员工智能体生成", { x: 0.75, y: 2.82, w: 9.8, h: 0.36, fontFace: "Microsoft YaHei", fontSize: 11.5, color: theme.muted, fit: "shrink" });
       if (item.bullets.length) {
-        slide.addText(bulletText(item), { x: 0.78, y: 4.2, w: 8.5, h: 1.4, fontFace: "Microsoft YaHei", fontSize: 14, color: theme.text, breakLine: false, fit: "shrink" });
+        slide.addText(bulletText(item), { x: 0.78, y: 4.2, w: 8.5, h: 1.25, fontFace: "Microsoft YaHei", fontSize: 12.2, color: theme.text, breakLine: false, fit: "shrink" });
       }
       slide.addShape("rect", { x: 9.4, y: 4.2, w: 2.8, h: 1.5, rectRadius: 0.08, fill: { color: theme.pale }, line: { color: theme.border } });
       slide.addText("AI 生成初稿\n请人工复核数据与表述", { x: 9.65, y: 4.55, w: 2.3, h: 0.7, fontFace: "Microsoft YaHei", fontSize: 11, color: theme.muted, align: "center", valign: "mid" });
@@ -1536,6 +1576,7 @@ export async function generatePptxFromBlueprint(args: {
 
     addSlideTitle(slide, item, theme);
     const y0 = item.keyMessage ? 1.48 : 1.28;
+    const displayLimit = displayLimitForKind(kind);
 
     if (kind === "agenda") {
       const rows = item.bullets.length ? displayBullets(item) : slides.slice(1).map((s) => ({ text: s.title }));
@@ -1543,10 +1584,10 @@ export async function generatePptxFromBlueprint(args: {
         const y = y0 + i * 0.58;
         slide.addShape("ellipse", { x: 1.0, y, w: 0.32, h: 0.32, fill: { color: theme.accent }, line: { color: theme.accent } });
         slide.addText(String(i + 1).padStart(2, "0"), { x: 1.43, y: y - 0.02, w: 0.55, h: 0.26, fontFace: "Aptos", fontSize: 9, bold: true, color: theme.accent });
-        slide.addText(compactText(row.text, 72), { x: 2.05, y: y - 0.04, w: 9.5, h: 0.34, fontFace: "Microsoft YaHei", fontSize: 15, color: theme.text, fit: "shrink" });
+        slide.addText(compactText(row.text, 64), { x: 2.05, y: y - 0.04, w: 9.5, h: 0.34, fontFace: "Microsoft YaHei", fontSize: 13, color: theme.text, fit: "shrink" });
       });
     } else if (kind === "kpi") {
-      const rows = visualItems(item, item.title).slice(0, 6);
+      const rows = visualItems(item, item.title).slice(0, displayLimit);
       rows.forEach((row, i) => {
         const col = i % 3;
         const r = Math.floor(i / 3);
@@ -1554,12 +1595,12 @@ export async function generatePptxFromBlueprint(args: {
         const y = y0 + r * 1.72;
         slide.addShape("rect", { x, y, w: 3.55, h: 1.28, rectRadius: 0.08, fill: { color: theme.panel }, line: { color: theme.border } });
         slide.addShape("rect", { x, y, w: 0.08, h: 1.28, fill: { color: i % 2 ? theme.accent2 : theme.accent }, line: { color: i % 2 ? theme.accent2 : theme.accent } });
-        slide.addText(row.value || String(i + 1).padStart(2, "0"), { x: x + 0.28, y: y + 0.18, w: 1.6, h: 0.32, fontFace: "Aptos", fontSize: 19, bold: true, color: i % 2 ? theme.accent2 : theme.accent, fit: "shrink" });
-        slide.addText(row.label, { x: x + 0.3, y: y + 0.58, w: 2.85, h: 0.24, fontFace: "Microsoft YaHei", fontSize: 10.5, bold: true, color: theme.text, fit: "shrink" });
-        slide.addText(row.note, { x: x + 0.3, y: y + 0.88, w: 2.88, h: 0.24, fontFace: "Microsoft YaHei", fontSize: 8.5, color: theme.muted, fit: "shrink" });
+        slide.addText(row.value || String(i + 1).padStart(2, "0"), { x: x + 0.28, y: y + 0.18, w: 1.6, h: 0.32, fontFace: "Aptos", fontSize: 16, bold: true, color: i % 2 ? theme.accent2 : theme.accent, fit: "shrink" });
+        slide.addText(row.label, { x: x + 0.3, y: y + 0.58, w: 2.85, h: 0.24, fontFace: "Microsoft YaHei", fontSize: 9.5, bold: true, color: theme.text, fit: "shrink" });
+        slide.addText(row.note, { x: x + 0.3, y: y + 0.88, w: 2.88, h: 0.24, fontFace: "Microsoft YaHei", fontSize: 7.8, color: theme.muted, fit: "shrink" });
       });
     } else if (kind === "timeline") {
-      const rows = visualItems(item, item.title).slice(0, 6);
+      const rows = visualItems(item, item.title).slice(0, displayLimit);
       const baseY = y0 + 1.8;
       slide.addShape("line", { x: 1.0, y: baseY, w: 11.1, h: 0, line: { color: theme.border, width: 2 } });
       rows.forEach((row, i) => {
@@ -1588,7 +1629,7 @@ export async function generatePptxFromBlueprint(args: {
       slide.addText("高影响", { x: 0.8, y: y0 - 0.25, w: 1.0, h: 0.18, fontSize: 8, color: theme.muted });
       slide.addText("低确定性", { x: 0.18, y: y0 + 3.4, w: 0.8, h: 0.18, rotate: 270, fontSize: 8, color: theme.muted });
     } else if (kind === "bar") {
-      const rows = visualItems(item, item.title).slice(0, 6);
+      const rows = visualItems(item, item.title).slice(0, displayLimit);
       const values = rows.map((row, i) => Math.max(0, numericValue(row.value, rows.length - i)));
       const max = Math.max(...values, 1);
       rows.forEach((row, i) => {
@@ -1600,7 +1641,7 @@ export async function generatePptxFromBlueprint(args: {
         slide.addText(row.value || String(values[i]), { x: 11.35, y: y - 0.03, w: 0.85, h: 0.2, fontFace: "Aptos", fontSize: 8.5, bold: true, color: theme.muted, align: "right" });
       });
     } else if (kind === "compare") {
-      const rows = displayBullets(item, item.title);
+      const rows = displayBullets(item, item.title).slice(0, displayLimit);
       const left = rows.filter((_, i) => i % 2 === 0);
       const right = rows.filter((_, i) => i % 2 === 1);
       [
@@ -1608,38 +1649,35 @@ export async function generatePptxFromBlueprint(args: {
         { x: 6.95, title: "目标 / 建议", data: right.length ? right : rows.slice(3), color: theme.accent2 },
       ].forEach((col) => {
         slide.addShape("rect", { x: col.x, y: y0, w: 5.55, h: 4.75, rectRadius: 0.06, fill: { color: theme.panel }, line: { color: theme.border } });
-        slide.addText(col.title, { x: col.x + 0.28, y: y0 + 0.25, w: 4.8, h: 0.35, fontFace: "Microsoft YaHei", fontSize: 14, bold: true, color: col.color });
-        slide.addText(col.data.slice(0, 4).map((r) => `• ${compactText(r.text, 75)}`).join("\n"), { x: col.x + 0.35, y: y0 + 0.88, w: 4.85, h: 3.2, fontFace: "Microsoft YaHei", fontSize: 12, color: theme.text, breakLine: false, fit: "shrink" });
+        slide.addText(col.title, { x: col.x + 0.28, y: y0 + 0.25, w: 4.8, h: 0.35, fontFace: "Microsoft YaHei", fontSize: 12.5, bold: true, color: col.color });
+        slide.addText(col.data.slice(0, 4).map((r) => `• ${compactText(r.text, 64)}`).join("\n"), { x: col.x + 0.35, y: y0 + 0.88, w: 4.85, h: 3.2, fontFace: "Microsoft YaHei", fontSize: 10.5, color: theme.text, breakLine: false, fit: "shrink" });
       });
     } else if (kind === "process") {
-      const rows = displayBullets(item, item.title).slice(0, 5);
+      const rows = displayBullets(item, item.title).slice(0, displayLimit);
       rows.forEach((row, i) => {
         const w = 10.8 / rows.length;
         const x = 0.95 + i * w;
         slide.addShape("rect", { x, y: y0 + 1.2, w: w - 0.18, h: 1.3, rectRadius: 0.08, fill: { color: theme.panel }, line: { color: i % 2 ? theme.accent2 : theme.accent, width: 1.1 } });
         slide.addText(String(i + 1), { x: x + 0.2, y: y0 + 1.38, w: 0.35, h: 0.3, fontFace: "Aptos", fontSize: 13, bold: true, color: i % 2 ? theme.accent2 : theme.accent });
-        slide.addText(compactText(row.text, 52), { x: x + 0.2, y: y0 + 1.82, w: w - 0.55, h: 0.42, fontFace: "Microsoft YaHei", fontSize: 11, color: theme.text, fit: "shrink" });
+        slide.addText(compactText(row.text, 46), { x: x + 0.2, y: y0 + 1.82, w: w - 0.55, h: 0.42, fontFace: "Microsoft YaHei", fontSize: 9.8, color: theme.text, fit: "shrink" });
         if (i < rows.length - 1) slide.addText("→", { x: x + w - 0.12, y: y0 + 1.68, w: 0.25, h: 0.2, fontSize: 14, color: theme.muted });
       });
     } else if (kind === "table") {
-      const rows = displayBullets(item, item.title).slice(0, 5);
-      const tableRows = [["维度", "要点"], ...rows.map((row, i) => [`${i + 1}`, compactText(row.text, 88)])];
-      slide.addTable(tableRows, {
-        x: 0.85,
-        y: y0,
-        w: 11.7,
-        h: 4.55,
-        border: { type: "solid", color: theme.border, pt: 1 },
-        fontFace: "Microsoft YaHei",
-        fontSize: 11,
-        color: theme.text,
-        fill: { color: theme.panel },
-        margin: 0.08,
-        autoFit: true,
-        valign: "mid",
+      const rows = displayBullets(item, item.title).slice(0, displayLimit);
+      const rowH = 0.58;
+      const tableY = y0 + 0.12;
+      slide.addShape("rect", { x: 0.85, y: tableY, w: 11.7, h: rowH * (rows.length + 1), rectRadius: 0.06, fill: { color: theme.panel }, line: { color: theme.border } });
+      slide.addShape("rect", { x: 0.85, y: tableY, w: 11.7, h: rowH, rectRadius: 0.06, fill: { color: theme.pale }, line: { color: theme.border } });
+      slide.addText("维度", { x: 1.12, y: tableY + 0.17, w: 1.2, h: 0.2, fontFace: "Microsoft YaHei", fontSize: 10, bold: true, color: theme.muted });
+      slide.addText("要点", { x: 2.55, y: tableY + 0.17, w: 8.8, h: 0.2, fontFace: "Microsoft YaHei", fontSize: 10, bold: true, color: theme.muted });
+      rows.forEach((row, i) => {
+        const y = tableY + rowH * (i + 1);
+        slide.addShape("line", { x: 0.85, y, w: 11.7, h: 0, line: { color: theme.border, width: 0.6 } });
+        slide.addText(String(i + 1), { x: 1.12, y: y + 0.18, w: 0.5, h: 0.18, fontFace: "Aptos", fontSize: 9, bold: true, color: i % 2 ? theme.accent2 : theme.accent });
+        slide.addText(compactText(row.text, 80), { x: 2.55, y: y + 0.14, w: 8.9, h: 0.26, fontFace: "Microsoft YaHei", fontSize: 9.3, color: theme.text, fit: "shrink" });
       });
     } else {
-      const rows = displayBullets(item, item.title).slice(0, 6);
+      const rows = displayBullets(item, item.title).slice(0, displayLimit);
       rows.forEach((row, i) => {
         const col = i % 2;
         const r = Math.floor(i / 2);
@@ -1647,7 +1685,7 @@ export async function generatePptxFromBlueprint(args: {
         const y = y0 + r * 1.28;
         slide.addShape("rect", { x, y, w: 5.55, h: 0.96, rectRadius: 0.06, fill: { color: theme.panel }, line: { color: theme.border } });
         slide.addShape("rect", { x, y, w: 0.08, h: 0.96, fill: { color: i % 2 ? theme.accent2 : theme.accent }, line: { color: i % 2 ? theme.accent2 : theme.accent } });
-        slide.addText(compactText(row.text, 92), { x: x + 0.28, y: y + 0.17, w: 4.95, h: 0.5, fontFace: "Microsoft YaHei", fontSize: 12, color: theme.text, fit: "shrink" });
+        slide.addText(compactText(row.text, 76), { x: x + 0.28, y: y + 0.17, w: 4.95, h: 0.5, fontFace: "Microsoft YaHei", fontSize: 10.5, color: theme.text, fit: "shrink" });
       });
     }
 

@@ -241,7 +241,7 @@ Initial registry:
 |---|---|---|---|---|
 | 会议纪要 | general | current `MeetingNotesPage` route | audio upload | ASR + OpenClaw/Hermes writer |
 | Excel 填表 | general | current `ExcelFillPage` route | workbook/context upload | deterministic parser/filler + writer |
-| 幻灯片制作 | general | `research_ppt` | `ppt-template` | Hermes chain + renderer |
+| 幻灯片制作 | general | `research_ppt` | `ppt-template` | OpenClaw research + renderer |
 | 视频提纲 | general | current `VideoOutlinePage` route | video URL | URL/transcript extractor + writer |
 | 研究简报 | general | `market_research_brief` | none | Hermes/OpenClaw |
 | 客户会议准备 | general | `meeting_prep_agent` | none | Hermes/OpenClaw |
@@ -424,7 +424,7 @@ POST /run-stream
 
 | Ability | Orchestrator | Profiles / tools |
 |---|---|---|
-| 幻灯片制作 | employee-agent | `ppt-source-reader`, `ppt-insight-analyst`, `ppt-outline-writer`, renderer, checker |
+| 幻灯片制作 | employee-agent | OpenClaw research PPT agent, renderer, checker |
 | 研究简报 | employee-agent | Financial Data Pack builder + `market-data-analyst`, `market-brief-writer` |
 | 客户会议准备 | employee-agent | Financial Data Pack builder + `meeting-data-analyst`, `meeting-pack-writer` |
 | 公告解读 | employee-agent | Wind MCP docs/news + `wind-report-writer` |

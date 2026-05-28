@@ -12,7 +12,7 @@ import type { ReactNode } from "react";
 
 function MainPanelShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex-1 min-h-0 overflow-hidden">
+    <div className="flex-1 min-h-0 h-full overflow-hidden flex flex-col">
       {children}
     </div>
   );

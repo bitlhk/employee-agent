@@ -143,6 +143,14 @@ describe("task workbench lab route", () => {
       "meeting_prep_agent",
       "meeting_notes",
       "wind_announcement_digest",
+      "fund_compare",
+      "peer_comps_analysis",
+      "theme_leader_analysis",
+      "earnings_commentary",
+      "company_one_page_memo",
+      "macro_data_brief",
+      "credit_analysis",
+      "bond_rate_outlook",
       "research_ppt",
       "video_outline",
     ]);
@@ -152,6 +160,14 @@ describe("task workbench lab route", () => {
       "meeting_prep_agent",
       "meeting_notes",
       "wind_announcement_digest",
+      "fund_compare",
+      "peer_comps_analysis",
+      "theme_leader_analysis",
+      "earnings_commentary",
+      "company_one_page_memo",
+      "macro_data_brief",
+      "credit_analysis",
+      "bond_rate_outlook",
       "research_ppt",
       "video_outline",
     ]);
@@ -348,13 +364,10 @@ describe("task workbench lab route", () => {
       evidenceItems: [],
       sourceCards: [],
     }));
-    expect(remoteBody.financeDataPack.requirements).toHaveLength(1);
-    expect(remoteBody.financeDataPack.sections[0]).toEqual(expect.objectContaining({
-      requirementId: "d1",
-      status: "missing",
-    }));
+    expect(remoteBody.financeDataPack.requirements).toHaveLength(0);
+    expect(remoteBody.financeDataPack.sections).toHaveLength(0);
     expect(remoteBody.financeDataPack.gaps[0]).toEqual(expect.objectContaining({
-      id: "gap_1",
+      id: "gap_spec_1",
       requirementId: "d1",
       severity: "error",
     }));
@@ -374,7 +387,7 @@ describe("task workbench lab route", () => {
     expect(res.body.taskRun.metadata.remoteHarness.enabled).toBe(true);
     expect(res.body.taskRun.metadata.financeDataPack).toEqual(expect.objectContaining({
       provider: "wind-financial-docs",
-      requirementCount: 1,
+      requirementCount: 0,
       gapCount: 1,
       confidenceSummary: expect.objectContaining({ level: "missing" }),
     }));

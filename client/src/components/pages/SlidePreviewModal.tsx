@@ -124,7 +124,11 @@ export function SlidePreviewModal({ open, onClose, previewUrl, downloadUrl, file
 
   // ── 构造单页 srcDoc（嵌入共享 style + body 背景色配合 PPT 主题）──
   const srcDocFor = useMemo(() => {
-    return (slideHtml: string) => `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${docStyles}\nbody{background:#fff !important;padding:0 !important;margin:0 !important;}.slide{margin:0 !important;max-width:none !important;width:100% !important;border-radius:0 !important;box-shadow:none !important;min-height:100vh !important;}</style></head><body>${slideHtml}</body></html>`;
+    return (slideHtml: string) => `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${docStyles}
+html,body{background:#fff !important;padding:0 !important;margin:0 !important;overflow:hidden !important;}
+.slide-frame{width:100vw;aspect-ratio:16/9;container-type:inline-size;overflow:hidden;}
+.slide-frame>.slide{width:1280px !important;height:720px !important;margin:0 !important;max-width:none !important;border-radius:0 !important;box-shadow:none !important;transform:scale(calc(100cqw / 1280));transform-origin:top left;}
+body>.slide{zoom:0.75;margin:0 !important;border-radius:0 !important;box-shadow:none !important;}</style></head><body><div class="slide-frame">${slideHtml}</div></body></html>`;
   }, [docStyles]);
 
   if (!open) return null;

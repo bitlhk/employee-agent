@@ -33,7 +33,16 @@ const assertVerificationCode = (value: unknown) => {
 
 export const authRouter = router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      await recordAuditBestEffort({
+        action: "auth.logout",
+        result: "success",
+        severity: "low",
+        ...auditActor(ctx.user),
+        ...auditRequest(ctx.req),
+        targetType: "auth_session",
+        metadata: { localCacheClearRequested: true },
+      });
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return {

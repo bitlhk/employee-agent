@@ -857,156 +857,246 @@
   margin-bottom: 12px;
 }
 
-.settings-theme-grid {
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 42px;
+}
+
+.settings-overlay__scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: var(--oc-bg-overlay);
+  cursor: default;
+}
+
+.settings-overlay__panel {
+  position: relative;
+  z-index: 1;
+  width: min(1220px, calc(100vw - 84px));
+  height: min(790px, calc(100vh - 84px));
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: 220px minmax(0, 1fr);
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid var(--oc-border);
+  background: var(--oc-bg-surface);
+  color: var(--oc-text-primary);
+  box-shadow: 0 28px 80px rgba(0,0,0,0.28);
 }
 
-.settings-theme-card {
-  --settings-theme-color: var(--banking-theme-claw);
-  display: flex;
-  min-height: 112px;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 14px 16px;
-  border-radius: var(--banking-radius-md);
-  border: 1px solid var(--banking-border);
-  background: var(--banking-card);
-  color: var(--banking-text);
-  cursor: pointer;
-  transition: border-color .15s, background .15s, box-shadow .15s;
+.settings-overlay__nav {
+  min-height: 0;
+  padding: 22px 12px;
+  border-right: 1px solid var(--oc-border-subtle);
+  background: var(--oc-bg-soft);
 }
 
-.settings-theme-card--knot { --settings-theme-color: var(--banking-theme-knot); }
-.settings-theme-card--dash { --settings-theme-color: var(--banking-theme-dash); }
-.settings-theme-card--ember { --settings-theme-color: var(--banking-theme-ember); }
-
-.settings-theme-card:hover {
-  border-color: color-mix(in oklab, var(--settings-theme-color) 34%, var(--banking-border));
-}
-
-.settings-theme-card[data-active="true"] {
-  border-color: var(--settings-theme-color);
-  background: color-mix(in oklab, var(--settings-theme-color) 8%, var(--banking-card));
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--settings-theme-color) 12%, transparent);
-}
-
-.settings-theme-card__swatches {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-}
-
-.settings-theme-card__accent,
-.settings-theme-card__surface,
-.settings-theme-card__border {
-  display: block;
-  flex-shrink: 0;
-}
-
-.settings-theme-card__accent {
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--settings-theme-color);
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--settings-theme-color) 14%, transparent);
-}
-
-.settings-theme-card__surface {
-  width: 10px;
-  height: 18px;
-  border-radius: 4px;
-  background: var(--banking-panel);
-}
-
-.settings-theme-card__border {
-  width: 10px;
-  height: 18px;
-  border-radius: 4px;
-  background: var(--banking-border);
-}
-
-.settings-theme-card__title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--banking-text);
-}
-
-.settings-theme-card[data-active="true"] .settings-theme-card__title {
-  color: var(--settings-theme-color);
-}
-
-.settings-theme-card__desc {
-  font-size: 12px;
-  color: var(--banking-text-muted);
-  margin-top: 2px;
-}
-
-.settings-page-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--banking-border);
-}
-
-.settings-page-row__label {
-  font-size: 13px;
-  color: var(--banking-text);
-  font-weight: 600;
-}
-
-.settings-page-row__control {
-  display: flex;
-  align-items: center;
-}
-
-.settings-segmented {
-  display: flex;
-  gap: 2px;
-  background: var(--banking-panel);
-  border: 1px solid var(--banking-border);
-  border-radius: var(--banking-radius-md);
-  padding: 3px;
-}
-
-.settings-segmented__item {
-  padding: 4px 12px;
-  border-radius: calc(var(--banking-radius-md) - 2px);
-  border: none;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  background: transparent;
-  color: var(--banking-text-muted);
-  transition: background .15s, color .15s;
-  white-space: nowrap;
-}
-
-.settings-segmented__item[data-active="true"] {
-  background: var(--banking-brand-red);
-  color: var(--banking-on-brand);
-}
-
-.settings-range-row {
+.settings-overlay__brand {
   display: flex;
   align-items: center;
   gap: 10px;
+  height: 40px;
+  padding: 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--oc-text-primary);
 }
 
-.settings-range {
-  width: 140px;
-  accent-color: var(--banking-brand-red);
+.settings-overlay__group {
+  margin-top: 22px;
 }
 
-.settings-radius-preview {
-  width: 24px;
-  height: 24px;
-  background: var(--banking-brand-red-subtle);
-  border: 1.5px solid var(--banking-brand-red);
-  transition: border-radius .15s;
+.settings-overlay__group-label {
+  padding: 0 12px 8px;
+  font-size: 12px;
+  color: var(--oc-text-tertiary);
+}
+
+.settings-overlay__nav-item {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--oc-text-secondary);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-overlay__nav-item:hover {
+  background: var(--oc-sidebar-item-hover);
+}
+
+.settings-overlay__nav-item[data-active="true"] {
+  background: var(--oc-sidebar-item-active);
+  color: var(--oc-text-primary);
+}
+
+.settings-overlay__nav-item[data-disabled="true"] {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.settings-overlay__content {
+  position: relative;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 38px 52px;
+  background: var(--oc-bg-surface);
+}
+
+.settings-overlay__close {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--oc-text-secondary);
+  cursor: pointer;
+}
+
+.settings-overlay__close:hover {
+  background: var(--oc-bg-hover);
+  color: var(--oc-text-primary);
+}
+
+.settings-overlay-section {
+  max-width: 720px;
+}
+
+.settings-overlay-section__header {
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--oc-border-subtle);
+}
+
+.settings-overlay-section__header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--oc-text-primary);
+}
+
+.settings-overlay-section__header p {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--oc-text-secondary);
+}
+
+.settings-overlay-card {
+  margin-top: 28px;
+  padding: 22px;
+  border: 1px solid var(--oc-border);
+  border-radius: 14px;
+  background: var(--oc-bg-elevated);
+}
+
+.settings-overlay-card__label {
+  margin-bottom: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--oc-text-primary);
+}
+
+.settings-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-mode-card {
+  min-height: 86px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--oc-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--oc-text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-mode-card:hover,
+.settings-mode-card[data-active="true"] {
+  background: var(--oc-sidebar-item-active);
+  color: var(--oc-text-primary);
+}
+
+.settings-mode-card__copy {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-mode-card__copy strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-mode-card__copy span {
+  font-size: 12px;
+  color: var(--oc-text-tertiary);
+}
+
+.settings-overlay-empty {
+  color: var(--oc-text-secondary);
+}
+
+.settings-overlay__content .settings-page,
+.settings-overlay__content .settings-page-content,
+.settings-overlay__content .settings-page-panel {
+  max-width: none;
+}
+
+@media (max-width: 860px) {
+  .settings-overlay {
+    padding: 16px;
+  }
+  .settings-overlay__panel {
+    width: calc(100vw - 32px);
+    height: calc(100vh - 32px);
+    grid-template-columns: 1fr;
+  }
+  .settings-overlay__nav {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--oc-border-subtle);
+  }
+  .settings-overlay__group {
+    margin-top: 0;
+  }
+  .settings-overlay__group-label,
+  .settings-overlay__brand {
+    display: none;
+  }
+  .settings-overlay__nav-item {
+    white-space: nowrap;
+  }
+  .settings-overlay__content {
+    padding: 28px 20px;
+  }
+  .settings-mode-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .settings-toggle {
@@ -1514,6 +1604,17 @@
   --oc-bg-hover:       rgba(255,255,255,0.04);
   --oc-bg-active:      rgba(255,255,255,0.08);
   --oc-bg-overlay:     rgba(0,0,0,0.6);
+  --oc-chat-bg:        #181818;
+  --oc-sidebar-bg:     #1c1c1c;
+  --oc-sidebar-item-hover: var(--oc-sidebar-item-active);
+  --oc-sidebar-item-active: #2a2a2a;
+  --oc-sidebar-avatar-bg: #2a2a2a;
+  --oc-sidebar-text:   var(--oc-text-primary);
+  --oc-sidebar-muted:  var(--oc-text-secondary);
+  --oc-sidebar-subtle: var(--oc-text-tertiary);
+  --oc-user-bubble-bg: #242424;
+  --oc-user-bubble-hover: #2a2a2a;
+  --oc-user-bubble-border: var(--oc-border);
 
   /* 文字 4 级 */
   --oc-text-primary:   var(--text, #e5e7eb);
@@ -1561,6 +1662,17 @@
   --oc-bg-hover:       rgba(0,0,0,0.03);
   --oc-bg-active:      rgba(0,0,0,0.06);
   --oc-bg-overlay:     rgba(0,0,0,0.3);
+  --oc-chat-bg:        #f8f8f7;
+  --oc-sidebar-bg:     #ebebeb;
+  --oc-sidebar-item-hover: var(--oc-sidebar-item-active);
+  --oc-sidebar-item-active: #e4e4e4;
+  --oc-sidebar-avatar-bg: #dddddd;
+  --oc-sidebar-text:   var(--oc-text-primary);
+  --oc-sidebar-muted:  var(--oc-text-secondary);
+  --oc-sidebar-subtle: var(--oc-text-tertiary);
+  --oc-user-bubble-bg: #f0f0ee;
+  --oc-user-bubble-hover: #e9e9e7;
+  --oc-user-bubble-border: #e2e2df;
 
   --oc-text-primary:   #1d1d1f;
   --oc-text-secondary: #6e6e73;
@@ -1703,39 +1815,38 @@
 .compose-shell:hover { border-color: var(--border-strong); }
 
 .sidebar-item {
-  border-radius: 12px;
-  height: 46px;
-  padding: 0 16px;
-  gap: 10px;
+  border-radius: 10px;
+  min-height: 44px;
+  height: auto;
+  padding: 10px 16px;
+  gap: 12px;
   border: 1px solid transparent;
   background: transparent;
   font-size: 14px;
-  font-weight: 600;
-  color: var(--oc-text-secondary);
-  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
+  font-weight: 400;
+  color: var(--oc-sidebar-muted);
+  transition: background-color .16s ease, border-color .16s ease;
 }
-.sidebar-item .sidebar-item-label { font-weight: 600; letter-spacing: .1px; }
+.sidebar-item .sidebar-item-label { font-weight: 400; letter-spacing: 0; font-size: 14px; color: var(--oc-sidebar-text); }
+.sidebar-item .sidebar-item-icon { color: var(--oc-sidebar-muted); }
 .sidebar-item.active {
-  background: color-mix(in oklab, var(--oc-accent) 14%, var(--oc-bg-surface));
-  border-color: color-mix(in oklab, var(--oc-accent) 34%, var(--oc-border));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+  background: var(--oc-sidebar-item-active);
+  border-color: transparent;
+  box-shadow: none;
 }
 .sidebar-item.active .sidebar-item-label {
-  color: var(--oc-text-primary) !important;
-  font-weight: 650;
+  color: var(--oc-sidebar-text) !important;
+  font-weight: 400;
 }
 .sidebar-item.active .sidebar-item-icon {
-  color: var(--oc-accent) !important;
+  color: var(--oc-sidebar-muted) !important;
 }
 .sidebar-item:hover {
-  background: color-mix(in oklab, var(--oc-bg-surface) 76%, white 2%) !important;
-  border-color: var(--oc-border-strong);
+  background: var(--oc-sidebar-item-hover) !important;
+  border-color: transparent;
 }
 .sidebar-item-indicator {
-  width: 3px;
-  height: 22px;
-  border-radius: 999px;
-  background: var(--oc-accent);
+  display: none;
 }
 
 
@@ -1811,13 +1922,11 @@ select.settings-input {
 }
 
 
- .sidebar-footer {
-  margin-top: auto;
-  position: sticky;
-  bottom: 0;
-  padding: 14px;
-  border-top: 1px solid var(--oc-border);
-  background: var(--oc-panel);
+.sidebar-footer {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 .sidebar-doc {
   display: flex;
@@ -1861,11 +1970,35 @@ select.settings-input {
 
 
 /* Skills console (Phase C.1) */
+.skills-page {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.skills-page > .page-tabs {
+  flex-shrink: 0;
+}
+.skills-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  padding-bottom: 24px;
+}
+.skills-panel:focus {
+  outline: none;
+}
+.skills-panel--market {
+  display: flex;
+  flex-direction: column;
+}
 .skills-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-shrink: 0;
 }
 .skills-toolbar {
   display: flex;
@@ -1873,6 +2006,13 @@ select.settings-input {
   justify-content: space-between;
   gap: 12px;
   margin-top: 12px;
+  flex-shrink: 0;
+}
+.skills-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-bottom: 12px;
 }
 .skills-search {
   height: 36px;
@@ -2016,6 +2156,8 @@ select.settings-input {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1;
+  min-height: 0;
   padding-top: 12px;
 }
 .skills-market-hero {
@@ -2193,6 +2335,8 @@ select.settings-input {
 .skills-market-detail__panel {
   position: relative;
   width: min(520px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
   padding: 18px;
   display: flex;
   flex-direction: column;
@@ -2564,14 +2708,14 @@ select.settings-input {
 
 /* ── Bubble Final ── */
 .lingxia-bubble-user {
-  background: color-mix(in oklab, var(--oc-accent) 12%, var(--oc-bg-surface));
-  border: 1px solid color-mix(in oklab, var(--oc-accent) 24%, var(--oc-border));
+  background: var(--oc-user-bubble-bg);
+  border: 1px solid var(--oc-user-bubble-border);
   color: var(--oc-text-primary);
   transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 .lingxia-bubble-user:hover {
-  background: color-mix(in oklab, var(--oc-accent) 16%, var(--oc-bg-surface));
-  border-color: color-mix(in oklab, var(--oc-accent) 34%, var(--oc-border));
+  background: var(--oc-user-bubble-hover);
+  border-color: var(--oc-user-bubble-border);
   box-shadow: 0 5px 16px rgba(0,0,0,0.14);
 }
 .lingxia-bubble-ai {
@@ -3066,13 +3210,13 @@ select.settings-input {
 
 /* ③ 浅色：sidebar-item */
 :root[data-theme-mode="light"] .sidebar-item {
-  color: var(--text);
+  color: var(--oc-sidebar-muted);
 }
 :root[data-theme-mode="light"] .sidebar-item:hover {
-  background: rgba(0,0,0,0.04);
+  background: var(--oc-sidebar-item-hover);
 }
 :root[data-theme-mode="light"] .sidebar-item.active {
-  background: rgba(220, 38, 38, 0.08);
+  background: var(--oc-sidebar-item-active);
 }
 
 /* ④ 浅色：badge */
@@ -3165,21 +3309,22 @@ select.settings-input {
 
 /* 1. sidebar active 文字颜色 — 浅色下用深色文字 */
 :root[data-theme-mode="light"] .sidebar-item.active {
-  background: rgba(158,24,34,0.12) !important;
-  border-color: rgba(158,24,34,0.35) !important;
+  background: var(--oc-sidebar-item-active) !important;
+  border-color: transparent !important;
   box-shadow: none !important;
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-label {
-  color: #9e1822 !important;
+  color: var(--oc-sidebar-text) !important;
+  font-weight: 400 !important;
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-icon {
-  color: #9e1822 !important;
+  color: var(--oc-sidebar-muted) !important;
 }
 :root[data-theme-mode="light"] .sidebar-item-indicator {
-  background: #9e1822 !important;
+  display: none !important;
 }
 :root[data-theme-mode="light"] .sidebar-item:hover {
-  background: rgba(0,0,0,0.05) !important;
+  background: var(--oc-sidebar-item-hover) !important;
   border-color: transparent !important;
 }
 
@@ -3227,18 +3372,18 @@ select.settings-input {
 /* 浅色模式下消息列表容器用浅灰底，侧栏保持白色 */
 :root[data-theme-mode="light"] .lingxia-shell main .stealth-scrollbar,
 :root[data-theme-mode="light"] .lingxia-shell main > .overflow-y-auto {
-  background: var(--oc-bg) !important;
+  background: var(--oc-chat-bg) !important;
 }
 
 /* ── 修复项 2：用户消息气泡 → 粉红底色 ── */
 :root[data-theme-mode="light"] .lingxia-bubble-user {
-  background: #EFE3E5 !important;
-  border-color: #E0D0D3 !important;
+  background: var(--oc-user-bubble-bg) !important;
+  border-color: var(--oc-user-bubble-border) !important;
   color: #1f1f1f !important;
 }
 :root[data-theme-mode="light"] .lingxia-bubble-user:hover {
-  background: #E5D6D9 !important;
-  border-color: #D5C4C7 !important;
+  background: var(--oc-user-bubble-hover) !important;
+  border-color: var(--oc-user-bubble-border) !important;
   box-shadow: 0 4px 12px rgba(0,0,0,0.06) !important;
 }
 :root[data-theme-mode="light"] .lingxia-user-msg-text {
@@ -3317,19 +3462,20 @@ select.settings-input {
 
 /* ── 修复项 6：侧边栏激活项粉色标识 ── */
 :root[data-theme-mode="light"] .sidebar-item.active {
-  background: #FFF1F2 !important;
+  background: var(--oc-sidebar-item-active) !important;
   border-color: transparent !important;
-  border-left: 3px solid #F43F5E !important;
-  border-radius: 0 12px 12px 0 !important;
+  border-left: 0 !important;
+  border-radius: 10px !important;
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-label {
-  color: #BE123C !important;
+  color: var(--oc-sidebar-text) !important;
+  font-weight: 400 !important;
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-icon {
-  color: #F43F5E !important;
+  color: var(--oc-sidebar-muted) !important;
 }
 :root[data-theme-mode="light"] .sidebar-item-indicator {
-  background: #F43F5E !important;
+  display: none !important;
 }
 
 /* ── 修复项 7：全局文字对比度 ── */
@@ -3479,8 +3625,8 @@ select.settings-input {
 
 /* 浅色：侧边栏 footer */
 :root[data-theme-mode="light"] .sidebar-footer {
-  background: var(--panel) !important;
-  border-top-color: #E5E7EB !important;
+  background: transparent !important;
+  border-top-color: transparent !important;
 }
 :root[data-theme-mode="light"] .sidebar-doc {
   background: #F9FAFB !important;
@@ -3489,7 +3635,7 @@ select.settings-input {
 }
 :root[data-theme-mode="light"] .sidebar-doc:hover {
   background: #F3F4F6 !important;
-  border-color: #F43F5E !important;
+  border-color: var(--oc-border) !important;
   color: #1F2937 !important;
 }
 :root[data-theme-mode="light"] .sidebar-meta {
@@ -3871,12 +4017,12 @@ html:has(:root[data-theme-mode="light"]) body {
 
 /* 浅色：sidebar-meta + footer */
 :root[data-theme-mode="light"] .sidebar-meta {
-  background: rgba(0,0,0,0.02) !important;
-  border-color: var(--border) !important;
+  background: transparent !important;
+  border-color: transparent !important;
 }
 :root[data-theme-mode="light"] .sidebar-footer {
-  background: var(--panel) !important;
-  border-top-color: var(--border) !important;
+  background: transparent !important;
+  border-top-color: transparent !important;
 }
 
 /* ── 模型下拉菜单：修复选中项大红块 + hover 无样式 ── */

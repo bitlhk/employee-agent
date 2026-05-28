@@ -307,14 +307,8 @@ PPT should join the same document workbench, not remain a separate page forever.
 Recommended flow:
 
 ```text
-ppt-source-reader
-  -> search public/web/MCP sources
-
-ppt-insight-analyst
-  -> synthesize evidence and logic
-
-ppt-outline-writer
-  -> produce Markdown outline + PPT_BLUEPRINT_JSON
+OpenClaw research PPT agent
+  -> search public/web sources, synthesize evidence and logic, produce Markdown outline + PPT_BLUEPRINT_JSON
 
 ppt-template-renderer
   -> render PPTX using uploaded/default template
@@ -323,17 +317,9 @@ ppt-quality-reviewer
   -> validate slide count, title anchors, key messages, citations
 ```
 
-### 6.2 What Hermes Should Do
+### 6.2 Runtime Choice
 
-Hermes profiles should produce strong research and structured blueprint output.
-
-Hermes should not be the primary PPTX renderer in the new flow.
-
-Recommended Hermes profiles:
-
-- `ppt-source-reader`
-- `ppt-insight-analyst`
-- `ppt-outline-writer`
+OpenClaw is the default PPT content runtime. Hermes PPT profiles are optional experiments only; they must not be required for the production PPT flow until Hermes web-tool execution is stable.
 
 ### 6.3 What Existing PPT Generator Should Do
 
@@ -440,9 +426,7 @@ PPT must not remain a standalone "enter a topic and directly emit PPTX" island. 
 
 ```text
 user topic/materials
-  -> ppt-source-reader
-  -> ppt-insight-analyst
-  -> ppt-outline-writer
+  -> OpenClaw research PPT agent
   -> ppt-template-renderer
   -> ppt-quality-checker
   -> artifacts: outline.md, blueprint.json, preview.html, deck.pptx, quality-report.md
@@ -451,18 +435,13 @@ user topic/materials
 Tasks:
 
 - add task template `research_ppt`
-- add Hermes profiles:
-  - `ppt-source-reader`
-  - `ppt-insight-analyst`
-  - `ppt-outline-writer`
+- use OpenClaw for the research/outline stage by default
 - connect `ppt-template-renderer` to the existing `server/_core/office-ppt.ts` PPTX generation capability
 - add first-pass code validation as `ppt-quality-checker`; a Hermes reviewer can be added later if needed
 
 Role responsibilities:
 
-- `ppt-source-reader`: search and collect source-grounded evidence. It may use web search/fetch tools and must return sources, dates, uncertainty, and evidence gaps.
-- `ppt-insight-analyst`: read the evidence package and produce the storyline, key claims, risks, and page-level logic. It should not generate PPTX files.
-- `ppt-outline-writer`: produce a human-readable Markdown outline and strict `PPT_BLUEPRINT_JSON`. It is the content write holder for the deck plan, not the file generator.
+- OpenClaw research PPT agent: search and collect source-grounded evidence when needed, produce the storyline, key claims, risks, page-level logic, human-readable Markdown outline, and strict `PPT_BLUEPRINT_JSON`. It is the content write holder for the deck plan, not the file generator.
 - `ppt-template-renderer`: render `PPT_BLUEPRINT_JSON` into PPTX using selected template/default Huawei template. This should be deterministic backend code, reusing current PPT generation logic.
 - `ppt-quality-checker`: verify page count, title alignment, key-message coverage, downloadable artifacts, and obvious blueprint/render mismatches.
 

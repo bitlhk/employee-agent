@@ -31,6 +31,25 @@ describe("task workbench router", () => {
     expect(decision.userVisiblePlan).toHaveLength(5);
   });
 
+  it("keeps selected finance cards from being rerouted to PPT", async () => {
+    vi.stubEnv("TASK_WORKBENCH_ROUTER_LLM", "true");
+    vi.stubEnv("TASK_WORKBENCH_ROUTER_HARNESS", "true");
+    vi.stubEnv("TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT", "http://127.0.0.1:18650");
+    vi.stubEnv("HERMES_HTTP_KEY", "test-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await routeTaskWorkbenchPrompt({
+      prompt: "生成一份贵州茅台公司一页纸汇报材料，方便给领导看",
+      selectedTemplateId: "company_one_page_memo",
+    });
+
+    expect(decision.intent).toBe("run_template");
+    expect(decision.selectedTemplateId).toBe("company_one_page_memo");
+    expect(decision.router?.mode).toBe("rules_template_guard");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("routes research topics to the selected PPT template", () => {
     const decision = routeTaskWorkbenchPromptByRules({
       prompt: "看下最新的几个 SOTA 开源模型，分析能力差异以及对金融 AI 的影响",
@@ -99,6 +118,16 @@ describe("task workbench router", () => {
     expect(decision.reply).toContain("不会直接执行");
   });
 
+  it("allows bond-rate research prompts that mention trading perspective", () => {
+    const decision = routeTaskWorkbenchPromptByRules({
+      prompt: "从短线交易视角研判近期债券利率走势",
+      selectedTemplateId: "bond_rate_outlook",
+    });
+
+    expect(decision.intent).toBe("run_template");
+    expect(decision.selectedTemplateId).toBe("bond_rate_outlook");
+  });
+
   it("can run in rules-only mode without calling an LLM", async () => {
     vi.stubEnv("TASK_WORKBENCH_ROUTER_LLM", "false");
 
@@ -156,6 +185,8 @@ describe("task workbench router", () => {
     expect(decision.router?.mode).toBe("financial_harness");
     expect(decision.harnessPlan?.runId).toBe("run-harness-1");
     expect(decision.harnessPlan?.templateId).toBe("market-researcher");
+    expect(decision.harnessPlan?.skillSpecId).toBe("market-research-brief");
+    expect(decision.harnessPlan?.executionLane).toBe("official_spec");
     expect(decision.harnessPlan?.stages.map((stage) => stage.profile)).toEqual(["market-comps-spreader"]);
     expect(decision.harnessPlan?.stages[0]?.skillRefs).toEqual(["comps-analysis"]);
     expect(decision.harnessPlan?.dataRequirements).toEqual([]);
@@ -173,6 +204,8 @@ describe("task workbench router", () => {
       confidence: 0.88,
       reason: "Market update request with explicit data planning",
       risk_flags: ["needs_source_check"],
+      skill_spec_id: "market-research-brief",
+      execution_lane: "official_spec",
       data_requirements: [
         {
           id: "d1",
@@ -225,6 +258,8 @@ describe("task workbench router", () => {
 
     expect(decision.intent).toBe("run_template");
     expect(decision.harnessPlan?.runId).toBe("run-harness-2");
+    expect(decision.harnessPlan?.skillSpecId).toBe("market-research-brief");
+    expect(decision.harnessPlan?.executionLane).toBe("official_spec");
     expect(decision.harnessPlan?.dataRequirements).toEqual([
       {
         id: "d1",

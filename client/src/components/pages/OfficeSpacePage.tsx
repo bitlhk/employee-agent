@@ -2,11 +2,18 @@ import { useState } from "react";
 import {
   ArrowLeft,
   BarChart3,
+  Building2,
+  CircleDollarSign,
   FileSearch,
   FileSpreadsheet,
   FileText,
+  Landmark,
   Mic2,
   Presentation,
+  Scale,
+  ShieldCheck,
+  Target,
+  TrendingUp,
   Video,
 } from "lucide-react";
 import { DocumentTaskWorkbench } from "@/components/document-workbench/DocumentTaskWorkbench";
@@ -22,7 +29,15 @@ type CapabilityId =
   | "video-outline"
   | "market-research-brief"
   | "meeting-prep-agent"
-  | "wind-announcement-digest";
+  | "wind-announcement-digest"
+  | "fund-compare"
+  | "peer-comps-analysis"
+  | "theme-leader-analysis"
+  | "earnings-commentary"
+  | "company-one-page-memo"
+  | "macro-data-brief"
+  | "credit-analysis"
+  | "bond-rate-outlook";
 
 const capabilities: Array<{
   id: CapabilityId;
@@ -148,6 +163,134 @@ const capabilities: Array<{
     category: "finance",
     Icon: FileSearch,
   },
+  {
+    id: "fund-compare",
+    title: "公募基金对比",
+    shortTitle: "基金对比",
+    description: "对 2-5 只公募基金进行收益、风险、持仓、风格和适用场景对比。",
+    placeholder: "输入基金名称或代码，以及对比目标",
+    quickPrompts: [
+      "对比几只基金的收益和回撤",
+      "分析基金持仓风格差异",
+      "筛选适合稳健配置的基金",
+      "生成基金对比材料",
+    ],
+    status: "ready",
+    category: "finance",
+    Icon: CircleDollarSign,
+  },
+  {
+    id: "peer-comps-analysis",
+    title: "同业比选",
+    shortTitle: "同业比选",
+    description: "横向比较同业公司的业务质量、财务指标、估值、催化因素和风险。",
+    placeholder: "输入目标公司和可比公司，或说明行业范围",
+    quickPrompts: [
+      "比较几家同业公司的业务质量",
+      "生成可比公司分析表",
+      "梳理估值和催化差异",
+      "建立优先跟踪清单",
+    ],
+    status: "ready",
+    category: "finance",
+    Icon: Building2,
+  },
+  {
+    id: "theme-leader-analysis",
+    title: "题材龙头",
+    shortTitle: "题材龙头",
+    description: "识别热门题材中的龙头、中军、跟随股与掉队股，并输出跟踪框架。",
+    placeholder: "输入题材、板块或热点主题",
+    quickPrompts: [
+      "分析 CPO 板块的龙头股",
+      "识别 AI 算力题材的龙头和中军",
+      "判断机器人板块当前主线和跟随股",
+      "梳理低空经济题材的角色分层",
+    ],
+    status: "ready",
+    category: "finance",
+    Icon: Target,
+  },
+  {
+    id: "earnings-commentary",
+    title: "财报点评",
+    shortTitle: "财报点评",
+    description: "基于财报、公告和新闻，生成业绩回顾、指标变化、盈利质量和风险点评。",
+    placeholder: "输入公司名称、股票代码和财报期间",
+    quickPrompts: [
+      "点评最新季度财报",
+      "分析业绩超预期原因",
+      "梳理利润率和现金流变化",
+      "生成财报更新报告",
+    ],
+    status: "ready",
+    category: "finance",
+    Icon: FileText,
+  },
+  {
+    id: "company-one-page-memo",
+    title: "公司一页纸",
+    shortTitle: "公司一页纸",
+    description: "基于 Wind 数据包和写作员生成上市公司一页纸投资研究材料。",
+    placeholder: "输入上市公司名称或代码",
+    quickPrompts: [
+      "生成公司一页纸投资报告",
+      "快速了解公司业务和风险",
+      "整理首次覆盖材料",
+      "提炼投资逻辑和催化剂",
+    ],
+    status: "ready",
+    category: "finance",
+    Icon: Landmark,
+  },
+  {
+    id: "macro-data-brief",
+    title: "宏观数据解读",
+    shortTitle: "宏观解读",
+    description: "基于 Wind 宏观数据包解读 CPI、PMI、GDP、社融等指标和市场影响。",
+    placeholder: "输入宏观指标、时间窗口和关注方向",
+    quickPrompts: [
+      "解读最新 CPI 和 PPI",
+      "分析 PMI 变化和行业影响",
+      "生成宏观数据周报",
+      "梳理社融数据的市场含义",
+    ],
+    status: "ready",
+    category: "finance",
+    Icon: TrendingUp,
+  },
+  {
+    id: "credit-analysis",
+    title: "信用分析",
+    shortTitle: "信用分析",
+    description: "基于 Wind 数据包分析主体资质、行业风险、财务健康度和评级对标。",
+    placeholder: "输入债券发行主体、城投平台或公司名称",
+    quickPrompts: [
+      "分析发行主体信用风险",
+      "生成城投信用分析材料",
+      "梳理财务健康度和现金流",
+      "对标评级与风险因素",
+    ],
+    status: "ready",
+    category: "finance",
+    Icon: ShieldCheck,
+  },
+  {
+    id: "bond-rate-outlook",
+    title: "债券利率研判",
+    shortTitle: "利率研判",
+    description: "基于 Wind 数据包从交易、策略、配置视角研判债券利率走势。",
+    placeholder: "输入利率品种、期限、时间窗口和关注视角",
+    quickPrompts: [
+      "研判近期债券利率走势",
+      "分析短线交易视角",
+      "生成中长期配置建议框架",
+      "梳理利率风险因素",
+    ],
+    status: "ready",
+    category: "finance",
+    Icon: Scale,
+  },
 ];
 
 const generalCapabilities = capabilities.filter(
@@ -165,6 +308,14 @@ const workbenchTemplateIds = [
   "market_research_brief",
   "wind_announcement_digest",
   "meeting_prep_agent",
+  "fund_compare",
+  "peer_comps_analysis",
+  "theme_leader_analysis",
+  "earnings_commentary",
+  "company_one_page_memo",
+  "macro_data_brief",
+  "credit_analysis",
+  "bond_rate_outlook",
 ];
 
 function CapabilityCard({
@@ -469,6 +620,32 @@ export function OfficeSpacePage({ adoptId }: OfficeSpacePageProps) {
         apiBase="/api/claw/office/task-workbench"
         templateIds={workbenchTemplateIds}
         initialTemplateId="wind_announcement_digest"
+        titleLabel="办公空间"
+        showSelector={false}
+        compactOfficeMode
+        onBack={() => setSelected(null)}
+      />
+    );
+  }
+
+  const financeTemplateMap: Partial<Record<CapabilityId, string>> = {
+    "fund-compare": "fund_compare",
+    "peer-comps-analysis": "peer_comps_analysis",
+    "theme-leader-analysis": "theme_leader_analysis",
+    "earnings-commentary": "earnings_commentary",
+    "company-one-page-memo": "company_one_page_memo",
+    "macro-data-brief": "macro_data_brief",
+    "credit-analysis": "credit_analysis",
+    "bond-rate-outlook": "bond_rate_outlook",
+  };
+  const financeTemplateId = selected ? financeTemplateMap[selected] : null;
+  if (financeTemplateId) {
+    return (
+      <DocumentTaskWorkbench
+        adoptId={adoptId}
+        apiBase="/api/claw/office/task-workbench"
+        templateIds={workbenchTemplateIds}
+        initialTemplateId={financeTemplateId}
         titleLabel="办公空间"
         showSelector={false}
         compactOfficeMode

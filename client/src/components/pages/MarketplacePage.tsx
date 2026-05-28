@@ -34,7 +34,7 @@ const CATEGORY_MAP: Record<string, { label: string; Icon: ComponentType<{ size?:
 
 const ORIGIN_META: Record<OriginKey, { label: string; Icon: ComponentType<{ size?: number; className?: string }> }> = {
   opensource: { label: "开源社区", Icon: Compass },
-  squad: { label: "中队原创", Icon: Sparkles },
+  squad: { label: "金融专业", Icon: Sparkles },
 };
 
 interface MarketSkill {
@@ -52,6 +52,24 @@ interface MarketSkill {
 
 function categoryMeta(category: string) {
   return CATEGORY_MAP[category] || { label: category || "其他", Icon: BriefcaseBusiness };
+}
+
+function financeTagOf(item: MarketSkill): string {
+  const license = item.license.toLowerCase();
+  const author = item.author.toLowerCase();
+  const skillId = item.skillId.toLowerCase();
+  if (license.includes("yingmi") || license.includes("qieman") || author.includes("盈米") || skillId.includes("wealth")) {
+    return "个人财富";
+  }
+  if (license.includes("wind") || author.includes("wind")) {
+    return "专业投研";
+  }
+  return ORIGIN_META[item.origin]?.label || "技能";
+}
+
+function skillTitleOf(item: MarketSkill): string {
+  if (item.license.toLowerCase().includes("wind")) return item.title.replace(/^Wind\s+/i, "");
+  return item.title;
 }
 
 export function MarketplacePage({ adoptId }: { adoptId?: string }) {
@@ -245,10 +263,10 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
         <div className="skills-market-grid">
           {filtered.map((item) => {
             const meta = categoryMeta(item.category);
-            const originMeta = ORIGIN_META[item.origin] || ORIGIN_META.opensource;
             const Icon = meta.Icon;
             const { installed, canUpdate } = installState(item);
             const installLabel = canUpdate ? "更新" : installed ? "已安装" : "安装";
+            const title = skillTitleOf(item);
             return (
               <div
                 key={item.id}
@@ -267,11 +285,11 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                   <div className="skills-market-card__title-wrap">
                     <div className="skills-market-card__title">
                       <Icon size={15} />
-                      <span>{item.title}</span>
+                      <span>{title}</span>
                     </div>
                     <div className="skills-market-card__meta">{item.author} · v{item.version}</div>
                   </div>
-                  <span className="skills-chip skills-chip--neutral">{originMeta.label}</span>
+                  <span className="skills-chip skills-chip--neutral">{financeTagOf(item)}</span>
                 </div>
 
                 <div className="skills-market-card__desc">{item.description}</div>
@@ -303,21 +321,21 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
       )}
 
       {selectedSkill && (
-        <div className="skills-market-detail" role="dialog" aria-modal="true" aria-label={`${selectedSkill.title} 详情`}>
+        <div className="skills-market-detail" role="dialog" aria-modal="true" aria-label={`${skillTitleOf(selectedSkill)} 详情`}>
           <button className="skills-market-detail__backdrop" type="button" aria-label="关闭详情" onClick={() => setSelectedSkill(null)} />
           <div className="skills-market-detail__panel settings-card">
             {(() => {
               const meta = categoryMeta(selectedSkill.category);
-              const originMeta = ORIGIN_META[selectedSkill.origin] || ORIGIN_META.opensource;
               const Icon = meta.Icon;
               const { installed, installedVersion, canUpdate } = installState(selectedSkill);
               const installLabel = canUpdate ? "更新" : installed ? "已安装" : "安装";
+              const title = skillTitleOf(selectedSkill);
               return (
                 <>
                   <div className="skills-market-detail__head">
                     <div className="skills-market-detail__icon"><Icon size={18} /></div>
                     <div className="min-w-0">
-                      <div className="skills-market-detail__title">{selectedSkill.title}</div>
+                      <div className="skills-market-detail__title">{title}</div>
                       <div className="skills-market-detail__meta">{selectedSkill.author} · v{selectedSkill.version}</div>
                     </div>
                     <button className="skills-icon-btn" type="button" aria-label="关闭详情" onClick={() => setSelectedSkill(null)}>
@@ -326,7 +344,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                   </div>
 
                   <div className="skills-market-detail__chips">
-                    <span className="skills-chip skills-chip--neutral">{originMeta.label}</span>
+                    <span className="skills-chip skills-chip--neutral">{financeTagOf(selectedSkill)}</span>
                     <span className="skills-chip skills-chip--neutral">{meta.label}</span>
                     <span className="skills-chip skills-chip--neutral">{selectedSkill.license}</span>
                     {installed ? (

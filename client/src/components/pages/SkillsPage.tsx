@@ -633,13 +633,13 @@ export function SkillsPage({ adoptId }: {
         </div>
 
         {skillTab === "market" && (
-          <div id="skills-panel-market" role="tabpanel" aria-labelledby="skills-tab-market" tabIndex={0}>
+          <div id="skills-panel-market" className="skills-panel skills-panel--market stealth-scrollbar" role="tabpanel" aria-labelledby="skills-tab-market" tabIndex={0}>
             <MarketplacePage adoptId={adoptId} />
           </div>
         )}
 
         {skillTab === "mine" && (
-          <div id="skills-panel-mine" role="tabpanel" aria-labelledby="skills-tab-mine" tabIndex={0}>
+          <div id="skills-panel-mine" className="skills-panel stealth-scrollbar" role="tabpanel" aria-labelledby="skills-tab-mine" tabIndex={0}>
             <div className="skills-header">
               <div className="skills-summary skills-muted-text text-xs">
                 共 {counts.total} 个技能 · {counts.ready} 个可用 · {counts.attention} 个需处理
@@ -663,7 +663,7 @@ export function SkillsPage({ adoptId }: {
             </div>
             <SkillsToolbar q={q} setQ={setQ} source={sourceFilter} setSource={setSourceFilter} state={stateFilter} setState={setStateFilter} />
 
-            <div className="grid gap-2 mt-3">
+            <div className="skills-list">
               {loading && <div className="settings-card skills-muted-card text-sm">正在加载技能...</div>}
               {!loading && filtered.length === 0 && <div className="settings-card skills-muted-card text-sm">暂无匹配技能</div>}
               {!loading && filtered.map((skill) => (

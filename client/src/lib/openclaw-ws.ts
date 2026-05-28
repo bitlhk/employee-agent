@@ -31,6 +31,7 @@ export class OpenClawWSClient {
   // 上层用 setRawHandler 注册，断线重连后自动绑定到新的 WebSocket
   private rawHandler: ((data: any) => void) | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectPromise: Promise<boolean> | null = null;
   private backoffMs = 1000;
   private closed = false;
   private agentId: string | null = null;
@@ -62,10 +63,15 @@ export class OpenClawWSClient {
   }
 
   async connect(): Promise<boolean> {
-    if (this._state === "connected" || this._state === "connecting") return true;
+    if (this._state === "connected") return true;
+    if (this._state === "connecting" && this.connectPromise) return this.connectPromise;
     this.closed = false;
 
-    return new Promise((resolve) => {
+    this.connectPromise = new Promise((resolve) => {
+      const finish = (ok: boolean) => {
+        this.connectPromise = null;
+        resolve(ok);
+      };
       this.setState("connecting");
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -87,9 +93,9 @@ export class OpenClawWSClient {
         if (this._state === "connecting") {
           this.ws?.close();
           this.setState("disconnected");
-          resolve(false);
+          finish(false);
         }
-      }, 15000);  // 增加到 15 秒，WSS 握手+session创建需要时间
+      }, 15000);
 
       this.ws.onopen = () => {
         // 等 gateway 认证完成（后端会发 { type: "connected" }）
@@ -110,7 +116,7 @@ export class OpenClawWSClient {
             this.agentId = msg.agentId;
             this.setState("connected");
             this.backoffMs = 1000;
-            resolve(true);
+            finish(true);
             return;
           }
 
@@ -138,11 +144,12 @@ export class OpenClawWSClient {
       this.ws.onclose = () => {
         clearTimeout(timeout);
         const wasConnected = this._state === "connected";
+        const wasConnecting = this._state === "connecting";
         this.setState("disconnected");
         this.ws = null;
 
-        if (this._state === "connecting") {
-          resolve(false);
+        if (wasConnecting) {
+          finish(false);
         }
 
         if (!this.closed && wasConnected) {
@@ -154,6 +161,7 @@ export class OpenClawWSClient {
         // onclose 会处理
       };
     });
+    return this.connectPromise;
   }
 
   private handleGatewayEvent(msg: any) {
@@ -215,6 +223,7 @@ export class OpenClawWSClient {
     }
     this.ws?.close();
     this.ws = null;
+    this.connectPromise = null;
     this.setState("disconnected");
   }
 

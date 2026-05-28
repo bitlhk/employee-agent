@@ -56,6 +56,7 @@ import { getClientIp } from "./ip-utils";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+let openClawVersionCache: { value: string; expiresAt: number } | null = null;
 
 function resolveProtectedClawAdoptId(req: Request): string | null {
   const host = String(req.hostname || req.headers.host || "").toLowerCase().split(":")[0];
@@ -302,11 +303,19 @@ async function startServer() {
   });
 
   app.get("/api/meta/openclaw-version", async (_req, res) => {
+    const now = Date.now();
+    if (openClawVersionCache && openClawVersionCache.expiresAt > now) {
+      res.json({ version: openClawVersionCache.value });
+      return;
+    }
+
     try {
       const raw = execSync("openclaw --version", { encoding: "utf-8", timeout: 2500 });
-      const text = String(raw || "").trim();
-      res.json({ version: text || "unknown" });
+      const version = String(raw || "").trim() || "unknown";
+      openClawVersionCache = { value: version, expiresAt: now + 5 * 60 * 1000 };
+      res.json({ version });
     } catch (_e) {
+      openClawVersionCache = { value: "unknown", expiresAt: now + 30 * 1000 };
       res.json({ version: "unknown" });
     }
   });

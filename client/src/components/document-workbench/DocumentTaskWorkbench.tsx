@@ -83,6 +83,14 @@ const FINANCE_COMPACT_TEMPLATE_IDS = [
   "market_research_brief",
   "wind_announcement_digest",
   "meeting_prep_agent",
+  "fund_compare",
+  "peer_comps_analysis",
+  "theme_leader_analysis",
+  "earnings_commentary",
+  "company_one_page_memo",
+  "macro_data_brief",
+  "credit_analysis",
+  "bond_rate_outlook",
 ];
 
 function CompactTaskSwitcher({
@@ -293,21 +301,15 @@ function localTaskTemplate(id: string): TaskTemplate | null {
     research_ppt: [
       {
         id: "source_reader",
-        displayName: "检索员收集资料与来源",
+        displayName: "OpenClaw 联网研究并生成资料包",
         personaId: "reader",
-        agentDefinitionId: "ppt-source-reader",
-      },
-      {
-        id: "insight_analyst",
-        displayName: "分析师提炼逻辑主线",
-        personaId: "analyst",
-        agentDefinitionId: "ppt-insight-analyst",
+        agentDefinitionId: "openclaw-research-ppt",
       },
       {
         id: "outline_writer",
-        displayName: "大纲员生成 PPT 蓝图",
+        displayName: "OpenClaw 生成 PPT 蓝图",
         personaId: "writer",
-        agentDefinitionId: "ppt-outline-writer",
+        agentDefinitionId: "openclaw-research-ppt",
       },
       {
         id: "template_renderer",
@@ -334,6 +336,118 @@ function localTaskTemplate(id: string): TaskTemplate | null {
         displayName: "写作员生成视频提纲",
         personaId: "writer",
         agentDefinitionId: "video-outline-writer",
+      },
+    ],
+    fund_compare: [
+      {
+        id: "fund_data_reader",
+        displayName: "数据员读取基金资料",
+        personaId: "reader",
+        agentDefinitionId: "wind-fund-reader",
+      },
+      {
+        id: "fund_compare_writer",
+        displayName: "写作员生成基金对比",
+        personaId: "writer",
+        agentDefinitionId: "wind-report-writer",
+      },
+    ],
+    peer_comps_analysis: [
+      {
+        id: "peer_data_reader",
+        displayName: "数据员读取公司与同业资料",
+        personaId: "reader",
+        agentDefinitionId: "wind-peer-reader",
+      },
+      {
+        id: "peer_comps_writer",
+        displayName: "写作员生成同业比选",
+        personaId: "writer",
+        agentDefinitionId: "wind-report-writer",
+      },
+    ],
+    theme_leader_analysis: [
+      {
+        id: "theme_data_reader",
+        displayName: "数据员读取题材与候选标的资料",
+        personaId: "reader",
+        agentDefinitionId: "wind-theme-reader",
+      },
+      {
+        id: "theme_leader_writer",
+        displayName: "写作员生成题材龙头分析",
+        personaId: "writer",
+        agentDefinitionId: "wind-report-writer",
+      },
+    ],
+    earnings_commentary: [
+      {
+        id: "earnings_data_reader",
+        displayName: "数据员读取财报与公告",
+        personaId: "reader",
+        agentDefinitionId: "wind-earnings-reader",
+      },
+      {
+        id: "earnings_writer",
+        displayName: "写作员生成财报点评",
+        personaId: "writer",
+        agentDefinitionId: "wind-report-writer",
+      },
+    ],
+    company_one_page_memo: [
+      {
+        id: "company_data_reader",
+        displayName: "数据员读取公司资料",
+        personaId: "reader",
+        agentDefinitionId: "wind-company-reader",
+      },
+      {
+        id: "company_memo_writer",
+        displayName: "写作员生成公司一页纸",
+        personaId: "writer",
+        agentDefinitionId: "wind-report-writer",
+      },
+    ],
+    macro_data_brief: [
+      {
+        id: "macro_data_reader",
+        displayName: "数据员读取宏观指标",
+        personaId: "reader",
+        agentDefinitionId: "wind-macro-reader",
+      },
+      {
+        id: "macro_brief_writer",
+        displayName: "写作员生成宏观解读",
+        personaId: "writer",
+        agentDefinitionId: "wind-report-writer",
+      },
+    ],
+    credit_analysis: [
+      {
+        id: "credit_data_reader",
+        displayName: "数据员读取主体与债券资料",
+        personaId: "reader",
+        agentDefinitionId: "wind-credit-reader",
+      },
+      {
+        id: "credit_writer",
+        displayName: "写作员生成信用分析",
+        personaId: "writer",
+        agentDefinitionId: "wind-report-writer",
+      },
+    ],
+    bond_rate_outlook: [
+      {
+        id: "bond_data_reader",
+        displayName: "数据员读取债券与利率资料",
+        personaId: "reader",
+        agentDefinitionId: "wind-bond-reader",
+      },
+      {
+        id: "bond_outlook_writer",
+        displayName: "写作员生成利率研判",
+        personaId: "writer",
+        agentDefinitionId: "wind-report-writer",
       },
     ],
   };
@@ -427,6 +541,13 @@ type StreamPayload = {
 };
 
 const CONTROLLED_DATA_STAGE_ID = "__controlled_data_pack";
+const CONTROLLED_DATA_STAGE_IDS = new Set([
+  CONTROLLED_DATA_STAGE_ID,
+  "controlled_data_pack",
+]);
+const CONTROLLED_COMPUTE_STAGE_IDS = new Set([
+  "controlled_compute_pack",
+]);
 
 type RouterDecision = {
   intent: "chat" | "clarify" | "run_template" | "unsupported";
@@ -632,6 +753,14 @@ function artifactSize(artifact: Artifact) {
 }
 
 function preferredDisplayArtifacts(artifacts: Artifact[]) {
+  const slidePreview = artifacts.find(
+    artifact => artifact.previewUrl && /slides-preview\.html?$/i.test(artifact.name)
+  );
+  const slideDeck = artifacts.find(
+    artifact => /\.pptx$/i.test(artifact.name) && !/editable/i.test(artifact.name)
+  );
+  if (slidePreview && slideDeck) return [slidePreview, slideDeck];
+
   const wordPreviews = artifacts.filter(
     artifact => artifact.previewUrl && /\.docx?$/i.test(artifact.name)
   );
@@ -661,6 +790,42 @@ function normalizePreviewHtml(html: string) {
     /<meta[^>]+http-equiv=["']content-security-policy["'][^>]*>/gi,
     ""
   );
+  const isSlidePreview =
+    /class=["'][^"']*\bdeck\b/i.test(stripped) &&
+    /class=["'][^"']*\bslide\b/i.test(stripped);
+  if (isSlidePreview) {
+    const slideStyle = `
+    <style>
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #eef2f7 !important;
+        overflow: auto !important;
+      }
+      .deck {
+        padding: 16px !important;
+        gap: 18px !important;
+      }
+      .slide-frame {
+        width: min(1280px, calc(100vw - 32px)) !important;
+        aspect-ratio: 16 / 9 !important;
+        container-type: inline-size !important;
+        overflow: hidden !important;
+      }
+      .slide-frame > .slide {
+        width: 1280px !important;
+        height: 720px !important;
+        transform: scale(calc(100cqw / 1280));
+        transform-origin: top left;
+      }
+      .deck > .slide {
+        zoom: 0.5;
+      }
+    </style>`;
+    if (/<\/head>/i.test(stripped))
+      return stripped.replace(/<\/head>/i, `${slideStyle}</head>`);
+    return `${slideStyle}${stripped}`;
+  }
   const style = `
     <style>
       html, body { font-size: 13px !important; line-height: 1.58 !important; }
@@ -975,15 +1140,15 @@ function compactInsightRows(
 }
 
 function compactSearchRows(metadata?: Record<string, unknown>, limit = 5) {
-  const sourceResearch = metadata?.sourceResearch as any;
-  const plan = sourceResearch?.searchPlan || {};
+  const sourceResearch = normalizeResearchMetadata(metadata);
+  const plan = sourceResearch.searchPlan || {};
   const queries = asArray(plan.queries)
     .map(item => String(item))
     .filter(Boolean);
   const fallbackQueries = asArray(plan.sourceHunt?.fallbackQueries)
     .map(item => String(item))
     .filter(Boolean);
-  const sourceHints = asArray(sourceResearch?.sources)
+  const sourceHints = asArray(sourceResearch.sources)
     .map(item => {
       if (!item || typeof item !== "object") return "";
       const source = item as Record<string, unknown>;
@@ -998,6 +1163,74 @@ function compactSearchRows(metadata?: Record<string, unknown>, limit = 5) {
     })
     .filter(Boolean);
   return [...queries, ...fallbackQueries, ...sourceHints].slice(0, limit);
+}
+
+function normalizeResearchMetadata(metadata?: Record<string, unknown>) {
+  const sourceResearch = (metadata?.sourceResearch || {}) as any;
+  const hasSourceResearch = Boolean(
+    sourceResearch?.searchPlan ||
+      sourceResearch?.sources ||
+      sourceResearch?.discardedSources
+  );
+  const plan = hasSourceResearch
+    ? sourceResearch.searchPlan || {}
+    : ((metadata?.searchPlan || {}) as any);
+  const sources = hasSourceResearch
+    ? asArray(sourceResearch.sources)
+    : asArray(metadata?.sources || metadata?.searchResults);
+  const discardedSources = hasSourceResearch
+    ? asArray(sourceResearch.discardedSources)
+    : asArray(metadata?.discardedSources);
+  const searchErrors = [
+    ...asArray(sourceResearch.searchErrors),
+    ...asArray(metadata?.searchErrors),
+  ]
+    .map(item => String(item))
+    .filter(Boolean);
+  const providers = [
+    ...asArray(sourceResearch.searchProviders),
+    ...asArray(metadata?.searchProviders),
+  ]
+    .map(item => String(item))
+    .filter(Boolean);
+  const attemptedProviders = [
+    ...asArray(sourceResearch.searchProvidersAttempted),
+    ...asArray(metadata?.searchProvidersAttempted),
+  ]
+    .map(item => String(item))
+    .filter(Boolean);
+  const searchResultCount =
+    typeof metadata?.searchResultCount === "number"
+      ? metadata.searchResultCount
+      : typeof sourceResearch.searchResultCount === "number"
+        ? sourceResearch.searchResultCount
+        : sources.length;
+  return {
+    ...sourceResearch,
+    searchPlan: plan,
+    sources,
+    discardedSources,
+    searchErrors,
+    searchProviders: providers,
+    searchProvidersAttempted: attemptedProviders,
+    searchResultCount,
+    searchElapsedMs:
+      metadata?.searchElapsedMs ?? sourceResearch.searchElapsedMs ?? null,
+    outputMarkdown: String((metadata as any)?.__output || ""),
+  };
+}
+
+function hasResearchDetails(metadata?: Record<string, unknown>) {
+  const normalized = normalizeResearchMetadata(metadata);
+  const plan = normalized.searchPlan || {};
+  return Boolean(
+    asArray(plan.queries).length ||
+      normalized.sources.length ||
+      normalized.outputMarkdown ||
+      normalized.searchResultCount ||
+      normalized.searchProviders.length ||
+      normalized.searchErrors.length
+  );
 }
 
 function renderInline(text: string) {
@@ -2113,10 +2346,23 @@ function ResearchSourceSidePanel({
   preview: ResearchPreviewState;
   onClose: () => void;
 }) {
-  const sourceResearch = (preview.metadata.sourceResearch || {}) as any;
+  const sourceResearch = normalizeResearchMetadata(preview.metadata);
   const plan = sourceResearch.searchPlan || {};
   const sources = asArray(sourceResearch.sources);
   const discarded = asArray(sourceResearch.discardedSources);
+  const providers = asArray(sourceResearch.searchProviders)
+    .map(item => String(item))
+    .filter(Boolean);
+  const attemptedProviders = asArray(sourceResearch.searchProvidersAttempted)
+    .map(item => String(item))
+    .filter(Boolean);
+  const searchErrors = asArray(sourceResearch.searchErrors)
+    .map(item => String(item))
+    .filter(Boolean);
+  const resultCount =
+    typeof sourceResearch.searchResultCount === "number"
+      ? sourceResearch.searchResultCount
+      : sources.length;
   const queries = asArray(plan.queries)
     .map(item => String(item))
     .filter(Boolean);
@@ -2127,10 +2373,24 @@ function ResearchSourceSidePanel({
   return (
     <DocumentPreviewPanel
       title={`${preview.title} · 资料来源`}
-      subtitle={`${confidenceLabel(sourceResearch.confidence)} · ${sources.length} 条采用 · ${discarded.length} 条过滤`}
+      subtitle={`${confidenceLabel(sourceResearch.confidence)} · 命中 ${resultCount} 条 · ${providers.length ? providers.join(" / ") : "检索源"}`}
       onClose={onClose}
     >
       <div className="min-h-0 flex-1 overflow-y-auto bg-white px-6 py-5">
+        <section
+          className="mb-4 grid gap-2 text-xs sm:grid-cols-3"
+          style={{ color: "var(--oc-text-secondary)" }}
+        >
+          <div className="rounded-[10px] bg-[#FAFAF9] px-3 py-2">
+            命中来源 {resultCount}
+          </div>
+          <div className="rounded-[10px] bg-[#FAFAF9] px-3 py-2">
+            已用 {providers.length ? providers.join(" / ") : "-"}
+          </div>
+          <div className="rounded-[10px] bg-[#FAFAF9] px-3 py-2">
+            尝试 {attemptedProviders.length ? attemptedProviders.join(" / ") : "-"}
+          </div>
+        </section>
         <section
           className="rounded-[10px] p-4"
           style={{ background: "#FAFAF9" }}
@@ -2174,10 +2434,46 @@ function ResearchSourceSidePanel({
                   </span>
                   {query}
                 </div>
-              ))}
+            ))}
           </div>
         </section>
 
+        {searchErrors.length ? (
+          <section
+            className="mt-4 rounded-[10px] border px-4 py-3 text-xs leading-6"
+            style={{
+              borderColor: "rgba(245,158,11,0.28)",
+              background: "rgba(245,158,11,0.08)",
+              color: "#92400e",
+            }}
+          >
+            <div className="font-semibold">检索异常</div>
+            <ul className="mt-1 list-disc pl-4">
+              {searchErrors.slice(0, 6).map(error => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {sourceResearch.outputMarkdown ? (
+          <section className="mt-4 rounded-[10px] border border-[#EEEEEE] bg-white p-4">
+            <div
+              className="mb-2 text-xs font-semibold"
+              style={{ color: "var(--oc-text-primary)" }}
+            >
+              资料包摘要
+            </div>
+            <article
+              className="prose prose-sm max-w-none text-xs leading-6"
+              style={{ color: "var(--oc-text-secondary)" }}
+            >
+              <MarkdownContent text={sourceResearch.outputMarkdown} compact />
+            </article>
+          </section>
+        ) : null}
+
+        {sources.length ? (
         <section className="mt-4 space-y-2">
           <div
             className="text-xs font-semibold"
@@ -2236,6 +2532,7 @@ function ResearchSourceSidePanel({
             </a>
           ))}
         </section>
+        ) : null}
 
         {discarded.length ? (
           <section className="mt-5 space-y-2">
@@ -2719,9 +3016,9 @@ function SourceSearchPlanCard({
 }: {
   metadata?: Record<string, unknown>;
 }) {
-  const sourceResearch = (metadata?.sourceResearch || null) as any;
-  const plan = sourceResearch?.searchPlan;
-  if (!plan) return null;
+  const sourceResearch = normalizeResearchMetadata(metadata);
+  const plan = sourceResearch.searchPlan;
+  if (!hasResearchDetails(metadata) || !plan) return null;
   const queries: string[] = Array.isArray(plan.queries)
     ? plan.queries
         .map((item: unknown) => String(item))
@@ -2840,9 +3137,9 @@ function SourceResearchSummaryCard({
   metadata?: Record<string, unknown>;
   onOpenDetails: (metadata: Record<string, unknown>) => void;
 }) {
-  const sourceResearch = (metadata?.sourceResearch || null) as any;
-  const plan = sourceResearch?.searchPlan;
-  if (!sourceResearch || !plan) return null;
+  const sourceResearch = normalizeResearchMetadata(metadata);
+  const plan = sourceResearch.searchPlan;
+  if (!hasResearchDetails(metadata) || !plan) return null;
   const queries = asArray(plan.queries)
     .map(item => String(item))
     .filter(Boolean);
@@ -2862,6 +3159,13 @@ function SourceResearchSummaryCard({
       ? `LLM 搜索规划${planner.provider ? ` · ${planner.provider}` : ""}${planner.model ? ` · ${planner.model}` : ""}`
       : "规则搜索规划";
   const topSources = sources.slice(0, 3);
+  const providers = asArray(sourceResearch.searchProviders)
+    .map(item => String(item))
+    .filter(Boolean);
+  const searchResultCount =
+    typeof sourceResearch.searchResultCount === "number"
+      ? sourceResearch.searchResultCount
+      : sources.length;
 
   return (
     <div
@@ -2885,6 +3189,7 @@ function SourceResearchSummaryCard({
           >
             {plannerLabel} ·{" "}
             {sourceHunt.type ? `Source Hunt: ${sourceHunt.type}` : "开放检索"}
+            {providers.length ? ` · ${providers.join(" / ")}` : ""}
           </div>
         </div>
         <button
@@ -2960,6 +3265,15 @@ function SourceResearchSummaryCard({
                 <span>{source.title}</span>
               </div>
             ))}
+          </div>
+        ) : null}
+        {!topSources.length && (queries.length || searchResultCount) ? (
+          <div
+            className="mt-3 rounded-xl bg-white/75 px-3 py-2 text-xs leading-5"
+            style={{ color: "var(--oc-text-secondary)" }}
+          >
+            已规划 {queries.length} 条检索，命中 {searchResultCount} 条来源。
+            完整 query、资料包摘要和检索异常请在右侧详情查看。
           </div>
         ) : null}
         {missingInfo.length ? (
@@ -3600,7 +3914,11 @@ function LiveStageCard({
   const rawText =
     stage.text || stage.runResult?.output || stage.runResult?.summary || "";
   const text = cleanText(rawText);
-  const hasSourceResearch = Boolean(stage.runResult?.metadata?.sourceResearch);
+  const researchMetadata = {
+    ...(stage.runResult?.metadata || {}),
+    __output: rawText,
+  } as Record<string, unknown>;
+  const hasSourceResearch = hasResearchDetails(researchMetadata);
   const preview =
     stage.status === "running" &&
     outputMode !== "evidence" &&
@@ -3631,7 +3949,7 @@ function LiveStageCard({
     );
     const searches =
       role === "reader" ? compactSearchRows(stage.runResult?.metadata, 8) : [];
-    const sourceResearch = stage.runResult?.metadata?.sourceResearch;
+    const sourceResearch = hasResearchDetails(researchMetadata);
     return (
       <div className="relative pb-4 pl-4">
         <span className="absolute -left-[21px] top-1.5 flex h-3 w-3 items-center justify-center rounded-full bg-white">
@@ -3758,7 +4076,7 @@ function LiveStageCard({
                 onClick={() =>
                   onOpenResearch(
                     personaLabel(stage),
-                    stage.runResult?.metadata || {}
+                    researchMetadata
                   )
                 }
                 className="mt-2 rounded-full px-2.5 py-1 text-[11px]"
@@ -3947,9 +4265,9 @@ function LiveStageCard({
               </div>
             ) : null}
 
-            {stage.artifacts?.length ? (
+            {displayArtifacts.length ? (
               <div className="mt-3 grid gap-3">
-                {stage.artifacts.map(artifact => (
+                {displayArtifacts.map(artifact => (
                   <ArtifactDisplayCard
                     key={artifact.id}
                     artifact={artifact}
@@ -3992,7 +4310,11 @@ function AgentMessageCard({
 }) {
   const meta = statusMeta(stage.status);
   const Icon = meta.icon;
-  const hasSourceResearch = Boolean(stage.runResult?.metadata?.sourceResearch);
+  const researchMetadata = {
+    ...(stage.runResult?.metadata || {}),
+    __output: stage.runResult?.output || stage.runResult?.summary || "",
+  } as Record<string, unknown>;
+  const hasSourceResearch = hasResearchDetails(researchMetadata);
   const displayArtifacts = preferredDisplayArtifacts(artifacts);
   const hasDisplayArtifacts = displayArtifacts.length > 0;
   const role = displayStageRole(
@@ -4024,7 +4346,7 @@ function AgentMessageCard({
     );
     const searches =
       role === "reader" ? compactSearchRows(stage.runResult?.metadata, 8) : [];
-    const sourceResearch = stage.runResult?.metadata?.sourceResearch;
+    const sourceResearch = hasResearchDetails(researchMetadata);
     return (
       <div className="relative pb-4 pl-4">
         <span className="absolute -left-[21px] top-1.5 flex h-3 w-3 items-center justify-center rounded-full bg-white">
@@ -4099,7 +4421,7 @@ function AgentMessageCard({
                 onClick={() =>
                   onOpenResearch(
                     personaLabel(stage),
-                    stage.runResult?.metadata || {}
+                    researchMetadata
                   )
                 }
                 className="mt-2 rounded-full px-2.5 py-1 text-[11px]"
@@ -4238,9 +4560,9 @@ function AgentMessageCard({
               metadata={stage.runResult?.metadata}
             />
 
-            {artifacts.length ? (
+            {displayArtifacts.length ? (
               <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {artifacts.map(artifact => (
+                {displayArtifacts.map(artifact => (
                   <ArtifactDisplayCard
                     key={artifact.id}
                     artifact={artifact}
@@ -4927,7 +5249,49 @@ export function DocumentTaskWorkbench({
     setLiveStages([]);
     setRouterDecision(null);
     setError(null);
+    const recoverLatestRunFromHistory = async (
+      taskTemplateId: string,
+      startedAtMs: number
+    ) => {
+      if (!adoptId) return null;
+      const params = new URLSearchParams({ adoptId, taskTemplateId });
+      const historyResponse = await fetch(
+        `${apiBase}/history?${params.toString()}`,
+        { credentials: "include" }
+      );
+      const historyData = await historyResponse.json().catch(() => ({}));
+      if (!historyResponse.ok) return null;
+      const records = Array.isArray(historyData?.records)
+        ? (historyData.records as TaskHistoryRecord[])
+        : [];
+      setHistoryRecords(records);
+      const latest = records
+        .filter(item => item.taskTemplateId === taskTemplateId)
+        .sort(
+          (a, b) =>
+            Date.parse(b.updatedAt || b.createdAt || "") -
+            Date.parse(a.updatedAt || a.createdAt || "")
+        )
+        .find(item => {
+          const updatedAt = Date.parse(item.updatedAt || item.createdAt || "");
+          return Number.isFinite(updatedAt)
+            ? updatedAt >= startedAtMs - 60_000
+            : true;
+        });
+      if (!latest) return null;
+      const detailResponse = await fetch(
+        `${apiBase}/history/${encodeURIComponent(latest.id)}?adoptId=${encodeURIComponent(adoptId)}`,
+        { credentials: "include" }
+      );
+      const detailData = await detailResponse.json().catch(() => ({}));
+      if (!detailResponse.ok || !detailData?.taskRun) return null;
+      return {
+        record: latest,
+        taskRun: detailData.taskRun as TaskRun,
+      };
+    };
     try {
+      const streamStartedAtMs = Date.now();
       const routeResponse = await fetch(`${apiBase}/route`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -5032,7 +5396,7 @@ export function DocumentTaskWorkbench({
           const message = `受控数据包已准备：${evidenceCount} 条证据，${gapCount} 个缺口，${confidenceLabel(level)}`;
           setLiveStages(current =>
             current.map(stage =>
-              stage.stageId === CONTROLLED_DATA_STAGE_ID
+              CONTROLLED_DATA_STAGE_IDS.has(stage.stageId)
                 ? {
                     ...stage,
                     status: "running",
@@ -5050,7 +5414,8 @@ export function DocumentTaskWorkbench({
           const message = `受控计算包已准备：${computeCount} 项计算，${gapCount} 个缺口`;
           setLiveStages(current =>
             current.map(stage =>
-              stage.stageId === CONTROLLED_DATA_STAGE_ID
+              CONTROLLED_COMPUTE_STAGE_IDS.has(stage.stageId) ||
+              CONTROLLED_DATA_STAGE_IDS.has(stage.stageId)
                 ? {
                     ...stage,
                     status: "running",
@@ -5064,7 +5429,7 @@ export function DocumentTaskWorkbench({
         if (payload.type === "harness_executor_started") {
           setLiveStages(current =>
             current.map(stage =>
-              stage.stageId === CONTROLLED_DATA_STAGE_ID
+              CONTROLLED_DATA_STAGE_IDS.has(stage.stageId)
                 ? {
                     ...stage,
                     status: "success",
@@ -5080,7 +5445,7 @@ export function DocumentTaskWorkbench({
           setLiveStages(current =>
             current.map(stage => {
               if (
-                stage.stageId === CONTROLLED_DATA_STAGE_ID &&
+                CONTROLLED_DATA_STAGE_IDS.has(stage.stageId) &&
                 stage.status !== "success"
               ) {
                 return {
@@ -5258,7 +5623,24 @@ export function DocumentTaskWorkbench({
         if (done) break;
       }
       if (buffer.trim()) consumeBlock(buffer);
-      const finalRun = completedRun as TaskRun | null;
+      let finalRun = completedRun as TaskRun | null;
+      if (!finalRun) {
+        const recovered = await recoverLatestRunFromHistory(
+          taskTemplateId,
+          streamStartedAtMs
+        );
+        if (recovered) {
+          finalRun = recovered.taskRun;
+          setRun(recovered.taskRun);
+          setLiveStages([]);
+          setRouterDecision(null);
+          setSubmittedPrompt(
+            recovered.record.prompt ||
+              String(recovered.taskRun.metadata?.rawUserPrompt || finalPrompt)
+          );
+          toast.info("已从任务历史恢复刚完成的结果。");
+        }
+      }
       if (!finalRun) throw new Error("stream_finished_without_result");
       loadHistory();
       toast.success(`任务完成，${statusMeta(finalRun.status).label}`);

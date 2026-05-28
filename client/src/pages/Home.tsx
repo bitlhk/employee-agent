@@ -22,6 +22,7 @@ import { BrandIcon } from "@/components/BrandIcon";
 import { Sidebar, type PageKey } from "@/components/console/Sidebar";
 import { TopBar } from "@/components/console/TopBar";
 import { MainPanel } from "@/components/console/MainPanel";
+import { SettingsOverlay } from "@/components/settings/SettingsOverlay";
 import { ChatPage } from "@/components/pages/ChatPage";
 import { LINGXIA_SIDEBAR_NAV } from "@/config/navigation";
 import { sidebarIconMap } from "@/config/icons";
@@ -29,6 +30,7 @@ import { applySettings as applyUiSettings, getSettings, subscribeSettings } from
 import { useLingxiaChat } from "@/hooks/useLingxiaChat";
 import { formatModelName } from "@/lib/modelDisplay";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Bot } from "lucide-react";
 
 
 
@@ -152,6 +154,13 @@ function writeHiddenWebSessions(key: string, hidden: Set<string>) {
   } catch {}
 }
 
+function visibleWebSessionIndex(key: string, hiddenKey?: string | null): WebChatSessionRecord[] {
+  const hidden = hiddenKey ? readHiddenWebSessions(hiddenKey) : new Set<string>();
+  return readWebSessionIndex(key)
+    .filter((item) => item?.conversationId && !hidden.has(item.conversationId))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
 function mergeWebSessionRecords(local: WebChatSessionRecord[], remote: WebChatSessionRecord[], hidden: Set<string>) {
   const byConversation = new Map<string, WebChatSessionRecord>();
   for (const item of [...local, ...remote]) {
@@ -159,37 +168,17 @@ function mergeWebSessionRecords(local: WebChatSessionRecord[], remote: WebChatSe
     const previous = byConversation.get(item.conversationId);
     const itemHasBackendSession = Boolean(item.sessionKey);
     const previousHasBackendSession = Boolean(previous?.sessionKey);
-    if (!previous || (itemHasBackendSession && !previousHasBackendSession) || itemHasBackendSession || Number(item.updatedAt || 0) >= Number(previous.updatedAt || 0)) {
+    const itemUpdatedAt = Number(item.updatedAt || 0);
+    const previousUpdatedAt = Number(previous?.updatedAt || 0);
+    if (!previous || itemUpdatedAt >= previousUpdatedAt) {
       byConversation.set(item.conversationId, { ...previous, ...item });
     } else if (item.sessionKey && !previous.sessionKey) {
       byConversation.set(item.conversationId, { ...previous, sessionKey: item.sessionKey, sessionId: item.sessionId });
+    } else if (itemHasBackendSession && !previousHasBackendSession) {
+      byConversation.set(item.conversationId, { ...item, ...previous, sessionKey: item.sessionKey, sessionId: item.sessionId });
     }
   }
   return Array.from(byConversation.values()).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 30);
-}
-
-function formatSessionUpdatedAt(ts: number) {
-  if (!Number.isFinite(ts) || ts <= 0) return "";
-  const date = new Date(ts);
-  const now = new Date();
-  const sameDay = date.toDateString() === now.toDateString();
-  if (sameDay) return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
-}
-
-function uniqueSessionTitle(session: WebChatSessionRecord, allSessions: WebChatSessionRecord[]) {
-  const title = session.title || "未命名会话";
-  const sameTitle = allSessions.filter((item) => (item.title || "未命名会话") === title);
-  if (sameTitle.length <= 1) return title;
-  const time = formatSessionUpdatedAt(session.updatedAt);
-  if (time) return `${title} · ${time}`;
-  return `${title} · ${session.conversationId.slice(-4)}`;
-}
-
-function sessionDebugId(session: WebChatSessionRecord) {
-  const raw = session.sessionId || session.sessionKey || session.conversationId;
-  const text = String(raw || "").trim();
-  return text ? text.slice(-8) : "";
 }
 
 function compactModelDisplayName(name: string) {
@@ -256,16 +245,18 @@ type LxMsg = {
 };
 
 function isLingxiaChatV2Enabled(userId?: number | string | null): boolean {
+  const mode = String(import.meta.env.VITE_LINGXIA_CHAT_V2 || "off").toLowerCase();
   try {
     const params = new URLSearchParams(window.location.search);
     const queryFlag = params.get("chatv2");
-    if (queryFlag === "1") localStorage.setItem("lingxia_chat_v2", "1");
-    if (queryFlag === "0") localStorage.setItem("lingxia_chat_v2", "0");
+    if (queryFlag === "1") return true;
+    if (queryFlag === "0") return false;
+    if (mode === "off") return false;
+    if (mode === "on") return true;
     if (localStorage.getItem("lingxia_chat_v2") === "0") return false;
     if (localStorage.getItem("lingxia_chat_v2") === "1") return true;
   } catch {}
 
-  const mode = String(import.meta.env.VITE_LINGXIA_CHAT_V2 || "off").toLowerCase();
   if (mode === "on") return true;
   if (mode === "allowlist") {
     const ids = String(import.meta.env.VITE_LINGXIA_CHAT_V2_USERS || "")
@@ -419,7 +410,7 @@ export default function Home() {
   const [lingxiaModelId, setLingxiaModelId] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768);
-  const [openclawVersion, setOpenclawVersion] = useState("v2026.3.27");
+  const [openclawVersion, setOpenclawVersion] = useState("OpenClaw 2026.5.7");
   const [runtimeAgentId, setRuntimeAgentId] = useState("");
   const prettyRuntimeAgentName = (agentId: string) => {
     const s = String(agentId || "").trim();
@@ -462,6 +453,7 @@ export default function Home() {
   const coopBadgeCount = (coopPending?.pendingMyApproval || 0) + (coopPending?.awaitingMyConsolidation || 0);
 
   const [collabOpen, setCollabOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [sessionSwitchingId, setSessionSwitchingId] = useState<string | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
@@ -640,32 +632,36 @@ export default function Home() {
       setWebSessions([]);
       return;
     }
-    if (!isDirectHttpRuntime) {
-      setWebSessions([]);
-      return;
-    }
-    const hidden = HIDDEN_SESSION_KEY ? readHiddenWebSessions(HIDDEN_SESSION_KEY) : new Set<string>();
-    setWebSessions(readWebSessionIndex(SESSION_INDEX_KEY).filter((item) => !hidden.has(item.conversationId)).sort((a, b) => b.updatedAt - a.updatedAt));
-  }, [SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime]);
+    setWebSessions(visibleWebSessionIndex(SESSION_INDEX_KEY, HIDDEN_SESSION_KEY));
+  }, [SESSION_INDEX_KEY, HIDDEN_SESSION_KEY]);
 
   const refreshBackendWebSessions = useCallback(async () => {
     if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return [];
     const apiBase = import.meta.env.VITE_API_URL || "";
-    const response = await fetch(`${apiBase}/api/claw/chat-history/sessions?adoptId=${encodeURIComponent(resolvedAdoptId)}&limit=60`, {
-      credentials: "include",
-    });
-    if (!response.ok) return [];
-    const data = await response.json().catch(() => null);
-    if (!data?.sessions) return [];
-    const hidden = HIDDEN_SESSION_KEY ? readHiddenWebSessions(HIDDEN_SESSION_KEY) : new Set<string>();
-    const remote = (Array.isArray(data.sessions) ? data.sessions : []) as WebChatSessionRecord[];
-    const backendSessions = remote
-      .filter((item) => item?.conversationId && item.sessionKey && !hidden.has(item.conversationId) && Number(item.messageCount || 0) > 0)
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, 30);
-    writeWebSessionIndex(SESSION_INDEX_KEY, backendSessions);
-    setWebSessions(backendSessions);
-    return backendSessions;
+    try {
+      const response = await fetch(`${apiBase}/api/claw/chat-history/sessions?adoptId=${encodeURIComponent(resolvedAdoptId)}&limit=60`, {
+        credentials: "include",
+      });
+      if (!response.ok) return [];
+      const data = await response.json().catch(() => null);
+      if (!data?.sessions) return [];
+      const hidden = HIDDEN_SESSION_KEY ? readHiddenWebSessions(HIDDEN_SESSION_KEY) : new Set<string>();
+      const remote = (Array.isArray(data.sessions) ? data.sessions : []) as WebChatSessionRecord[];
+      const backendSessions = remote
+        .filter((item) => item?.conversationId && item.sessionKey && !hidden.has(item.conversationId) && Number(item.messageCount || 0) > 0)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 30);
+      let mergedSessions: WebChatSessionRecord[] = [];
+      setWebSessions((previous) => {
+        mergedSessions = mergeWebSessionRecords([...readWebSessionIndex(SESSION_INDEX_KEY), ...previous], backendSessions, hidden);
+        writeWebSessionIndex(SESSION_INDEX_KEY, mergedSessions);
+        return mergedSessions;
+      });
+      return mergedSessions;
+    } catch (error) {
+      console.warn("[history] backend sync failed; keeping local session cache", error);
+      return [];
+    }
   }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime]);
 
   useEffect(() => {
@@ -674,6 +670,17 @@ export default function Home() {
     refreshBackendWebSessions().catch(() => {});
     return () => { cancelled = true; void cancelled; };
   }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime, refreshBackendWebSessions]);
+
+  useEffect(() => {
+    if (!SESSION_INDEX_KEY) return;
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage) return;
+      if (event.key !== SESSION_INDEX_KEY && event.key !== HIDDEN_SESSION_KEY) return;
+      setWebSessions(visibleWebSessionIndex(SESSION_INDEX_KEY, HIDDEN_SESSION_KEY));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [SESSION_INDEX_KEY, HIDDEN_SESSION_KEY]);
 
   useEffect(() => {
     if (isDirectHttpRuntime || activeLingxiaStreaming || !webConversationId || activeLingxiaMsgs.length === 0) return;
@@ -715,12 +722,6 @@ export default function Home() {
     writeWebSessionIndex(SESSION_INDEX_KEY, next);
     setWebSessions(next);
   }, [SESSION_INDEX_KEY, webConversationId, activeLingxiaMsgs, isDirectHttpRuntime]);
-
-  const currentSessionTitle = useMemo(() => {
-    const current = webSessions.find((item) => item.conversationId === webConversationId);
-    if (current?.title) return current.title;
-    return activeLingxiaMsgs.length > 0 ? inferSessionTitle(activeLingxiaMsgs as any) : "新对话";
-  }, [activeLingxiaMsgs, webConversationId, webSessions]);
 
   const restoreLingxiaMessages = (messages: any[]) => {
     const nextMessages = backfillLxMsgIds(messages || []);
@@ -1128,8 +1129,20 @@ export default function Home() {
       lingxiaStreamAbortRef.current = controller;
       // ── WSS 优先路径（仅 OpenClaw runtime） ──
       // Hermes/JiuwenClaw 跳过 WSS 尝试，直接走 HTTP SSE（server 侧按 prefix 分叉）。
-      const wsClient = isDirectHttpRuntime ? null : wsClientRef.current;
       const runtimeName = isJiuwenRuntime ? "jiuwenclaw" : isHermesRuntime ? "hermes" : "openclaw";
+      let wsClient = isDirectHttpRuntime ? null : wsClientRef.current;
+      if (!wsClient && !isDirectHttpRuntime && resolvedAdoptId && webConversationId) {
+        wsClient = new OpenClawWSClient(resolvedAdoptId, apiBase, { channel: "web", conversationId: webConversationId });
+        wsClientRef.current = wsClient;
+      }
+      if (wsClient && wsClient.state !== "connected") {
+        console.log(`[DIAG] runtime=${runtimeName}, wsClient.state = ${wsClient.state}, connecting before send`);
+        const connected = await wsClient.connect().catch(() => false);
+        setWsConnected(Boolean(connected));
+        if (!connected) {
+          wsClient = null;
+        }
+      }
       console.log(`[DIAG] runtime=${runtimeName}, wsClient.state = ${wsClient?.state ?? "null"}, will ${wsClient?.state === "connected" ? "try WSS first" : "use HTTP SSE directly"}`);
       if (wsClient?.state === "connected") {
         console.log("[WS] sending via WebSocket");
@@ -1815,29 +1828,30 @@ export default function Home() {
   useEffect(() => {
     if (!isLingxiaSubdomain) return;
 
-    const versionTimer = window.setTimeout(() => {
-      fetch("/api/meta/openclaw-version")
+    let cancelled = false;
+
+    fetch("/api/meta/openclaw-version")
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return;
+        const v = (d?.version || "").toString().trim();
+        if (v) setOpenclawVersion(v);
+      })
+      .catch(() => {});
+
+    if (resolvedAdoptId && user) {
+      fetch(`/api/claw/runtime-info?adoptId=${encodeURIComponent(resolvedAdoptId)}`)
         .then(r => r.json())
         .then(d => {
-          const v = (d?.version || "").toString().trim();
-          if (v) setOpenclawVersion(v);
+          if (!cancelled) setRuntimeAgentId(String(d?.runtimeAgentId || ""));
         })
-        .catch(() => {});
-    }, 1200);
-
-    let runtimeTimer: number | null = null;
-    if (resolvedAdoptId && user) {
-      runtimeTimer = window.setTimeout(() => {
-        fetch(`/api/claw/runtime-info?adoptId=${encodeURIComponent(resolvedAdoptId)}`)
-          .then(r => r.json())
-          .then(d => setRuntimeAgentId(String(d?.runtimeAgentId || "")))
-          .catch(() => setRuntimeAgentId(""));
-      }, 1600);
+        .catch(() => {
+          if (!cancelled) setRuntimeAgentId("");
+        });
     }
 
     return () => {
-      clearTimeout(versionTimer);
-      if (runtimeTimer !== null) clearTimeout(runtimeTimer);
+      cancelled = true;
     };
   }, [isLingxiaSubdomain, resolvedAdoptId, user]);
 
@@ -1897,10 +1911,6 @@ export default function Home() {
     </div>
   );
 
-  if (resolvedAdoptId && (authLoading || (!!user && clawByAdoptLoading))) {
-    return accessGateShell("正在校验访问权限", "请稍候，系统正在确认你是否可以访问该工作台。");
-  }
-
   if (resolvedAdoptId && !authLoading && !user) {
     return accessGateShell("请先登录", "登录后才能访问员工智能体工作台，未登录状态不会展示实例页面。");
   }
@@ -1940,26 +1950,44 @@ export default function Home() {
         >
 
           {/* ── 左侧：折叠面板，对齐 OpenClaw sidebar ── */}
-          <aside className="relative flex-none flex flex-col overflow-hidden shrink-0 hide-all-scrollbars" style={{ width: sidebarCollapsed ? 72 : sidebarWidth, background: "var(--oc-panel)", borderRight: "1px solid var(--border)", transition: "width 0.2s ease" }}>
+          <aside className="relative flex-none flex flex-col overflow-hidden shrink-0 hide-all-scrollbars" style={{ width: sidebarCollapsed ? 72 : sidebarWidth, background: "var(--oc-sidebar-bg)", borderRight: "1px solid var(--oc-border-subtle)", transition: "width 0.2s ease" }}>
             <button
               type="button"
               title={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
               onClick={() => setSidebarCollapsed(v => !v)}
               className="absolute right-2 top-2 z-40 w-6 h-6 rounded-md text-xs"
-              style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)" }}
+              style={{ background: "var(--oc-bg-surface)", border: "1px solid var(--oc-border-subtle)", color: "var(--oc-sidebar-muted)" }}
             >
               {sidebarCollapsed ? "»" : "«"}
             </button>
 
             {/* 实例信息头 */}
-            <div className="px-4 py-3 shrink-0 flex items-center gap-2.5" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-              <div className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center lingxia-avatar-ai"><BrandIcon size={26} animate={true} /></div>
+            <div className="px-4 py-4 shrink-0 flex items-center gap-2.5" style={{ borderBottom: "1px solid var(--oc-border-subtle)" }}>
+              <div
+                className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center relative"
+                style={{ background: "var(--oc-sidebar-avatar-bg)", color: "var(--oc-sidebar-muted)" }}
+              >
+                <Bot size={18} strokeWidth={1.8} />
+                {clawByAdoptId?.status === "active" ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute rounded-full"
+                    style={{
+                      width: 7,
+                      height: 7,
+                      right: -1,
+                      top: 1,
+                      background: "#22C55E",
+                      border: "2px solid var(--oc-sidebar-bg)",
+                    }}
+                  />
+                ) : null}
+              </div>
               <div className="min-w-0" style={{ display: sidebarCollapsed ? "none" : "block" }}>
-                <p className="text-sm font-medium truncate" style={{ color: "var(--oc-text-primary)" }}>{lingxiaDisplayName || brand.name}</p>
-                <p className="text-[11px] font-mono truncate" style={{ color: "var(--oc-text-tertiary)" }} title={resolvedAdoptId}>{resolvedAdoptId}</p>
+                <p className="text-sm font-medium truncate" style={{ color: "var(--oc-sidebar-text)" }}>{lingxiaDisplayName || brand.name}</p>
+                <p className="text-[11px] font-mono truncate" style={{ color: "var(--oc-sidebar-subtle)" }} title={resolvedAdoptId}>{resolvedAdoptId}</p>
                 {clawByAdoptId && (
-                  <p className="text-[11px] flex items-center gap-1" style={{ color: clawByAdoptId.status === "active" ? "#34d399" : "#fbbf24" }}>
-                    <span className={clawByAdoptId.status === "active" ? "animate-pulse" : ""}>●</span>
+                  <p className="text-[11px] flex items-center gap-1" style={{ color: clawByAdoptId.status === "active" ? "#22C55E" : "var(--oc-warning)" }}>
                     <span>{clawByAdoptId.status === "active" ? "在线" : clawByAdoptId.status}</span>
                   </p>
                 )}
@@ -1967,21 +1995,34 @@ export default function Home() {
             </div>
 
             {/* 工作台导航（Phase A） */}
-            <Sidebar
-              activePage={activePage}
-              setActivePage={setActivePage}
-              collapsed={sidebarCollapsed}
-              coopBadge={coopBadgeCount}
-              onOpenAgentMarket={() => setCollabOpen((open) => !open)}
+              <Sidebar
+                activePage={activePage}
+                setActivePage={setActivePage}
+                collapsed={sidebarCollapsed}
+                onOpenSettings={() => setSettingsOpen(true)}
+                coopBadge={coopBadgeCount}
+                onOpenAgentMarket={() => setCollabOpen((open) => !open)}
               agentMarketOpen={collabOpen}
+              sessions={webSessions}
+              currentConversationId={webConversationId}
+              sessionSwitchingId={sessionSwitchingId}
+              onSwitchConversation={(conversationId) => void switchLingxiaConversation(conversationId)}
+              onDeleteConversation={(conversationId) => void deleteLingxiaConversation(conversationId)}
+              onNewConversation={startNewLingxiaConversation}
+              footer={(
+                <SidebarFooter
+                  version={isJiuwenRuntime ? "JiuwenClaw" : isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
+                  expiryText={lingxiaExpiryInfo.text}
+                  expiryColor={lingxiaExpiryInfo.color}
+                  collapsed={sidebarCollapsed}
+                />
+              )}
             />
-
-            {/* 旧侧栏能力暂留（Phase B 迁移），当前隐藏 */}
-            <SidebarFooter
-              version={isJiuwenRuntime ? "JiuwenClaw" : isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
-              expiryText={lingxiaExpiryInfo.text}
-              expiryColor={lingxiaExpiryInfo.color}
-              collapsed={sidebarCollapsed}
+            <SettingsOverlay
+              open={settingsOpen}
+              onClose={() => setSettingsOpen(false)}
+              adoptId={resolvedAdoptId || ""}
+              skills={lingxiaSkills as any}
             />
 
             <div
@@ -2011,158 +2052,8 @@ export default function Home() {
           {/* ── 右侧主面板 ── */}
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {/* 全局顶部栏 */}
-          <TopBar
-            activePage={activePage}
-            afterPage={activePage === "chat" ? (
-              <>
-                <span className="lingxia-topbar__sep">›</span>
-                <div ref={sessionMenuRef} style={{ position: "relative", minWidth: 0 }}>
-                  <button
-                    type="button"
-                    title="切换历史会话"
-                    className="lingxia-session-title-trigger"
-                    onClick={() => setSessionMenuOpen((open) => !open)}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      maxWidth: 260,
-                      height: 28,
-                      padding: "0 6px",
-                      border: "none",
-                      borderRadius: 6,
-                      background: sessionMenuOpen ? "var(--oc-bg-active)" : "transparent",
-                      color: "var(--oc-text-secondary)",
-                      fontSize: "var(--oc-text-sm)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentSessionTitle}</span>
-                    <span style={{ fontSize: 10, opacity: 0.7 }}>{sessionMenuOpen ? "▲" : "▼"}</span>
-                  </button>
-                  {sessionMenuOpen ? (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "calc(100% + 8px)",
-                        left: 0,
-                        width: 320,
-                        maxHeight: 420,
-                        overflowY: "auto",
-                        background: "var(--oc-panel)",
-                        border: "1px solid var(--oc-border)",
-                        borderRadius: 8,
-                        boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-                        padding: 4,
-                        zIndex: 80,
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "5px 8px 7px" }}>
-                        <span style={{ color: "var(--oc-text-tertiary)", fontSize: "var(--oc-text-xs)" }}>历史会话</span>
-                        <button
-                          type="button"
-                          onClick={startNewLingxiaConversation}
-                          disabled={activeLingxiaStreaming || !!sessionSwitchingId}
-                          style={{
-                            border: "none",
-                            background: "transparent",
-                            color: "var(--oc-accent)",
-                            fontSize: "var(--oc-text-xs)",
-                            cursor: activeLingxiaStreaming || sessionSwitchingId ? "not-allowed" : "pointer",
-                            opacity: activeLingxiaStreaming || sessionSwitchingId ? 0.45 : 1,
-                          }}
-                        >
-                          新建
-                        </button>
-                      </div>
-                      {webSessions.length === 0 ? (
-                        <div style={{ padding: "18px 10px", color: "var(--oc-text-tertiary)", fontSize: "var(--oc-text-sm)", textAlign: "center" }}>
-                          暂无历史会话
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          {webSessions.map((session) => {
-                            const active = session.conversationId === webConversationId;
-                            const switching = sessionSwitchingId === session.conversationId;
-                            const displayTitle = uniqueSessionTitle(session, webSessions);
-                            const debugId = sessionDebugId(session);
-                            return (
-                              <div
-                                key={session.conversationId}
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => void switchLingxiaConversation(session.conversationId)}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault();
-                                    void switchLingxiaConversation(session.conversationId);
-                                  }
-                                }}
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 8,
-                                  minHeight: 48,
-                                  padding: "6px 8px",
-                                  borderRadius: 6,
-                                  background: active ? "var(--oc-bg-active)" : "transparent",
-                                  border: "1px solid transparent",
-                                  cursor: sessionSwitchingId ? "wait" : "pointer",
-                                  opacity: sessionSwitchingId && !switching ? 0.55 : 1,
-                                }}
-                              >
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                                    <span style={{ color: "var(--oc-text-primary)", fontSize: "var(--oc-text-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                      {displayTitle}
-                                    </span>
-                                    {debugId ? (
-                                      <span style={{ color: "var(--oc-text-tertiary)", fontSize: "10px", fontFamily: "var(--oc-font-mono)", flexShrink: 0 }}>
-                                        #{debugId}
-                                      </span>
-                                    ) : null}
-                                    {active ? <span style={{ width: 5, height: 5, borderRadius: 999, background: "var(--oc-accent)", flexShrink: 0 }} /> : null}
-                                  </div>
-                                  <div style={{ marginTop: 3, color: "var(--oc-text-tertiary)", fontSize: "var(--oc-text-xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                    {switching ? "正在切换..." : (session.preview || `${session.messageCount} 条消息`)}
-                                  </div>
-                                </div>
-                                <span style={{ color: "var(--oc-text-tertiary)", fontSize: "var(--oc-text-xs)", flexShrink: 0 }}>
-                                  {formatSessionUpdatedAt(session.updatedAt)}
-                                </span>
-                                <button
-                                  type="button"
-                                  title="删除会话"
-                                  disabled={!!sessionSwitchingId}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    void deleteLingxiaConversation(session.conversationId);
-                                  }}
-                                  style={{
-                                    border: "none",
-                                    background: "transparent",
-                                    color: "var(--oc-text-tertiary)",
-                                    cursor: sessionSwitchingId ? "not-allowed" : "pointer",
-                                    fontSize: 15,
-                                    lineHeight: 1,
-                                    padding: "2px 4px",
-                                    borderRadius: 5,
-                                    opacity: sessionSwitchingId ? 0.35 : 0.75,
-                                  }}
-                                >
-                                  ×
-                                </button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </>
-            ) : undefined}
-          />
+          <TopBar activePage={activePage} />
+
 
           {activePage === "chat" ? (
           <ChatPage>
