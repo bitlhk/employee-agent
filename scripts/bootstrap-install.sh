@@ -23,6 +23,10 @@ START_SERVICE=true
 INSTALL_MYSQL=true
 DRY_RUN=false
 OVERWRITE_ENV=false
+CREATE_ADMIN=true
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@linggan.local}"
+ADMIN_NAME="${ADMIN_NAME:-Admin}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 
 usage() {
   cat <<'EOF'
@@ -37,6 +41,7 @@ Options:
   --db-mode <mode>         mysql-auto | existing | compose. Default mysql-auto.
   --skip-mysql             Do not install mysql-server.
   --skip-start             Do not build/start PM2 service.
+  --skip-admin             Do not create the default admin account.
   --overwrite-env          Regenerate .env if it already exists.
   --dry-run                Print actions without changing the system.
   -h, --help               Show this help.
@@ -58,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     --db-mode) DB_MODE="${2:?missing --db-mode value}"; shift 2 ;;
     --skip-mysql) INSTALL_MYSQL=false; shift ;;
     --skip-start) START_SERVICE=false; shift ;;
+    --skip-admin) CREATE_ADMIN=false; shift ;;
     --overwrite-env) OVERWRITE_ENV=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -124,6 +130,10 @@ detect_host() {
 
 need_cmd() {
   ! command -v "$1" >/dev/null 2>&1
+}
+
+gen_admin_password() {
+  openssl rand -base64 18 2>/dev/null | tr -d '/+=' | cut -c1-18
 }
 
 ensure_base_packages() {
@@ -246,12 +256,35 @@ start_app() {
   fi
   run_with_log "Type check" "/tmp/employee-agent-check.log" bash -lc "cd '$INSTALL_DIR' && corepack pnpm check"
   run_with_log "Build" "/tmp/employee-agent-build.log" bash -lc "cd '$INSTALL_DIR' && corepack pnpm build"
-  if [[ -f "$INSTALL_DIR/ecosystem.config.cjs" ]]; then
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[dry-run] would start PM2 with ecosystem.config.cjs after setup generates it"
+  elif [[ -f "$INSTALL_DIR/ecosystem.config.cjs" ]]; then
     run bash -lc "cd '$INSTALL_DIR' && pm2 start ecosystem.config.cjs --update-env || pm2 restart ecosystem.config.cjs --update-env"
     run pm2 save
   else
     echo "ecosystem.config.cjs was not generated." >&2
     exit 1
+  fi
+}
+
+create_default_admin() {
+  if [[ "$CREATE_ADMIN" != "true" ]]; then
+    log "Skipping admin creation"
+    return
+  fi
+  if [[ -z "$ADMIN_PASSWORD" ]]; then
+    ADMIN_PASSWORD="$(gen_admin_password)"
+  fi
+  log "Creating default admin"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    printf "[dry-run] cd %q && ADMIN_EMAIL=%q ADMIN_PASSWORD=%q corepack pnpm tsx scripts/init-admin.ts --email=%q --password=%q --name=%q --skip-if-exists\n" \
+      "$INSTALL_DIR" "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$ADMIN_NAME"
+  else
+    (cd "$INSTALL_DIR" && corepack pnpm tsx scripts/init-admin.ts \
+      --email="$ADMIN_EMAIL" \
+      --password="$ADMIN_PASSWORD" \
+      --name="$ADMIN_NAME" \
+      --skip-if-exists)
   fi
 }
 
@@ -272,9 +305,11 @@ Install dir:
 Open:
   $url
 
-Create the first admin:
-  cd $INSTALL_DIR
-  corepack pnpm tsx scripts/init-admin.ts --email=admin@example.com --password='CHANGE_ME' --name='Admin'
+Default admin:
+  Email:    ${ADMIN_EMAIL}
+  Password: ${ADMIN_PASSWORD}
+
+Change this password immediately after first login.
 
 Health checks:
   curl http://127.0.0.1:${PORT}/health
@@ -290,6 +325,7 @@ main() {
   ensure_node_tools
   checkout_repo
   run_setup
+  create_default_admin
   start_app
   print_summary
 }

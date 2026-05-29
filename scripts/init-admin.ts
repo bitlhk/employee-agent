@@ -16,10 +16,15 @@ function arg(name: string, fallback = "") {
   return fallback;
 }
 
+function hasFlag(name: string) {
+  return args.includes(`--${name}`);
+}
+
 async function main() {
   const email = arg("email").toLowerCase();
   const password = arg("password");
   const name = arg("name", "Admin") || "Admin";
+  const skipIfExists = hasFlag("skip-if-exists");
 
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     throw new Error("missing or invalid --email=<admin@example.com>");
@@ -34,6 +39,10 @@ async function main() {
   const hashed = await bcrypt.hash(password, 10);
   const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (existing.length > 0) {
+    if (skipIfExists) {
+      console.log(`[INIT-ADMIN] existing admin kept: ${email}`);
+      return;
+    }
     await db
       .update(users)
       .set({
