@@ -79,7 +79,14 @@ export const IFRAME_BYPASS_KEY = "iframe_bypass_experience_ids";
 
 type ClawModelOption = { id: string; name: string; desc?: string; isDefault?: boolean };
 
-const HIDDEN_FROM_FRONTEND = new Set<string>(["maas/deepseek-v4-flash", "glm5/glm-5"]); // 2026-04-27: maas 限流 3rpm / glm5/glm-5 老版本已被 5.1 取代
+const FRONTEND_MODEL_ALLOWLIST = new Set<string>([
+  "glm5/glm-5.1",
+  "maas/deepseek-v4-flash",
+]);
+
+function isFrontendModelAllowed(modelId: string): boolean {
+  return FRONTEND_MODEL_ALLOWLIST.has(modelId);
+}
 
 export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
   try {
@@ -95,7 +102,7 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
 
     if (modelAllowlist.length > 0) {
       const visibleAllowlist = modelAllowlist
-        .filter((id) => !HIDDEN_FROM_FRONTEND.has(id))
+        .filter(isFrontendModelAllowed)
         .map((id) => ({
           id,
           name: id,
@@ -158,7 +165,9 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
     }
 
     // 2026-04-27: 隐藏不可用模型（华为 MaaS deepseek-v4-flash 限流 3 rpm）
-    for (const k of HIDDEN_FROM_FRONTEND) uniq.delete(k);
+    for (const k of Array.from(uniq.keys())) {
+      if (!isFrontendModelAllowed(k)) uniq.delete(k);
+    }
 
     // 确保有且仅有一个 isDefault（优先保留 defaults.primary，否则标第一个）
     const arr = Array.from(uniq.values());
@@ -168,6 +177,7 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
   } catch {
     return [
       { id: "glm5/glm-5.1", name: "GLM-5.1（默认）", desc: "fallback" },
+      { id: "maas/deepseek-v4-flash", name: "DeepSeek-V4-Flash", desc: "fallback" },
     ];
   }
 }

@@ -144,3 +144,6 @@ logs/
 
 # Agent runtime backup files
 server/_core/agent/data/*.bak-*
+
+# Prevent accidental absolute-path sync payloads
+home/
