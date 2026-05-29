@@ -70,7 +70,9 @@ async function main() {
   console.log(`[INIT-ADMIN] created admin: ${email} id=${result[0].insertId}`);
 }
 
-main().catch((err) => {
+main().then(() => {
+  process.exit(0);
+}).catch((err) => {
   console.error(`[INIT-ADMIN] failed: ${err?.message || err}`);
   process.exit(1);
 });
