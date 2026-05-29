@@ -79,12 +79,15 @@ export const IFRAME_BYPASS_KEY = "iframe_bypass_experience_ids";
 
 type ClawModelOption = { id: string; name: string; desc?: string; isDefault?: boolean };
 
-const FRONTEND_MODEL_ALLOWLIST = new Set<string>([
-  "glm5/glm-5.1",
-  "maas/deepseek-v4-flash",
-]);
+const FRONTEND_MODEL_ALLOWLIST = new Set<string>(
+  String(process.env.LINGXIA_FRONTEND_MODEL_ALLOWLIST || process.env.FRONTEND_MODEL_ALLOWLIST || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
+);
 
 function isFrontendModelAllowed(modelId: string): boolean {
+  if (FRONTEND_MODEL_ALLOWLIST.size === 0) return true;
   return FRONTEND_MODEL_ALLOWLIST.has(modelId);
 }
 
@@ -109,10 +112,12 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
           desc: "agents.defaults.models",
           isDefault: id === defaultsPrimary,
         }));
-      return visibleAllowlist.map((item, index, arr) => {
-        if (arr.some((m) => m.isDefault)) return item;
-        return index === 0 ? { ...item, isDefault: true } : item;
-      });
+      if (visibleAllowlist.length > 0) {
+        return visibleAllowlist.map((item, index, arr) => {
+          if (arr.some((m) => m.isDefault)) return item;
+          return index === 0 ? { ...item, isDefault: true } : item;
+        });
+      }
     }
 
     // 1) providers.models
@@ -164,7 +169,8 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
       });
     }
 
-    // 2026-04-27: 隐藏不可用模型（华为 MaaS deepseek-v4-flash 限流 3 rpm）
+    // Deployments may optionally restrict the frontend model selector with
+    // LINGXIA_FRONTEND_MODEL_ALLOWLIST. By default, mirror OpenClaw config.
     for (const k of Array.from(uniq.keys())) {
       if (!isFrontendModelAllowed(k)) uniq.delete(k);
     }

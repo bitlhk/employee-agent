@@ -21,12 +21,14 @@ HOST="${LINGXIA_HOST:-}"
 DB_MODE="${LINGXIA_DB_MODE:-mysql-auto}"
 START_SERVICE=true
 INSTALL_MYSQL=true
+INSTALL_DOCKER=true
 DRY_RUN=false
 OVERWRITE_ENV=false
 CREATE_ADMIN=true
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@linggan.local}"
 ADMIN_NAME="${ADMIN_NAME:-Admin}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+ADMIN_PASSWORD_DISPLAY=""
 
 usage() {
   cat <<'EOF'
@@ -40,6 +42,7 @@ Options:
   --host <ip-or-host>      Public host/IP for FRONTEND_URL. Auto-detected by default.
   --db-mode <mode>         mysql-auto | existing | compose. Default mysql-auto.
   --skip-mysql             Do not install mysql-server.
+  --skip-docker            Do not install docker.io for OpenClaw sandbox.
   --skip-start             Do not build/start PM2 service.
   --skip-admin             Do not create the default admin account.
   --overwrite-env          Regenerate .env if it already exists.
@@ -62,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     --host) HOST="${2:?missing --host value}"; shift 2 ;;
     --db-mode) DB_MODE="${2:?missing --db-mode value}"; shift 2 ;;
     --skip-mysql) INSTALL_MYSQL=false; shift ;;
+    --skip-docker) INSTALL_DOCKER=false; shift ;;
     --skip-start) START_SERVICE=false; shift ;;
     --skip-admin) CREATE_ADMIN=false; shift ;;
     --overwrite-env) OVERWRITE_ENV=true; shift ;;
@@ -143,6 +147,14 @@ ensure_base_packages() {
     run sudo_cmd apt-get install -y git curl ca-certificates openssl python3 build-essential
     if [[ "$INSTALL_MYSQL" == "true" && "$DB_MODE" == "mysql-auto" ]]; then
       run sudo_cmd apt-get install -y mysql-server
+    fi
+    if [[ "$INSTALL_DOCKER" == "true" ]]; then
+      run sudo_cmd apt-get install -y docker.io
+      if [[ "$DRY_RUN" == "true" ]]; then
+        echo "[dry-run] sudo_cmd systemctl enable --now docker"
+      else
+        sudo_cmd systemctl enable --now docker || true
+      fi
     fi
   else
     log "Non-Debian system detected; please ensure git/curl/openssl/python3 are installed"
@@ -275,16 +287,22 @@ create_default_admin() {
   if [[ -z "$ADMIN_PASSWORD" ]]; then
     ADMIN_PASSWORD="$(gen_admin_password)"
   fi
+  ADMIN_PASSWORD_DISPLAY="$ADMIN_PASSWORD"
   log "Creating default admin"
   if [[ "$DRY_RUN" == "true" ]]; then
     printf "[dry-run] cd %q && ADMIN_EMAIL=%q ADMIN_PASSWORD=%q corepack pnpm tsx scripts/init-admin.ts --email=%q --password=%q --name=%q --skip-if-exists\n" \
       "$INSTALL_DIR" "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$ADMIN_NAME"
   else
-    (cd "$INSTALL_DIR" && corepack pnpm tsx scripts/init-admin.ts \
+    local output
+    output="$(cd "$INSTALL_DIR" && corepack pnpm tsx scripts/init-admin.ts \
       --email="$ADMIN_EMAIL" \
       --password="$ADMIN_PASSWORD" \
       --name="$ADMIN_NAME" \
-      --skip-if-exists)
+      --skip-if-exists)"
+    echo "$output"
+    if [[ "$output" == *"existing admin kept"* ]]; then
+      ADMIN_PASSWORD_DISPLAY="(existing password kept; not changed)"
+    fi
   fi
 }
 
@@ -307,7 +325,7 @@ Open:
 
 Default admin:
   Email:    ${ADMIN_EMAIL}
-  Password: ${ADMIN_PASSWORD}
+  Password: ${ADMIN_PASSWORD_DISPLAY:-${ADMIN_PASSWORD:-"(not created)"}}
 
 Change this password immediately after first login.
 

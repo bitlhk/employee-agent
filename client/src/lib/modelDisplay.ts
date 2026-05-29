@@ -7,6 +7,8 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "deepseek/deepseek-v4-flash": "DeepSeek-V4-Flash",
   "deepseek/deepseek-v4-pro": "DeepSeek-V4-Pro",
   "deepseek/deepseek-chat": "DeepSeek Chat",
+  "openai-codex/gpt-5.5": "GPT-5.5",
+  "openai/gpt-5.5": "GPT-5.5",
   "hermes/hermes-agent": "Hermes Agent",
 };
 
