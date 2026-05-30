@@ -230,6 +230,21 @@ export function normalizeWsEvent(msg: unknown, expectedSessionKey?: string | nul
     return unmatched("unknown_item_phase");
   }
 
+  if (stream === "lifecycle" && phase === "error") {
+    return events([{
+      type: "error",
+      message: normalizeErrorMessage(
+        data.error
+          || data.errorMessage
+          || data.message
+          || data.reason
+          || data.promptError
+          || payload.error
+          || "Agent runtime error"
+      ),
+    }]);
+  }
+
   if (stream === "lifecycle" && phase === "end") {
     return events([{ type: "lifecycle_end" }]);
   }

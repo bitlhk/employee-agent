@@ -35,12 +35,18 @@ function Router() {
     applySettings({});
   }, []);
 
+  const isLingxiaSubdomain =
+    typeof window !== "undefined" &&
+    /^(lgc-[a-z0-9-]+)\.(?:demo\.linggantest\.top|demo\.linggan\.top)$/i.test(
+      window.location.hostname
+    );
+
   return (
     <Suspense fallback={<LoadingFallback />}>
       <Switch>
         {/* ── 首页 ── */}
         <Route path={"/"}>
-          <ClawHome />
+          {isLingxiaSubdomain ? <Home /> : <ClawHome />}
         </Route>
 
         {/* ── 管理控制台 ── */}

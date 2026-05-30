@@ -86,6 +86,9 @@ const webMessagesStorageKey = (userId: string, adoptId: string, conversationId: 
 const legacyWebMessagesStorageKey = (adoptId: string, conversationId: string) => `lgc_msgs_${adoptId}_${conversationId}`;
 const webSessionIndexStorageKey = (userId: string, adoptId: string) => `lingxia_web_sessions_${userId}_${adoptId}`;
 const webHiddenSessionsStorageKey = (userId: string, adoptId: string) => `lingxia_web_sessions_hidden_${userId}_${adoptId}`;
+const clawStatusStorageKey = (userId: string, adoptId: string) => `lingxia_claw_status_${userId}_${adoptId}`;
+const clawModelStorageKey = (userId: string, adoptId: string) => `lingxia_claw_model_${userId}_${adoptId}`;
+const clawModelFallbackStorageKey = (adoptId: string) => `lingxia_claw_model_public_${adoptId}`;
 
 type WebChatSessionRecord = {
   conversationId: string;
@@ -551,28 +554,68 @@ export default function Home() {
     resolvedAdoptId ? { adoptId: resolvedAdoptId } : undefined,
     { enabled: !!resolvedAdoptId && !!user, retry: false, refetchInterval: 30000, refetchOnWindowFocus: true, refetchOnMount: true }
   );
+  const MODEL_SELECTION_KEY = resolvedAdoptId && userStorageId ? clawModelStorageKey(userStorageId, resolvedAdoptId) : null;
+  const MODEL_SELECTION_FALLBACK_KEY = resolvedAdoptId ? clawModelFallbackStorageKey(resolvedAdoptId) : null;
+  const [cachedLingxiaModelId, setCachedLingxiaModelId] = useState(() => {
+    try {
+      const key = MODEL_SELECTION_KEY || MODEL_SELECTION_FALLBACK_KEY;
+      return key ? localStorage.getItem(key) || "" : "";
+    } catch {
+      return "";
+    }
+  });
+  useEffect(() => {
+    if (!MODEL_SELECTION_KEY && !MODEL_SELECTION_FALLBACK_KEY) {
+      setCachedLingxiaModelId("");
+      return;
+    }
+    try {
+      const modelId =
+        (MODEL_SELECTION_KEY ? localStorage.getItem(MODEL_SELECTION_KEY) : "") ||
+        (MODEL_SELECTION_FALLBACK_KEY ? localStorage.getItem(MODEL_SELECTION_FALLBACK_KEY) : "") ||
+        "";
+      setCachedLingxiaModelId(modelId);
+    } catch {
+      setCachedLingxiaModelId("");
+    }
+  }, [MODEL_SELECTION_FALLBACK_KEY, MODEL_SELECTION_KEY]);
+  const defaultLingxiaModelId = useMemo(() => {
+    if (!availableModels || availableModels.length === 0) return cachedLingxiaModelId;
+    const ids = (availableModels as any[]).map((m: any) => m.id);
+    const userPref = (clawSettings as any)?.model;
+    if (userPref && ids.includes(userPref)) return userPref;
+    if (cachedLingxiaModelId && ids.includes(cachedLingxiaModelId)) return cachedLingxiaModelId;
+    const defaultModel = (availableModels as any[]).find((m: any) => m.isDefault);
+    return defaultModel?.id || ids[0] || "";
+  }, [availableModels, cachedLingxiaModelId, clawSettings]);
+  const effectiveLingxiaModelId = lingxiaModelId || defaultLingxiaModelId || cachedLingxiaModelId;
   // 模型兜底：优先用户在前端选过的偏好（claw-model-overrides.json），其次 isDefault，最后第一个
   // 修复刷新后下拉强制回 GLM5.1 但 OpenClaw 实际跑用户上次选的 model 的前后端不一致 bug
   useEffect(() => {
     if (!availableModels || availableModels.length === 0) return;
     const ids = (availableModels as any[]).map((m: any) => m.id);
     if (!lingxiaModelId || !ids.includes(lingxiaModelId)) {
-      // 优先：用户在前端选过的 model（持久化在 data/claw-model-overrides.json，由 getSettings 返回）
-      const userPref = (clawSettings as any)?.model;
-      if (userPref && ids.includes(userPref)) {
-        setLingxiaModelId(userPref);
-        return;
-      }
-      const defaultModel = (availableModels as any[]).find((m: any) => m.isDefault);
-      setLingxiaModelId(defaultModel ? defaultModel.id : ids[0]);
+      setLingxiaModelId(defaultLingxiaModelId || ids[0]);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availableModels, clawSettings]);
+  }, [availableModels, defaultLingxiaModelId, lingxiaModelId]);
+  useEffect(() => {
+    const modelId = lingxiaModelId || defaultLingxiaModelId;
+    if ((!MODEL_SELECTION_KEY && !MODEL_SELECTION_FALLBACK_KEY) || !modelId) return;
+    setCachedLingxiaModelId(modelId);
+    try {
+      if (MODEL_SELECTION_KEY) localStorage.setItem(MODEL_SELECTION_KEY, modelId);
+      if (MODEL_SELECTION_FALLBACK_KEY) localStorage.setItem(MODEL_SELECTION_FALLBACK_KEY, modelId);
+    } catch {}
+  }, [MODEL_SELECTION_FALLBACK_KEY, MODEL_SELECTION_KEY, defaultLingxiaModelId, lingxiaModelId]);
 
   const selectedLingxiaModelName = useMemo(() => {
-    const model = (availableModels || []).find((m: any) => m.id === lingxiaModelId) as any;
-    return compactModelDisplayName(String(model?.name || "").trim() || formatModelName(lingxiaModelId || "default"));
-  }, [availableModels, lingxiaModelId]);
+    const model = (availableModels || []).find((m: any) => m.id === effectiveLingxiaModelId) as any;
+    const fallback = effectiveLingxiaModelId || cachedLingxiaModelId ? "默认模型" : "同步模型...";
+    return compactModelDisplayName(formatModelName(
+      String(model?.id || effectiveLingxiaModelId || cachedLingxiaModelId || "default"),
+      String(model?.name || "").trim() || fallback,
+    ));
+  }, [availableModels, cachedLingxiaModelId, effectiveLingxiaModelId]);
 
   const switchModelMutation = trpc.claw.switchModel.useMutation({
     retry: false,
@@ -626,6 +669,8 @@ export default function Home() {
   const activeLingxiaStreaming = chatV2Enabled ? chatV2.isStreaming : lingxiaStreaming;
   const [webSessions, setWebSessions] = useState<WebChatSessionRecord[]>([]);
   const lastBackendHistoryRefreshRef = useRef("");
+  const [cachedClawStatus, setCachedClawStatus] = useState<string | null>(null);
+  const CLAW_STATUS_KEY = resolvedAdoptId && userStorageId ? clawStatusStorageKey(userStorageId, resolvedAdoptId) : null;
 
   useEffect(() => {
     if (!SESSION_INDEX_KEY) {
@@ -634,6 +679,27 @@ export default function Home() {
     }
     setWebSessions(visibleWebSessionIndex(SESSION_INDEX_KEY, HIDDEN_SESSION_KEY));
   }, [SESSION_INDEX_KEY, HIDDEN_SESSION_KEY]);
+
+  useEffect(() => {
+    if (!CLAW_STATUS_KEY) {
+      setCachedClawStatus(null);
+      return;
+    }
+    try {
+      setCachedClawStatus(localStorage.getItem(CLAW_STATUS_KEY));
+    } catch {
+      setCachedClawStatus(null);
+    }
+  }, [CLAW_STATUS_KEY]);
+
+  useEffect(() => {
+    const status = String((clawByAdoptId as any)?.status || "");
+    if (!CLAW_STATUS_KEY || !status) return;
+    setCachedClawStatus(status);
+    try {
+      localStorage.setItem(CLAW_STATUS_KEY, status);
+    } catch {}
+  }, [CLAW_STATUS_KEY, clawByAdoptId]);
 
   const refreshBackendWebSessions = useCallback(async () => {
     if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return [];
@@ -1388,7 +1454,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         signal: controller.signal,
-        body: JSON.stringify({ adoptId: resolvedAdoptId, message: text, model: lingxiaModelId, clientRunId, channel: "web", conversationId: webConversationId, runtimeMode: chatRuntimeMode }),
+        body: JSON.stringify({ adoptId: resolvedAdoptId, message: text, model: effectiveLingxiaModelId, clientRunId, channel: "web", conversationId: webConversationId, runtimeMode: chatRuntimeMode }),
       });
 
       if (!resp.ok || !resp.body) {
@@ -1893,6 +1959,8 @@ export default function Home() {
   );
 
   const lingxiaExpiryInfo = useMemo(() => ({ text: "长期持有", color: "var(--oc-success)" }), []);
+  const sidebarClawStatus = String((clawByAdoptId as any)?.status || cachedClawStatus || "");
+  const sidebarClawOnline = sidebarClawStatus === "active";
 
   const navLabel = (key: string) => LINGXIA_SIDEBAR_NAV.find((i) => i.key === key)?.label || key;
   const NavIcon = ({ navKey }: { navKey: keyof typeof sidebarIconMap }) => {
@@ -1968,7 +2036,7 @@ export default function Home() {
                 style={{ background: "var(--oc-sidebar-avatar-bg)", color: "var(--oc-sidebar-muted)" }}
               >
                 <Bot size={18} strokeWidth={1.8} />
-                {clawByAdoptId?.status === "active" ? (
+                {sidebarClawOnline ? (
                   <span
                     aria-hidden="true"
                     className="absolute rounded-full"
@@ -1986,9 +2054,9 @@ export default function Home() {
               <div className="min-w-0" style={{ display: sidebarCollapsed ? "none" : "block" }}>
                 <p className="text-sm font-medium truncate" style={{ color: "var(--oc-sidebar-text)" }}>{lingxiaDisplayName || brand.name}</p>
                 <p className="text-[11px] font-mono truncate" style={{ color: "var(--oc-sidebar-subtle)" }} title={resolvedAdoptId}>{resolvedAdoptId}</p>
-                {clawByAdoptId && (
-                  <p className="text-[11px] flex items-center gap-1" style={{ color: clawByAdoptId.status === "active" ? "#22C55E" : "var(--oc-warning)" }}>
-                    <span>{clawByAdoptId.status === "active" ? "在线" : clawByAdoptId.status}</span>
+                {sidebarClawStatus && (
+                  <p className="text-[11px] flex items-center gap-1" style={{ color: sidebarClawOnline ? "#22C55E" : "var(--oc-warning)" }}>
+                    <span>{sidebarClawOnline ? "在线" : sidebarClawStatus}</span>
                   </p>
                 )}
               </div>
@@ -2083,7 +2151,7 @@ export default function Home() {
                     <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed" style={{ background: "color-mix(in oklab, var(--oc-card) 65%, transparent)", color: "var(--oc-text-primary)" }}>
                       你好，我是 <span style={{ color: "var(--oc-accent, #7c3aed)", fontWeight: "var(--oc-weight-semibold)" }}>{lingxiaDisplayName || brand.name}</span>，有什么想聊的？
                     </div>
-                    <p className="text-[10px] mt-1 px-1 font-mono" style={{ color: "var(--oc-text-tertiary)" }}>{lingxiaDisplayName || brand.name} · {formatModelName(lingxiaModelId)}</p>
+                    <p className="text-[10px] mt-1 px-1 font-mono" style={{ color: "var(--oc-text-tertiary)" }}>{lingxiaDisplayName || brand.name} · {selectedLingxiaModelName}</p>
                   </div>
                 </div>
               )}
@@ -2105,7 +2173,7 @@ export default function Home() {
                     isPlaceholder={isPlaceholder}
                     streaming={activeLingxiaStreaming}
                     displayName={lingxiaDisplayName || brand.name}
-                    modelId={lingxiaModelId || "default"}
+                    modelId={effectiveLingxiaModelId || "default"}
                     timeLabel={m.timeLabel}
                     toolCalls={m.role === "assistant" ? (m.toolCalls ?? (isLast && !chatV2Enabled && lingxiaStreaming ? lingxiaToolCalls : [])) : undefined}
                     showToolCalls={lingxiaShowToolCalls}
@@ -2206,8 +2274,13 @@ export default function Home() {
                 setMentionedUsers((prev) => prev.some((x) => x.userId === u.userId) ? prev : [...prev, u]);
               }}
               rightControls={(
-                <Select value={lingxiaModelId} onValueChange={(v) => {
+                <Select value={effectiveLingxiaModelId} onValueChange={(v) => {
                   setLingxiaModelId(v);
+                  setCachedLingxiaModelId(v);
+                  try {
+                    if (MODEL_SELECTION_KEY) localStorage.setItem(MODEL_SELECTION_KEY, v);
+                    if (MODEL_SELECTION_FALLBACK_KEY) localStorage.setItem(MODEL_SELECTION_FALLBACK_KEY, v);
+                  } catch {}
                   if (!user) { toast.error("请先登录"); return; }
                   switchModelMutation.mutate({ adoptId: resolvedAdoptId!, modelId: v });
                 }}>

@@ -150,7 +150,6 @@ export function registerWSProxy(server: Server) {
         socket.write("HTTP/1.1 403 Forbidden\r\n\r\n"); socket.destroy(); return;
       }
 
-      const { existsSync } = await import("fs");
       const dbAgent = String((claw as any).agentId || "").trim();
       const trialId = `trial_${adoptId}`;
       const agentId = existsSync(openClawAgentDir(trialId)) ? trialId : dbAgent;
@@ -194,7 +193,7 @@ export function registerWSProxy(server: Server) {
 
     const splitLargeDeltaForClient = (content: string): string[] => {
       const text = String(content || "");
-      if (text.length <= 240) return text ? [text] : [];
+      if (text.length <= 96) return text ? [text] : [];
 
       const chunks: string[] = [];
       let buf = "";
@@ -204,19 +203,19 @@ export function registerWSProxy(server: Server) {
         buf = "";
       };
       const pushLong = (part: string) => {
-        for (let i = 0; i < part.length; i += 180) {
-          chunks.push(part.slice(i, i + 180));
+        for (let i = 0; i < part.length; i += 72) {
+          chunks.push(part.slice(i, i + 72));
         }
       };
 
       const parts = text.match(/[\s\S]*?(?:[。！？!?；;：:\n]+|\.\s+|,\s+|$)/g)?.filter(Boolean) || [text];
       for (const part of parts) {
-        if (part.length > 360) {
+        if (part.length > 144) {
           pushBuf();
           pushLong(part);
           continue;
         }
-        if ((buf + part).length > 220) pushBuf();
+        if ((buf + part).length > 88) pushBuf();
         buf += part;
       }
       pushBuf();
@@ -245,7 +244,7 @@ export function registerWSProxy(server: Server) {
           sendToClient(frame);
         }
         if (shouldPace || deferredClientSendDelayMs > 0) {
-          deferredClientSendDelayMs += 45;
+          deferredClientSendDelayMs += 55;
         }
       }
     };
