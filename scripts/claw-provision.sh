@@ -70,6 +70,29 @@ if [[ -z "$DEFAULT_OPENCLAW_MODEL" ]]; then
       || true
   )"
 fi
+if [[ -z "$DEFAULT_OPENCLAW_MODEL" && -f "$_OC_DOTDIR/openclaw.json" ]]; then
+  DEFAULT_OPENCLAW_MODEL="$(
+    python3 - "$_OC_DOTDIR/openclaw.json" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+defaults = cfg.get("agents", {}).get("defaults", {})
+primary = str(defaults.get("model", {}).get("primary") or "").strip()
+if primary:
+    print(primary)
+    sys.exit(0)
+models = defaults.get("models") or {}
+if isinstance(models, dict):
+    for key in models:
+        key = str(key).strip()
+        if key:
+            print(key)
+            break
+PY
+  )"
+fi
 
 mkdir -p "$WORKSPACE_DIR"
 
@@ -100,8 +123,8 @@ fi
 
 if [[ "$agent_exists" != "true" ]]; then
   ADD_CMD=("$OPENCLAW_BIN" agents add "$AGENT_ID" --workspace "$WORKSPACE_DIR" --non-interactive)
-  if [[ -n "$AGENT_MODEL" ]]; then
-    ADD_CMD+=(--model "$AGENT_MODEL")
+  if [[ -n "$DEFAULT_OPENCLAW_MODEL" ]]; then
+    ADD_CMD+=(--model "$DEFAULT_OPENCLAW_MODEL")
   fi
   OPENCLAW_HOME="$OPENCLAW_HOME_DIR" "${ADD_CMD[@]}" >/tmp/lingganclaw-agent-add.log 2>&1
 fi
@@ -253,7 +276,8 @@ found = False
 for a in d.get("agents", {}).get("list", []):
     if a.get("id") == agent_id:
         a["tools"] = cfg["tools"]
-        a["model"] = cfg["model"]
+        if "model" in cfg:
+            a["model"] = cfg["model"]
         found = True
         break
 
@@ -264,7 +288,7 @@ with open(path, "w") as f:
     json.dump(d, f, indent=2, ensure_ascii=False)
 
 if found:
-    print(f"tools+model written: {agent_id} => profile={profile}, model={cfg['model']}")
+    print(f"tools+model written: {agent_id} => profile={profile}, model={cfg.get('model', '')}")
 PY
 fi
 
