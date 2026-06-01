@@ -1,15 +1,20 @@
 import express from "express";
 import http from "http";
-import { existsSync, readdirSync, statSync } from "fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { clawChatLimiter } from "./security";
 import { routeTool, type ToolContext } from "./tool_router";
-import { buildChatRequestBody, type PermissionProfile } from "./tool_schema";
+import {
+  buildChatRequestBody,
+  INTERNAL_EXEC_TOOL_NAME,
+  PLATFORM_EXEC_TOOL_NAME,
+  type PermissionProfile,
+} from "./tool_schema";
 import {
   requireClawOwner, resolveRuntimeAgentId, appendLogAsync,
   readSessionEpoch, bumpSessionEpoch, lookupSessionRegistry,
   upsertSessionRegistry, clearAgentSessionsCache, isPrivateUrl, APP_ROOT,
   buildRuntimeSessionKey, buildSessionRegistryScope,
-  OPENCLAW_BASE_HOME, openClawAgentDir, openClawWorkspaceDir
+  OPENCLAW_BASE_HOME, OPENCLAW_JSON_PATH, openClawAgentDir, openClawWorkspaceDir
 } from "./helpers";
 import { ResponseAccumulator } from "./response-accumulator";
 // 2026-04-18: eager import 避免首次 HTTP 聊天冷启动挂死（配合 claw-ws-proxy 保持一致）
@@ -25,6 +30,45 @@ import {
 import { restoreDeletedProtectedCoreFiles, snapshotProtectedCoreFiles } from "./core-file-guard";
 
 type ChatRuntimeMode = "fast" | "plan";
+
+type OpenAiToolCallAccumulator = {
+  index: number;
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+
+function routeableToolName(name: string) {
+  return name === PLATFORM_EXEC_TOOL_NAME ? INTERNAL_EXEC_TOOL_NAME : name;
+}
+
+function mergeOpenAiToolCallDeltas(
+  target: Map<number, OpenAiToolCallAccumulator>,
+  toolCalls: unknown,
+) {
+  if (!Array.isArray(toolCalls)) return false;
+  for (const raw of toolCalls) {
+    if (!raw || typeof raw !== "object") continue;
+    const call = raw as any;
+    const index = Number.isFinite(Number(call.index)) ? Number(call.index) : target.size;
+    const existing = target.get(index) ?? {
+      index,
+      id: "",
+      type: "function" as const,
+      function: { name: "", arguments: "" },
+    };
+    if (typeof call.id === "string" && call.id) existing.id = call.id;
+    if (call.type === "function") existing.type = "function";
+    const fn = call.function && typeof call.function === "object" ? call.function : {};
+    if (typeof fn.name === "string" && fn.name) existing.function.name = fn.name;
+    if (typeof fn.arguments === "string") existing.function.arguments += fn.arguments;
+    target.set(index, existing);
+  }
+  return true;
+}
 
 function normalizeChatRuntimeMode(value: unknown): ChatRuntimeMode {
   return "fast";
@@ -399,9 +443,14 @@ export function registerChatStreamRoutes(app: express.Express) {
       rawProfile === "plus" || rawProfile === "internal" ? rawProfile : "starter";
 
     // 前端传入的模型 ID，白名单校验后通过 x-openclaw-model header 生效
-    const ALLOWED_CLAW_MODELS = new Set(["glm5/glm-5.1", "maas/deepseek-v4-flash"]);
+    const ALLOWED_CLAW_MODELS = new Set(["openai/gpt-5.5", "glm5/glm-5.1", "modelarts-maas/glm-5.1", "maas/deepseek-v4-flash"]);
     const reqModel = (typeof model === "string" && model.trim()) ? model.trim() : "";
-    const backendModel = (reqModel && ALLOWED_CLAW_MODELS.has(reqModel)) ? reqModel : "";
+    let primaryModel = "";
+    try {
+      const cfg = JSON.parse(readFileSync(OPENCLAW_JSON_PATH, "utf8") || "{}");
+      primaryModel = String(cfg?.agents?.defaults?.model?.primary || "").trim();
+    } catch {}
+    const backendModel = (reqModel && ALLOWED_CLAW_MODELS.has(reqModel) && reqModel !== primaryModel) ? reqModel : "";
 
     // 品牌配置：从 DB 读取 AI 身份
     let brandSystemPrompt: string | undefined;
@@ -417,19 +466,18 @@ export function registerChatStreamRoutes(app: express.Express) {
 
     // Phase 2 方案 D：如果上一轮是 agent 回复，用户端传来 pendingToolContext
     //   将之注入 gateway messages 数组，openclaw 可读到 agent 结论做 follow-up
-    const body = JSON.stringify(
-      buildChatRequestBody({
-        message,
-        permissionProfile,
-        brandSystemPrompt,
-        pendingToolContext: pendingToolContext && typeof pendingToolContext === "object"
-          ? {
-              agentName: String(pendingToolContext.agentName || "agent").slice(0, 64),
-              content: String(pendingToolContext.content || "").slice(0, 8000),
-            }
-          : null,
-      })
-    );
+    const bodyObj = buildChatRequestBody({
+      message,
+      permissionProfile,
+      brandSystemPrompt,
+      pendingToolContext: pendingToolContext && typeof pendingToolContext === "object"
+        ? {
+            agentName: String(pendingToolContext.agentName || "agent").slice(0, 64),
+            content: String(pendingToolContext.content || "").slice(0, 8000),
+          }
+        : null,
+    });
+    let body = JSON.stringify(bodyObj);
     if (pendingToolContext && typeof pendingToolContext === "object") {
       console.log("[CTX-INJECT] adoptId=" + adoptId + " agentName=" + String(pendingToolContext.agentName || "").slice(0, 40) + " contentLen=" + String(pendingToolContext.content || "").length);
     }
@@ -492,12 +540,11 @@ const options = {
       port: gatewayPort,
       path: "/v1/chat/completions",
       method: "POST",
-      timeout: 0,
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body),
-        "Authorization": `Bearer ${gatewayToken}`,
-        "x-openclaw-agent-id": runtimeAgentId,
+	      timeout: 0,
+	      headers: {
+	        "Content-Type": "application/json",
+	        "Authorization": `Bearer ${gatewayToken}`,
+	        "x-openclaw-agent-id": runtimeAgentId,
         "x-openclaw-session-key": sessionKey,
         ...(backendModel ? { "x-openclaw-model": backendModel } : {}),
       },
@@ -651,8 +698,106 @@ const options = {
       }
     }, 8000);
 
-    const proxyReq = httpMod.request(options, async (proxyRes) => {
-      let buffer = "";
+	    const openAiToolCalls = new Map<number, OpenAiToolCallAccumulator>();
+	    let openAiToolLoopCount = 0;
+	    const MAX_OPENAI_TOOL_LOOPS = 3;
+	    let activeProxyReq: ReturnType<typeof http.request> | null = null;
+
+	    const executePlatformToolCalls = async (calls: OpenAiToolCallAccumulator[]) => {
+	      const toolMessages: any[] = [];
+	      const assistantToolCalls = calls.map((call, idx) => {
+	        const id = call.id || `call_${Date.now()}_${idx}`;
+	        const name = call.function.name || PLATFORM_EXEC_TOOL_NAME;
+	        return {
+	          id,
+	          type: "function" as const,
+	          function: {
+	            name,
+	            arguments: call.function.arguments || "{}",
+	          },
+	        };
+	      });
+
+	      for (const call of assistantToolCalls) {
+	        const routedName = routeableToolName(call.function.name);
+	        const req = {
+	          id: call.id,
+	          name: routedName,
+	          arguments: call.function.arguments || "{}",
+	        };
+	        writeEvent("tool_call", { id: req.id, name: req.name, arguments: req.arguments });
+	        const TOOL_EXEC_TIMEOUT_MS = 300_000;
+	        startToolHeartbeat(req.name);
+	        try {
+	          const result = await Promise.race([
+	            routeTool(toolCtx, req),
+	            new Promise<never>((_, reject) =>
+	              setTimeout(() => reject(new Error("tool_timeout")), TOOL_EXEC_TIMEOUT_MS)
+	            ),
+	          ]);
+	          stopToolHeartbeat();
+	          suppressedToolResults.add(result.toolCallId);
+	          writeEvent("tool_result", {
+	            tool_call_id:             result.toolCallId,
+	            result:                   result.output,
+	            is_error:                 !result.ok,
+	            exitCode:                 result.exitCode,
+	            truncated:                result.truncated,
+	            durationMs:               result.meta.durationMs,
+	            suppressedOriginalResult: result.suppressedOriginalResult,
+	            auditId:                  result.auditId,
+	            requestId:                toolCtx.adoptId,
+	            executor:                 result.executor,
+	            policyDenyReason:         result.policyDenyReason,
+	            outputFiles:              result.outputFiles ?? [],
+	          });
+	          toolMessages.push({
+	            role: "tool",
+	            tool_call_id: call.id,
+	            name: call.function.name,
+	            content: result.output || "",
+	          });
+	        } catch (err: any) {
+	          const isTimeout = err?.message === "tool_timeout";
+	          const output = isTimeout
+	            ? `[执行超时] 工具 "${req.name}" 运行超过 5 分钟被系统中断，请尝试减少任务规模或重试。`
+	            : `[工具执行异常] ${err?.message ?? String(err)}`;
+	          stopToolHeartbeat();
+	          writeEvent("tool_result", {
+	            tool_call_id: req.id,
+	            result: output,
+	            is_error: true,
+	            exitCode: isTimeout ? 124 : 1,
+	            truncated: false,
+	            durationMs: TOOL_EXEC_TIMEOUT_MS,
+	            suppressedOriginalResult: true,
+	            executor: "timeout",
+	            policyDenyReason: isTimeout ? "tool_timeout" : "execution_error",
+	            requestId: toolCtx.adoptId,
+	          });
+	          toolMessages.push({
+	            role: "tool",
+	            tool_call_id: call.id,
+	            name: call.function.name,
+	            content: output,
+	          });
+	        }
+	      }
+
+	      return { assistantToolCalls, toolMessages };
+	    };
+
+	    const startGatewayRequest = (requestBody: string) => {
+	      const requestOptions = {
+	        ...options,
+	        headers: {
+	          ...options.headers,
+	          "Content-Length": Buffer.byteLength(requestBody),
+	        },
+	      };
+	      const proxyReq = httpMod.request(requestOptions, async (proxyRes) => {
+	        activeProxyReq = proxyReq;
+	      let buffer = "";
       // 启动 Gateway 内部工具空白检测
       // startGatewayGapDetection(); // disabled — HTTP gap detection unreliable, will replace with WSS
 
@@ -815,27 +960,39 @@ const options = {
               default:
                 break;
             }
-          }
-          if (sawStreamDoneEvent) {
-            writeData({ __done: true });
-            continue;
-          }
+	          }
+	          if (sawStreamDoneEvent) {
+	            if (!(sawFinishReason === "tool_calls" && openAiToolCalls.size > 0)) {
+	              writeData({ __done: true });
+	            }
+	            continue;
+	          }
 
           try {
             const chunk = JSON.parse(dataStr);
 
             // 完成态跟踪（2026-04-28 SSE 截断诊断）
             // 只在标准 OpenAI chunk 上抓 id（含 choices 数组），避免误抓 tool_call 自带 id
-            if (!chatCompletionId && Array.isArray(chunk?.choices) && typeof chunk?.id === "string") {
-              chatCompletionId = chunk.id;
-            }
-            // ── tool_call：通过 routeTool 统一处理（带 5 分钟超时）──────────
-            if (eventName === "tool_call") {
-              const req = {
-                id: String(chunk.id || ""),
-                name: String(chunk.name || ""),
-                arguments: String(chunk.arguments || "{}"),
-              };
+	            if (!chatCompletionId && Array.isArray(chunk?.choices) && typeof chunk?.id === "string") {
+	              chatCompletionId = chunk.id;
+	            }
+
+	            const firstChoice = Array.isArray(chunk?.choices) ? chunk.choices[0] : null;
+	            const delta = firstChoice && typeof firstChoice === "object" ? (firstChoice as any).delta : null;
+	            const capturedOpenAiToolCall = mergeOpenAiToolCallDeltas(openAiToolCalls, delta?.tool_calls);
+	            const openAiToolCallFinish = firstChoice && typeof firstChoice === "object"
+	              && (firstChoice as any).finish_reason === "tool_calls";
+	            if (capturedOpenAiToolCall || openAiToolCallFinish) {
+	              continue;
+	            }
+
+	            // ── tool_call：通过 routeTool 统一处理（带 5 分钟超时）──────────
+	            if (eventName === "tool_call") {
+	              const req = {
+	                id: String(chunk.id || ""),
+	                name: routeableToolName(String(chunk.name || "")),
+	                arguments: String(chunk.arguments || "{}"),
+	              };
               // 先把 tool_call 转发给前端，让 UI 显示工具调用卡片
               writeEvent("tool_call", { id: req.id, name: req.name, arguments: req.arguments });
               const TOOL_EXEC_TIMEOUT_MS = 300_000; // 5 分钟超时
@@ -908,10 +1065,38 @@ const options = {
         }
       });
 
-      proxyRes.on("end", () => {
-        proxyResEndedFlag = true;
-        if (finalized) { console.log("[BIZ-STREAM] proxyRes end after finalized, skip"); return; }
-        finalized = true;
+	      proxyRes.on("end", async () => {
+	        proxyResEndedFlag = true;
+	        if (finalized) { console.log("[BIZ-STREAM] proxyRes end after finalized, skip"); return; }
+	        if (sawFinishReason === "tool_calls" && openAiToolCalls.size > 0 && openAiToolLoopCount < MAX_OPENAI_TOOL_LOOPS) {
+	          openAiToolLoopCount += 1;
+	          const calls = Array.from(openAiToolCalls.values()).sort((a, b) => a.index - b.index);
+	          openAiToolCalls.clear();
+	          appendLogAsync("claw-exec-detail.log", {
+	            ts: new Date().toISOString(),
+	            event: "openai_tool_calls_followup",
+	            adoptId: String(adoptId),
+	            agentId: String((claw as any).agentId || ""),
+	            runtimeAgentId,
+	            sessionKey,
+	            count: calls.length,
+	            loop: openAiToolLoopCount,
+	            names: calls.map((call) => call.function.name || ""),
+	          });
+	          const { assistantToolCalls, toolMessages } = await executePlatformToolCalls(calls);
+	          bodyObj.messages.push({
+	            role: "assistant",
+	            content: null,
+	            tool_calls: assistantToolCalls,
+	          });
+	          bodyObj.messages.push(...toolMessages);
+	          body = JSON.stringify(bodyObj);
+	          sawFinishReason = null;
+	          sawUpstreamDone = false;
+	          startGatewayRequest(body);
+	          return;
+	        }
+	        finalized = true;
         markChatRunComplete(sessionKey, clientRunId, "http_done");
         memAcc.flush();
           console.log("[BIZ-STREAM] proxyRes ended");
@@ -1023,48 +1208,53 @@ const options = {
           lastChunkAt,
           clientClosed: clientClosedFlag,
           flag: process.env.SSE_TRUNCATE_DETECT || "off",
-        });
-        restoreCoreFiles("stream_done");
-      });
-    });
+	        });
+	        restoreCoreFiles("stream_done");
+	      });
+	      });
 
-      proxyReq.on("timeout", () => { console.log("[BIZ-STREAM] proxyReq TIMEOUT"); });
-    proxyReq.on("error", (err) => {
-      if (endReason === "natural") endReason = "error";
-      proxyResErrorObj = err;
-      stopToolHeartbeat();
-      stopGatewayGapDetection();
-      if (finalized) return;
-      finalized = true;
-      markChatRunComplete(dedupSessionKey, clientRunId, "http_error");
-      if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ __stream_error: true, error: err.message })}\n\n`);
-        res.write("data: [DONE]\n\n");
-        res.end();
-      }
-      restoreCoreFiles("stream_request_error");
-    });
+	      proxyReq.on("timeout", () => { console.log("[BIZ-STREAM] proxyReq TIMEOUT"); });
+	      proxyReq.on("error", (err) => {
+	        if (endReason === "natural") endReason = "error";
+	        proxyResErrorObj = err;
+	        stopToolHeartbeat();
+	        stopGatewayGapDetection();
+	        if (finalized) return;
+	        finalized = true;
+	        markChatRunComplete(dedupSessionKey, clientRunId, "http_error");
+	        if (!res.writableEnded) {
+	          res.write(`data: ${JSON.stringify({ __stream_error: true, error: err.message })}\n\n`);
+	          res.write("data: [DONE]\n\n");
+	          res.end();
+	        }
+	        restoreCoreFiles("stream_request_error");
+	      });
 
-    // 客户端断开时取消上游请求
-    // 关键：finalized 时短路返回——正常完成路径上 res.end() 会让 underlying socket 关闭，
-    // req 跟着 emit "close"。如果不 guard，正常完成日志会被改写成 client_close。
-    req.on("close", () => {
-      if (finalized) {
-        clearInterval(sseKeepaliveInterval);
-        return;
-      }
-      clientClosedFlag = true;
-      if (endReason === "natural") endReason = "client_close";
-      stopToolHeartbeat();
-      stopGatewayGapDetection();
-      clearInterval(sseKeepaliveInterval);
-      proxyReq.destroy();
-      restoreCoreFiles("stream_client_close");
-    });
+	      proxyReq.write(requestBody);
+	      proxyReq.on("close", () => {
+	        if (finalized) clearInterval(sseKeepaliveInterval);
+	      });
+	      proxyReq.end();
+	      return proxyReq;
+	    };
 
-    proxyReq.write(body);
-    proxyReq.on("close", () => clearInterval(sseKeepaliveInterval));
-    proxyReq.end();
-  });
+	    // 客户端断开时取消当前上游请求
+	    // 关键：finalized 时短路返回——正常完成路径上 res.end() 会让 underlying socket 关闭。
+	    req.on("close", () => {
+	      if (finalized) {
+	        clearInterval(sseKeepaliveInterval);
+	        return;
+	      }
+	      clientClosedFlag = true;
+	      if (endReason === "natural") endReason = "client_close";
+	      stopToolHeartbeat();
+	      stopGatewayGapDetection();
+	      clearInterval(sseKeepaliveInterval);
+	      activeProxyReq?.destroy();
+	      restoreCoreFiles("stream_client_close");
+	    });
+
+	    startGatewayRequest(body);
+	  });
 
 }

@@ -347,6 +347,23 @@ export interface PolicyCheckResult {
   policyDecision?: "allow" | "deny" | "rewrite";
 }
 
+function shellQuoteArg(arg: string): string {
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+function buildSandboxCommand(input: SandboxExecInput): string {
+  const cmd = String(input.cmd || "").trim();
+  const args = Array.isArray(input.args) ? input.args : [];
+  if (args.length === 0) return cmd;
+  return [cmd, ...args.map(shellQuoteArg)].join(" ");
+}
+
+function buildPolicyCommand(input: SandboxExecInput): string {
+  const cmd = String(input.cmd || "").trim();
+  const args = Array.isArray(input.args) ? input.args : [];
+  return [cmd, ...args].filter(Boolean).join(" ");
+}
+
 export function policyCheck(
   permissionProfile: "starter" | "plus" | "internal",
   toolName: string,
@@ -389,7 +406,7 @@ export function policyCheck(
 
     // 4a. 黑名单检查
     for (const { pat, reason } of blockedPatterns) {
-      if (pat.test(input.cmd)) {
+      if (pat.test(buildPolicyCommand(input))) {
         return {
           allowed: false,
           denyReason: "blocked_pattern",
@@ -818,7 +835,7 @@ export async function routeTool(
     try {
       const raw = await sandboxExec({
         adoptId: ctx.adoptId,
-        command: input.cmd!,
+        command: buildSandboxCommand(input),
         timeoutMs,
         env: input.env ?? undefined,
         outputDir: tmpOutputDir ?? undefined,

@@ -2,12 +2,15 @@
 
 export type PermissionProfile = "starter" | "plus" | "internal";
 
+export const PLATFORM_EXEC_TOOL_NAME = "platform_exec";
+export const INTERNAL_EXEC_TOOL_NAME = "exec";
+
 export const VIRTUAL_EXEC_TOOL = {
   type: "function" as const,
   function: {
-    name: "exec",
+    name: PLATFORM_EXEC_TOOL_NAME,
     description:
-      "Run shell commands in an isolated sandbox environment. No network. Read-only root filesystem. Limited CPU, memory, process count, timeout, and output size.",
+      "Run shell commands through the Employee Agent platform executor in an isolated sandbox environment. No network. Read-only root filesystem. Limited CPU, memory, process count, timeout, and output size.",
     parameters: {
       type: "object",
       properties: {
@@ -76,7 +79,7 @@ function buildPlatformSecurityPrompt(brandSystemPrompt?: string) {
   "",
   "## Exec Approval Policy (三级审批规则)",
   "",
-  "When you need to run shell commands via exec tool, follow this approval policy:",
+  "When you need to run shell commands via platform_exec tool, follow this approval policy:",
   "",
   "**Auto-approve with allow-always** (read-only, zero side effects — no need to ask user):",
   "- System info: hostname, uname, uptime, date, whoami, id",
@@ -101,12 +104,12 @@ function buildPlatformSecurityPrompt(brandSystemPrompt?: string) {
   "",
   "When asked to do anything in the forbidden list: politely refuse, explain why.",
   "",
-  "## Platform Tools (MANDATORY - higher priority than exec for these scenarios)",
+  "## Platform Tools (MANDATORY - higher priority than platform_exec for these scenarios)",
   "",
-  "You have 3 platform tools. You MUST use them instead of exec for the following scenarios:",
+  "You have 3 platform tools. You MUST use them instead of platform_exec for the following scenarios:",
   "",
   "1. create_scheduled_task - MUST use when user wants: scheduled/periodic/recurring tasks, daily checks, reminders, cron jobs.",
-  "   DO NOT use exec or openclaw CLI for scheduling. The create_scheduled_task tool handles it directly.",
+  "   DO NOT use platform_exec or openclaw CLI for scheduling. The create_scheduled_task tool handles it directly.",
   "   When user asks to view/list existing scheduled tasks, DO NOT use native cron tools or openclaw CLI. Existing schedules are scoped by Employee Agent platform routing; if no platform list is provided, direct the user to the Employee Agent scheduled tasks page.",
   "",
   "2. send_notification - MUST use when user wants to: send to WeChat/WeCom/Feishu/Webhook, push a message, notify externally.",
@@ -118,9 +121,9 @@ function buildPlatformSecurityPrompt(brandSystemPrompt?: string) {
   "NEVER use exec to run openclaw CLI commands. NEVER say you cannot create scheduled tasks or send to WeChat.",
   "",
   "## Critical Execution Rules (MANDATORY)",
-  "- NEVER describe or pretend to execute code. If a task requires running code or generating a file, you MUST call the exec tool.",
-  "- NEVER say a file has been created, saved, or generated unless you have actually called exec and the command succeeded.",
-  "- If a skill tells you to run a script or save output to /output/, call exec to do it. No exceptions.",
+  "- NEVER describe or pretend to execute code. If a task requires running code or generating a file, you MUST call the platform_exec tool.",
+  "- NEVER say a file has been created, saved, or generated unless you have actually called platform_exec and the command succeeded.",
+  "- If a skill tells you to run a script or save output to /output/, call platform_exec to do it. No exceptions.",
   "- Describing what code would do is NOT the same as running it. Users need the actual file.",
 ].join("\n");
 }
