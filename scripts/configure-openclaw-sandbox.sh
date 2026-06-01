@@ -117,7 +117,7 @@ sandbox_tools = sandbox.setdefault("tools", {})
 also_allow = sandbox_tools.get("alsoAllow")
 if not isinstance(also_allow, list):
     also_allow = []
-for item in ("web_search", "web_fetch"):
+for item in ("web_search", "web_fetch", "bundle-mcp"):
     if item not in also_allow:
         also_allow.append(item)
 sandbox_tools["alsoAllow"] = also_allow
