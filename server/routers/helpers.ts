@@ -78,6 +78,7 @@ export const DEMO_PUBLISH_META_KEY = "demo_route_publish_meta_v1";
 export const IFRAME_BYPASS_KEY = "iframe_bypass_experience_ids";
 
 type ClawModelOption = { id: string; name: string; desc?: string; isDefault?: boolean };
+const DEFAULT_FRONTEND_MODEL_FALLBACKS = ["modelarts-maas/glm-5.1", "maas/deepseek-v4-flash"];
 
 const FRONTEND_MODEL_ALLOWLIST = new Set<string>(
   String(process.env.LINGXIA_FRONTEND_MODEL_ALLOWLIST || process.env.FRONTEND_MODEL_ALLOWLIST || "")
@@ -89,6 +90,38 @@ const FRONTEND_MODEL_ALLOWLIST = new Set<string>(
 function isFrontendModelAllowed(modelId: string): boolean {
   if (FRONTEND_MODEL_ALLOWLIST.size === 0) return true;
   return FRONTEND_MODEL_ALLOWLIST.has(modelId);
+}
+
+function modelDisplayName(modelId: string): string {
+  if (modelId === "modelarts-maas/glm-5.1") return "GLM-5.1（默认）";
+  if (modelId === "maas/deepseek-v4-flash") return "DeepSeek-V4-Flash";
+  if (modelId === "openai/gpt-5.5") return "GPT-5.5";
+  return modelId;
+}
+
+function configuredFrontendFallbackModelIds(): string[] {
+  const explicit = String(
+    process.env.LINGXIA_FRONTEND_MODEL_FALLBACKS
+      || process.env.FRONTEND_MODEL_FALLBACKS
+      || process.env.DEFAULT_FRONTEND_MODEL
+      || process.env.CLAW_AGENT_MODEL
+      || ""
+  )
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  return explicit.length > 0 ? explicit : DEFAULT_FRONTEND_MODEL_FALLBACKS;
+}
+
+export function getFrontendModelFallbacks(): ClawModelOption[] {
+  return configuredFrontendFallbackModelIds()
+    .filter(isFrontendModelAllowed)
+    .map((id, index) => ({
+      id,
+      name: modelDisplayName(id),
+      desc: "fallback",
+      isDefault: index === 0,
+    }));
 }
 
 export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
@@ -161,12 +194,9 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
     }
 
     if (uniq.size === 0) {
-      uniq.set("glm5/glm-5.1", {
-        id: "glm5/glm-5.1",
-        name: "GLM-5.1（默认）",
-        desc: "fallback",
-        isDefault: true,
-      });
+      for (const item of getFrontendModelFallbacks()) {
+        uniq.set(item.id, item);
+      }
     }
 
     // Deployments may optionally restrict the frontend model selector with
@@ -181,10 +211,7 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
     if (!hasDefault && arr.length > 0) arr[0] = { ...arr[0], isDefault: true };
     return arr;
   } catch {
-    return [
-      { id: "glm5/glm-5.1", name: "GLM-5.1（默认）", desc: "fallback" },
-      { id: "maas/deepseek-v4-flash", name: "DeepSeek-V4-Flash", desc: "fallback" },
-    ];
+    return getFrontendModelFallbacks();
   }
 }
 

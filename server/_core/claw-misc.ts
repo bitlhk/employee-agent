@@ -730,7 +730,12 @@ export function registerMiscRoutes(app: express.Express) {
   // ── AI 审核技能包 ───────────────────────────────────
   app.post("/api/claw/admin/ai-review-skill", async (req, res) => {
     try {
-      // 简单鉴权：检查 cookie 中的 session
+      const context = await createContext({ req, res, info: {} as any });
+      if (!context.user || context.user.role !== "admin") {
+        res.status(403).json({ error: "admin only" });
+        return;
+      }
+
       const { getSkillMarketItem: getSMI } = await import("../db");
 
       const { skillMarketId } = req.body || {};

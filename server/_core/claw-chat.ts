@@ -478,16 +478,18 @@ export function registerChatStreamRoutes(app: express.Express) {
         : null,
     });
     let body = JSON.stringify(bodyObj);
-    if (pendingToolContext && typeof pendingToolContext === "object") {
+    const debugOpenClawChat = /^(1|true|yes)$/i.test(String(process.env.DEBUG_OPENCLAW_CHAT || ""));
+    if (debugOpenClawChat && pendingToolContext && typeof pendingToolContext === "object") {
       console.log("[CTX-INJECT] adoptId=" + adoptId + " agentName=" + String(pendingToolContext.agentName || "").slice(0, 40) + " contentLen=" + String(pendingToolContext.content || "").length);
     }
 
-    // DEBUG: 验证 tools 是否注入
-    try {
-      const bodyParsed = JSON.parse(body);
-      console.log("[DEBUG] tools in body:", JSON.stringify(bodyParsed.tools || 'none'));
-      console.log("[DEBUG] permissionProfile:", permissionProfile);
-    } catch(e) {}
+    if (debugOpenClawChat) {
+      try {
+        const bodyParsed = JSON.parse(body);
+        console.log("[DEBUG] tools in body:", JSON.stringify(bodyParsed.tools || "none"));
+        console.log("[DEBUG] permissionProfile:", permissionProfile);
+      } catch(e) {}
+    }
 
     const startedAt = Date.now();
     const gatewayRequestStartMs = Date.now();
