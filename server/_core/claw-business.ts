@@ -1712,7 +1712,7 @@ export function registerBusinessRoutes(app: express.Express) {
                   // 旧通道：保留 workspace_files 事件（兼容其他可能的监听方）
                   res.write("event: workspace_files\ndata: " + JSON.stringify({ adoptId: String(agentId), files: recent }) + "\n\n");
 
-                  // 新通道：注入 __files: marker 到 assistant text，触发 CollabDrawer 的 inline preview card
+                  // 新通道：注入 __files: marker 到 assistant text，触发前端 inline preview card
                   // 前端 filesMatch regex: /<!-- __files:(\[.*?\]) -->/
                   // 字段：name, ext, size, url — url 会被 split("/").pop() 提取 filename
                   const filesForMarker = recent.map((f: any) => {

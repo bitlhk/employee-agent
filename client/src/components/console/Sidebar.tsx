@@ -1,13 +1,11 @@
 import {
   BriefcaseBusiness,
   CalendarClock,
-  ChevronRight,
   FolderTree,
   MessageSquareText,
   Plus,
   Settings2,
   Sparkles,
-  Store,
   Trash2,
   Users,
 } from "lucide-react";
@@ -59,8 +57,6 @@ export function Sidebar({
   collapsed,
   onOpenSettings,
   coopBadge,
-  onOpenAgentMarket,
-  agentMarketOpen,
   sessions = [],
   currentConversationId,
   sessionSwitchingId,
@@ -74,8 +70,6 @@ export function Sidebar({
   collapsed?: boolean;
   onOpenSettings?: () => void;
   coopBadge?: number;
-  onOpenAgentMarket?: () => void;
-  agentMarketOpen?: boolean;
   sessions?: SidebarConversation[];
   currentConversationId?: string;
   sessionSwitchingId?: string | null;
@@ -259,25 +253,9 @@ export function Sidebar({
           >
             <Settings2 size={16} className="sidebar-item-icon" />
           </button>
-          {renderBottomMenu("workbench", "工作台", BriefcaseBusiness, activePage === "office" || activePage === "schedule" || !!agentMarketOpen, (
+          {renderBottomMenu("workbench", "工作台", BriefcaseBusiness, activePage === "office" || activePage === "schedule", (
             <div className="space-y-1">
               {workbenchItems.map((item) => renderItem(item))}
-              {onOpenAgentMarket ? (
-                <button
-                  type="button"
-                  title="智能体广场"
-                  onClick={() => {
-                    setOpenMenu(null);
-                    onOpenAgentMarket();
-                  }}
-                  className={`w-full flex items-center gap-3 text-left sidebar-item relative ${agentMarketOpen ? "active" : ""}`}
-                  style={{ padding: "10px 16px", minHeight: 44 }}
-                >
-                  <Store size={16} className="sidebar-item-icon" />
-                  <span className="sidebar-item-label">智能体广场</span>
-                  <ChevronRight size={13} style={{ marginLeft: "auto", color: "var(--oc-text-tertiary)" }} />
-                </button>
-              ) : null}
             </div>
           ))}
         </div>

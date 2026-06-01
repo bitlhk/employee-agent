@@ -14,7 +14,6 @@ import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useRoute, useLocation } from "wouter";
 import { SidebarFooter } from "@/components/SidebarFooter";
-import { CollabDrawer } from "@/components/CollabDrawer";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatMessage, type ToolCallEntry } from "@/components/ChatMessage";
 import { AgentTaskCard, type AgentTask } from "@/components/AgentTaskCard";
@@ -32,6 +31,8 @@ import { formatModelName } from "@/lib/modelDisplay";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Bot } from "lucide-react";
 
+
+const ENABLE_OPENCLAW_WS_CHAT = true;
 
 
 // ── 2026-04-27: reasoning_content (DeepSeek-V4-Flash 等 reasoning 模型) 累积成虚拟 thinking toolCall ──
@@ -455,7 +456,6 @@ export default function Home() {
   });
   const coopBadgeCount = (coopPending?.pendingMyApproval || 0) + (coopPending?.awaitingMyConsolidation || 0);
 
-  const [collabOpen, setCollabOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [sessionSwitchingId, setSessionSwitchingId] = useState<string | null>(null);
@@ -984,7 +984,7 @@ export default function Home() {
 
   // 初始化 WSS 连接（后台自动尝试，不阻塞 UI）—— 仅 OpenClaw (lgc-*)
   useEffect(() => {
-    if (!resolvedAdoptId || !webConversationId || isDirectHttpRuntime || chatV2Enabled) return;
+    if (!ENABLE_OPENCLAW_WS_CHAT || !resolvedAdoptId || !webConversationId || isDirectHttpRuntime || chatV2Enabled) return;
     const apiBase = (import.meta as any).env?.VITE_API_URL || "";
     const ws = new OpenClawWSClient(resolvedAdoptId, apiBase, { channel: "web", conversationId: webConversationId });
     wsClientRef.current = ws;
@@ -1196,8 +1196,8 @@ export default function Home() {
       // ── WSS 优先路径（仅 OpenClaw runtime） ──
       // Hermes/JiuwenClaw 跳过 WSS 尝试，直接走 HTTP SSE（server 侧按 prefix 分叉）。
       const runtimeName = isJiuwenRuntime ? "jiuwenclaw" : isHermesRuntime ? "hermes" : "openclaw";
-      let wsClient = isDirectHttpRuntime ? null : wsClientRef.current;
-      if (!wsClient && !isDirectHttpRuntime && resolvedAdoptId && webConversationId) {
+      let wsClient = ENABLE_OPENCLAW_WS_CHAT && !isDirectHttpRuntime ? wsClientRef.current : null;
+      if (!wsClient && ENABLE_OPENCLAW_WS_CHAT && !isDirectHttpRuntime && resolvedAdoptId && webConversationId) {
         wsClient = new OpenClawWSClient(resolvedAdoptId, apiBase, { channel: "web", conversationId: webConversationId });
         wsClientRef.current = wsClient;
       }
@@ -2003,9 +2003,6 @@ export default function Home() {
       {dialog}
       <div className="h-screen overflow-hidden flex flex-col lingxia-shell" style={{ background: "var(--oc-bg)", color: "var(--oc-text-primary)" }}>
 
-        {/* 智能体广场抽屉（动效在 CollabDrawer 内部实现） */}
-        {collabOpen && <CollabDrawer onClose={() => setCollabOpen(false)} adoptId={resolvedAdoptId || ""} />}
-
         {/* ── Body ── */}
         <div
           className="flex-1 min-h-0 flex overflow-hidden"
@@ -2069,9 +2066,7 @@ export default function Home() {
                 collapsed={sidebarCollapsed}
                 onOpenSettings={() => setSettingsOpen(true)}
                 coopBadge={coopBadgeCount}
-                onOpenAgentMarket={() => setCollabOpen((open) => !open)}
-              agentMarketOpen={collabOpen}
-              sessions={webSessions}
+                sessions={webSessions}
               currentConversationId={webConversationId}
               sessionSwitchingId={sessionSwitchingId}
               onSwitchConversation={(conversationId) => void switchLingxiaConversation(conversationId)}

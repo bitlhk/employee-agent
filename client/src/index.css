@@ -4711,12 +4711,6 @@ body[data-admin-light="true"] .admin-collaboration-tab .divide-y > :not([hidden]
   border-color: rgba(17, 24, 39, 0.10) !important;
 }
 
-/* ── CollabDrawer light theme fixes ── */
-:root[data-theme-mode="light"] .collab-file-card {
-  background: #F8F7FF !important;
-  border-color: #D4D0E8 !important;
-}
-
 /* ═══ Console Tab 统一规范 ═══ */
 /* 浅色：console-tab Apple 风格 */
 :root[data-theme-mode="light"] .console-tab {
@@ -4816,7 +4810,7 @@ body[data-admin-light="true"] .admin-collaboration-tab .divide-y > :not([hidden]
    CoopSession.tsx 大量用 shadcn token（bg-muted / bg-card / text-foreground
    / text-muted-foreground / border-border / bg-primary），但项目里 --muted
    在 light 下被定义为文本色 #6e6e73（Apple secondaryLabel 风格），作为背景
-   会呈现为深灰，跟首页 CollabDrawer / CoopSubmitModal 的 --oc-* 体系不一致。
+   会呈现为深灰，跟首页 CoopSubmitModal 的 --oc-* 体系不一致。
 
    此 scope 把 shadcn token 重映射到 --oc-* 品牌体系，不影响站内其它
    使用 shadcn token 的组件（如 ui/table、ui/card 等）。

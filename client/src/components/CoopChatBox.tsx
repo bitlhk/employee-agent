@@ -5,7 +5,7 @@
  * 用 epochLabel = `coop-{sid}-u{uid}` 跟主聊天物理隔离（claw-chat.ts:312 已支持）。
  *
  * 演示前 Phase 1 简化：
- *   - 不调 task-xxx（接收方需要时去 CollabDrawer 自己跑，回来再附文件）
+ *   - 不调 task-xxx（接收方需要时自行执行，回来再附文件）
  *   - 提交 = 简版（拼接最后 N 条 AI 输出 → 弹 prompt 编辑 → 提交）
  *   - 不污染虾记忆（默认 skipMemoryWrite=true）
  *
