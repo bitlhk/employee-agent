@@ -82,10 +82,47 @@ type SkillPackageInspectResponse = {
   };
 };
 
-const SKILL_TAB_KEYS = ["mine", "market"] as const;
+const SKILL_TAB_KEYS = ["mine", "market", "mcp"] as const;
 type SkillTab = (typeof SKILL_TAB_KEYS)[number];
 type SourceFilter = "all" | SourceKind;
 type StateFilter = "all" | "ready" | "attention" | "disabled";
+
+type McpServerStatus = "available" | "disabled" | "missing";
+type McpToolSummary = {
+  name: string;
+  description: string;
+};
+type McpToolChild = {
+  id: string;
+  name: string;
+  description: string;
+  serverId: string;
+  configured: boolean;
+  enabled: boolean;
+  status: McpServerStatus;
+  existsOnDisk?: boolean;
+  tools?: McpToolSummary[];
+};
+type McpToolGroup = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  status: McpServerStatus;
+  availableCount: number;
+  configuredCount: number;
+  serverCount: number;
+  children: McpToolChild[];
+  recommendedSkills?: string[];
+};
+type McpToolsResponse = {
+  items: McpToolGroup[];
+  totals?: {
+    groups: number;
+    configuredServers: number;
+    availableServers: number;
+  };
+};
 
 const SOURCE_LABEL: Record<SourceKind, string> = {
   builtin: "平台内置",
@@ -199,6 +236,148 @@ function sourceCanPublish(skill: RegistrySkill) {
 
 function SkillPill({ children, tone = "neutral" }: { children: ReactNode; tone?: "ok" | "warn" | "danger" | "neutral" }) {
   return <span className={`skills-chip ${pillToneClass(tone)}`}>{children}</span>;
+}
+
+function mcpStatusTone(status: McpServerStatus): "ok" | "warn" | "neutral" {
+  if (status === "available") return "ok";
+  if (status === "disabled") return "warn";
+  return "neutral";
+}
+
+function mcpStatusLabel(status: McpServerStatus) {
+  if (status === "available") return "可用";
+  if (status === "disabled") return "已停用";
+  return "未接入";
+}
+
+function McpToolsPage({ adoptId }: { adoptId?: string }) {
+  const [items, setItems] = useState<McpToolGroup[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [openChildId, setOpenChildId] = useState<string | null>(null);
+
+  const loadMcpTools = async () => {
+    if (!adoptId) return;
+    setLoading(true);
+    try {
+      const data = await fetchJson<McpToolsResponse>(`/api/claw/mcp-tools/status?adoptId=${encodeURIComponent(adoptId)}`);
+      setItems(Array.isArray(data.items) ? data.items : []);
+    } catch (e: any) {
+      toast.error(`MCP 工具加载失败${e?.message ? `: ${e.message}` : ""}`);
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadMcpTools();
+  }, [adoptId]);
+
+  useEffect(() => {
+    setOpenChildId((current) => {
+      if (current && items.some((item) => item.children?.some((child) => `${item.id}:${child.id}` === current))) return current;
+      const firstAvailable = items
+        .flatMap((item) => (item.children || []).map((child) => ({ item, child })))
+        .find(({ child }) => child.status === "available");
+      return firstAvailable ? `${firstAvailable.item.id}:${firstAvailable.child.id}` : null;
+    });
+  }, [items]);
+
+  const availableGroups = items.filter((item) => item.status === "available").length;
+  const configuredServers = items.reduce((sum, item) => sum + item.configuredCount, 0);
+  const availableServers = items.reduce((sum, item) => sum + item.availableCount, 0);
+
+  return (
+    <div className="skills-market skills-mcp">
+      <div className="skills-market-hero settings-card">
+        <div className="skills-market-hero__icon"><Wrench size={18} /></div>
+        <div className="min-w-0">
+          <div className="skills-market-hero__title">MCP工具</div>
+          <div className="skills-market-hero__desc">
+            MCP 是平台统一接入的宿主机工具能力，只展示当前 OpenClaw 的注册和可用状态；安装、密钥和网络访问由管理员统一治理。
+          </div>
+        </div>
+      </div>
+
+      <div className="skills-header">
+        <div className="skills-summary skills-muted-text text-xs">
+          共 {items.length} 类 MCP · {availableGroups} 类可用 · {availableServers}/{configuredServers} 个服务已启用
+        </div>
+        <button className="skills-btn" onClick={() => void loadMcpTools()} disabled={loading}>
+          <RefreshCw size={14} /> 刷新
+        </button>
+      </div>
+
+      {loading && <div className="settings-card skills-market-empty"><RefreshCw size={18} className="animate-spin" /><div>正在加载 MCP 工具...</div></div>}
+      {!loading && items.length === 0 && <div className="settings-card skills-market-empty"><Wrench size={22} /><div>暂无 MCP 工具配置</div></div>}
+
+      {!loading && items.length > 0 && (
+        <div className="skills-mcp-groups">
+          {items.map((item) => (
+            <section key={item.id} className="settings-card skills-mcp-group">
+              <div className="skills-mcp-group__head">
+                <div className="skills-mcp-group__title-wrap">
+                  <div className="skills-mcp-group__title">
+                    <Wrench size={16} />
+                    <span>{item.name}</span>
+                  </div>
+                  <div className="skills-mcp-group__desc">{item.description}</div>
+                </div>
+                <div className="skills-mcp-group__status">
+                  <span className="skills-chip skills-chip--neutral">{item.category}</span>
+                  <span className={`skills-chip ${pillToneClass(mcpStatusTone(item.status))}`}>
+                    {mcpStatusLabel(item.status)} {item.availableCount}/{item.serverCount}
+                  </span>
+                </div>
+              </div>
+
+              <div className="skills-mcp-children">
+                {(item.children || []).map((child) => {
+                  const childKey = `${item.id}:${child.id}`;
+                  const open = openChildId === childKey;
+                  const childTone = mcpStatusTone(child.status);
+                  return (
+                    <div key={child.id} className="skills-mcp-child" data-open={open ? "true" : "false"}>
+                      <button className="skills-mcp-child__row" onClick={() => setOpenChildId(open ? null : childKey)}>
+                        <span className="skills-mcp-child__chevron">
+                          {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                        </span>
+                        <span className="skills-mcp-child__main">
+                          <span className="skills-mcp-child__name">{child.name}</span>
+                          <span className="skills-mcp-child__desc">{child.description}</span>
+                        </span>
+                        <span className="skills-mcp-child__meta">
+                          <span className="skills-mcp-child__server">{child.serverId}</span>
+                          <span className={`skills-chip ${pillToneClass(childTone)}`}>{mcpStatusLabel(child.status)}</span>
+                        </span>
+                      </button>
+
+                      <div className="skills-mcp-child__panel" aria-hidden={!open}>
+                        <div className="skills-mcp-tools">
+                          {(child.tools && child.tools.length > 0 ? child.tools : [{ name: "工具清单", description: "该 MCP 已接入，工具明细以管理员配置为准。" }]).map((tool) => (
+                            <div key={`${child.id}:${tool.name}`} className="skills-mcp-tool">
+                              <div className="skills-mcp-tool__name">{tool.name}</div>
+                              <div className="skills-mcp-tool__desc">{tool.description}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {item.recommendedSkills && item.recommendedSkills.length > 0 && (
+                <div className="skills-mcp-related">
+                  关联技能：{item.recommendedSkills.join("、")}
+                </div>
+              )}
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function SkillsToolbar({
@@ -377,7 +556,7 @@ function SkillDetailDrawer({
                   {skill.enabled ? "停用" : "启用"}
                 </button>
                 {sourceCanRename(skill) && <button className="skills-btn" disabled={busy} onClick={() => onRename(skill)}><Pencil size={13} /> 重命名</button>}
-                {sourceCanPublish(skill) && <button className="skills-btn" disabled={busy} onClick={() => onPublish(skill)}><Store size={13} /> 提交到中队原创</button>}
+                {sourceCanPublish(skill) && <button className="skills-btn" disabled={busy} onClick={() => onPublish(skill)}><Store size={13} /> 提交到中队专区</button>}
                 {sourceCanUninstall(skill) && <button className="skills-btn" disabled={busy} onClick={() => onUninstall(skill)}><Trash2 size={13} /> 卸载</button>}
                 {sourceCanDestroy(skill) && <button className="skills-btn" disabled={busy} onClick={() => onDestroy(skill)}><Trash2 size={13} /> 删除</button>}
               </div>
@@ -630,11 +809,21 @@ export function SkillsPage({ adoptId }: {
             <Store className="page-tab__icon" aria-hidden="true" />
             技能广场
           </button>
+          <button id="skills-tab-mcp" className="page-tab" data-active={skillTab === "mcp" ? "true" : "false"} role="tab" aria-selected={skillTab === "mcp"} aria-controls="skills-panel-mcp" tabIndex={skillTab === "mcp" ? 0 : -1} onClick={() => setSkillTab("mcp")}>
+            <Wrench className="page-tab__icon" aria-hidden="true" />
+            MCP工具
+          </button>
         </div>
 
         {skillTab === "market" && (
           <div id="skills-panel-market" className="skills-panel skills-panel--market stealth-scrollbar" role="tabpanel" aria-labelledby="skills-tab-market" tabIndex={0}>
             <MarketplacePage adoptId={adoptId} />
+          </div>
+        )}
+
+        {skillTab === "mcp" && (
+          <div id="skills-panel-mcp" className="skills-panel skills-panel--market stealth-scrollbar" role="tabpanel" aria-labelledby="skills-tab-mcp" tabIndex={0}>
+            <McpToolsPage adoptId={adoptId} />
           </div>
         )}
 

@@ -11,6 +11,8 @@ import {
   bumpSessionEpoch,
   clearAgentSessionsCache,
   OPENCLAW_BASE_HOME,
+  OPENCLAW_HOME,
+  OPENCLAW_JSON_PATH,
   openClawAgentDir,
   openClawSkillMarketDir,
   resolveRuntimeWorkspaceByIds,
@@ -36,6 +38,243 @@ function decodeParam(value: unknown): string {
 
 function skillSourceCacheDir(adoptId: string, skillId: string): string {
   return path.join(APP_ROOT, "data", "generated-skills", adoptId, skillId);
+}
+
+const MCP_TOOL_CATALOG = [
+  {
+    id: "wind",
+    name: "Wind 金融数据",
+    category: "专业投研",
+    description: "覆盖行情、财务、公告新闻、指数和市场分析等 Wind 数据能力，供金融类技能和主对话按需调用。",
+    children: [
+      {
+        id: "wind-financial-docs",
+        name: "金融文档与公告研报",
+        description: "查询公告、新闻、研报、财经资讯和金融资料检索能力。",
+        serverIds: ["wind_financial_docs"],
+        tools: [
+          { name: "公告与新闻检索", description: "按公司、关键词和时间范围查找公告新闻。" },
+          { name: "研报资料查询", description: "检索研究报告、摘要和相关金融文档。" },
+        ],
+      },
+      {
+        id: "wind-stock-data",
+        name: "股票行情与财务",
+        description: "覆盖 A 股、港股、美股的行情、K 线、财务和公司事件。",
+        serverIds: ["wind_stock_data"],
+        tools: [
+          { name: "股票行情查询", description: "查询最新价、涨跌幅、成交量和行情快照。" },
+          { name: "K线与分钟数据", description: "获取日线、分钟线和历史走势。" },
+          { name: "财务与事件数据", description: "查询财报、股本、分红、风险和公司事件。" },
+        ],
+      },
+      {
+        id: "wind-index-data",
+        name: "指数与板块数据",
+        description: "查询指数行情、成分、行业板块和相关基本面数据。",
+        serverIds: ["wind_index_data"],
+        tools: [
+          { name: "指数行情查询", description: "查询指数最新行情、K 线和估值指标。" },
+          { name: "成分与板块分析", description: "查看指数成分、行业板块和权重变化。" },
+        ],
+      },
+      {
+        id: "wind-fund-data",
+        name: "基金与 ETF 数据",
+        description: "覆盖 ETF、公募基金行情、档案、持仓、业绩和管理人数据。",
+        serverIds: ["wind_fund_data"],
+        tools: [
+          { name: "基金行情与净值", description: "查询基金净值、涨跌、业绩和风险指标。" },
+          { name: "持仓与管理人", description: "查询基金持仓、持有人和管理公司信息。" },
+        ],
+      },
+      {
+        id: "wind-bond-data",
+        name: "债券数据",
+        description: "查询债券档案、主体、估值、行情和发行人财务数据。",
+        serverIds: ["wind_bond_data"],
+        tools: [
+          { name: "债券档案查询", description: "查询债券基础信息、期限、票息和发行条款。" },
+          { name: "估值与主体数据", description: "查询债券估值、成交、主体财务和评级信息。" },
+        ],
+      },
+      {
+        id: "wind-economic-data",
+        name: "宏观经济数据",
+        description: "查询宏观指标、行业指标、经济周期和统计数据。",
+        serverIds: ["wind_economic_data"],
+        tools: [
+          { name: "宏观指标查询", description: "查询 GDP、CPI、PMI、社融等宏观指标。" },
+          { name: "行业指标查询", description: "查询行业景气、价格、产量和库存数据。" },
+        ],
+      },
+      {
+        id: "wind-analytics-data",
+        name: "市场分析工具",
+        description: "提供技术指标、风险指标和组合分析相关的数据能力。",
+        serverIds: ["wind_analytics_data"],
+        tools: [
+          { name: "技术指标计算", description: "查询或计算常用技术分析指标。" },
+          { name: "风险与组合分析", description: "支持风险指标、收益分析和组合诊断。" },
+        ],
+      },
+    ],
+    recommendedSkills: ["wind-mcp-skill", "wind-find-finance-skill"],
+  },
+  {
+    id: "qieman",
+    name: "且慢财富工具",
+    category: "个人财富",
+    description: "面向财富规划、组合诊断、基金分析和目标测算场景，由财富类技能统一调度。",
+    children: [
+      {
+        id: "qieman-wealth",
+        name: "财富规划与基金分析",
+        description: "查询且慢侧基金、组合、目标测算和财富诊断工具。",
+        serverIds: ["qieman"],
+        tools: [
+          { name: "基金分析", description: "查询基金资料、业绩、风险和持仓特征。" },
+          { name: "组合诊断", description: "分析组合配置、波动、收益和集中度。" },
+          { name: "目标测算", description: "按目标金额、期限和风险偏好做规划测算。" },
+          { name: "财富健康检查", description: "评估资产结构、现金流和风险暴露。" },
+        ],
+      },
+    ],
+    recommendedSkills: ["wealth-family-advisor", "wealth-healthcheck", "wealth-goalcalc", "fund-analyst", "portfolio-doctor"],
+  },
+  {
+    id: "bond-quote-parse",
+    name: "债券群聊报价解析",
+    category: "债券承销",
+    description: "解析债券申购群聊、报价语料和 CSV 表格，提取机构、利率、投标量和错误项。",
+    children: [
+      {
+        id: "bond-quote-parse",
+        name: "债券群聊报价解析",
+        description: "从群聊文本或表格中解析债券报价、申购量、机构和异常项。",
+        serverIds: ["bond_quote_parse", "bond-quote-parse"],
+        displayServerId: "bond-quote-parse",
+        tools: [
+          { name: "报价文本解析", description: "从群聊文本中抽取债券简称、期限、收益率、量和机构。" },
+          { name: "报价表格校验", description: "校验 CSV 或表格中的缺失项、格式错误和重复记录。" },
+        ],
+      },
+    ],
+    recommendedSkills: ["bond-quote-parse"],
+  },
+];
+
+function readOpenClawMcpServers(): Record<string, any> {
+  try {
+    if (!existsSync(OPENCLAW_JSON_PATH)) return {};
+    const cfg = JSON.parse(String(readFileSync(OPENCLAW_JSON_PATH, "utf-8") || "{}"));
+    return cfg?.mcp?.servers && typeof cfg.mcp.servers === "object" ? cfg.mcp.servers : {};
+  } catch {
+    return {};
+  }
+}
+
+function mcpServerExistsOnDisk(serverId: string, raw: any): boolean {
+  const command = typeof raw?.command === "string" ? raw.command : "";
+  const args = Array.isArray(raw?.args) ? raw.args.map((x: any) => String(x || "")) : [];
+  const candidates = [command, ...args].filter(Boolean);
+  for (const item of candidates) {
+    if (item.startsWith("/") && existsSync(item)) return true;
+  }
+  return existsSync(path.join(OPENCLAW_HOME, "mcp", serverId));
+}
+
+function listMcpToolGroups() {
+  const servers = readOpenClawMcpServers();
+  const serverRows = Object.entries(servers).map(([serverId, raw]) => {
+    const disabled = Boolean((raw as any)?.disabled);
+    return {
+      serverId,
+      configured: true,
+      enabled: !disabled,
+      status: disabled ? "disabled" : "available",
+      existsOnDisk: mcpServerExistsOnDisk(serverId, raw),
+    };
+  });
+  const byId = new Map(serverRows.map((row) => [row.serverId, row]));
+  const knownServerIds = new Set<string>();
+
+  const groups = MCP_TOOL_CATALOG.map((item) => {
+    const children = item.children.map((child) => {
+      for (const id of child.serverIds) knownServerIds.add(id);
+      const aliasServers = child.serverIds.map((serverId) => byId.get(serverId) || {
+        serverId,
+        configured: false,
+        enabled: false,
+        status: "missing",
+        existsOnDisk: existsSync(path.join(OPENCLAW_HOME, "mcp", serverId)),
+      });
+      const activeServer = aliasServers.find((server) => server.configured) || aliasServers[0];
+      const configured = aliasServers.some((server) => server.configured);
+      const enabled = aliasServers.some((server) => server.configured && server.enabled);
+      const status = enabled ? "available" : configured ? "disabled" : "missing";
+      return {
+        id: child.id,
+        name: child.name,
+        description: child.description,
+        serverId: (child as any).displayServerId || activeServer.serverId,
+        configured,
+        enabled,
+        status,
+        existsOnDisk: aliasServers.some((server) => server.existsOnDisk),
+        tools: child.tools,
+      };
+    });
+    const availableCount = children.filter((child) => child.status === "available").length;
+    const configuredCount = children.filter((child) => child.configured).length;
+    return {
+      id: item.id,
+      name: item.name,
+      category: item.category,
+      description: item.description,
+      recommendedSkills: item.recommendedSkills,
+      status: availableCount > 0 ? "available" : configuredCount > 0 ? "disabled" : "missing",
+      availableCount,
+      configuredCount,
+      serverCount: children.length,
+      children,
+    };
+  });
+
+  const extraGroups = serverRows
+    .filter((server) => !knownServerIds.has(server.serverId))
+    .map((server) => ({
+      id: server.serverId,
+      name: server.serverId,
+      category: "平台工具",
+      description: "OpenClaw 配置中已注册的 MCP Server。",
+      serverIds: [server.serverId],
+      recommendedSkills: [],
+      status: server.enabled ? "available" : "disabled",
+      availableCount: server.enabled ? 1 : 0,
+      configuredCount: 1,
+      serverCount: 1,
+      children: [{
+        id: server.serverId,
+        name: server.serverId,
+        description: "OpenClaw 配置中已注册的 MCP Server。",
+        serverId: server.serverId,
+        configured: true,
+        enabled: server.enabled,
+        status: server.status,
+        existsOnDisk: server.existsOnDisk,
+        tools: [{ name: "工具清单", description: "该 MCP 未纳入平台目录，具体能力以管理员配置为准。" }],
+      }],
+    }));
+
+  return {
+    items: [...groups, ...extraGroups],
+    totals: {
+      groups: groups.length + extraGroups.length,
+      configuredServers: serverRows.length,
+      availableServers: serverRows.filter((row) => row.enabled).length,
+    },
+  };
 }
 
 async function discoverGeneratedRuntimeSkills(adoptId: string, runtimeAgentId: string, onlySkillId?: string): Promise<{
@@ -135,6 +374,22 @@ async function readSkillPackagePayload(req: express.Request): Promise<{
 }
 
 export function registerSkillRoutes(app: express.Express) {
+  app.get("/api/claw/mcp-tools/status", async (req, res) => {
+    try {
+      const adoptId = String(req.query.adoptId || "").trim();
+      if (!adoptId) {
+        res.status(400).json({ error: "adoptId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      res.json(listMcpToolGroups());
+    } catch (e) {
+      console.error("[mcp tools] status failed", e);
+      res.status(500).json({ error: "list mcp tools failed" });
+    }
+  });
+
   app.get("/api/claw/skills/registry", async (req, res) => {
     try {
       const adoptId = String(req.query.adoptId || "").trim();
@@ -468,7 +723,7 @@ export function registerSkillRoutes(app: express.Express) {
         skillId: parsed.skillId || skill.id,
         name: skill.source.displayName || parsed.displayName || skill.id,
         description: skill.source.description || parsed.description || null,
-        author: "中队原创",
+        author: "中队专区",
         authorUserId: Number((claw as any).userId || 0) || null,
         version,
         category: "general",

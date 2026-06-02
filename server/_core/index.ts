@@ -51,12 +51,18 @@ import { APP_ROOT } from "./helpers";
 import { sdk } from "./sdk";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { getClawByAdoptId } from "../db";
+import { getClawByAdoptId, getDb } from "../db";
 import { getClientIp } from "./ip-utils";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 let openClawVersionCache: { value: string; expiresAt: number } | null = null;
+const iosLoadDebugEnabled = process.env.IOS_LOAD_DEBUG === "1";
+
+function logIosLoadDebug(message: string, fields: Record<string, unknown> = {}): void {
+  if (!iosLoadDebugEnabled) return;
+  console.log(`[IOS-LOAD] ${message}`, fields);
+}
 
 function resolveProtectedClawAdoptId(req: Request): string | null {
   const host = String(req.hostname || req.headers.host || "").toLowerCase().split(":")[0];
@@ -67,9 +73,23 @@ function resolveProtectedClawAdoptId(req: Request): string | null {
 }
 
 async function guardProtectedClawSpa(req: Request, res: Response): Promise<boolean> {
-  if (req.path === "/login" || req.path === "/reset-password") return true;
+  const startedAt = Date.now();
+  if (req.path === "/login" || req.path === "/reset-password") {
+    logIosLoadDebug("guard_skip_auth_page", {
+      path: req.path,
+      ms: Date.now() - startedAt,
+    });
+    return true;
+  }
   const adoptId = resolveProtectedClawAdoptId(req);
-  if (!adoptId) return true;
+  if (!adoptId) {
+    logIosLoadDebug("guard_skip_public_route", {
+      path: req.path,
+      host: req.headers.host,
+      ms: Date.now() - startedAt,
+    });
+    return true;
+  }
 
   let user: any = null;
   try {
@@ -77,14 +97,32 @@ async function guardProtectedClawSpa(req: Request, res: Response): Promise<boole
   } catch {
     const redirect = encodeURIComponent(`${req.originalUrl || req.url || "/"}`);
     res.redirect(302, `/login?redirect=${redirect}`);
+    logIosLoadDebug("guard_redirect_login", {
+      path: req.path,
+      adoptId,
+      ms: Date.now() - startedAt,
+    });
     return false;
   }
 
   const claw = await getClawByAdoptId(adoptId).catch(() => null);
   if (!claw || Number((claw as any).userId || 0) !== Number(user?.id || 0)) {
     res.status(403).send(`<!doctype html><meta charset="utf-8"><title>无权访问</title><body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#0f172a"><main style="min-height:100vh;display:grid;place-items:center;padding:24px"><section style="max-width:420px;border:1px solid #e2e8f0;background:white;border-radius:14px;padding:32px;text-align:center;box-shadow:0 12px 30px rgba(15,23,42,.08)"><h1 style="font-size:22px;margin:0 0 12px">无权访问该工作台</h1><p style="font-size:14px;line-height:1.7;color:#64748b;margin:0">当前账号没有该员工智能体实例的访问权限。请切换到实例所属账号，或返回自己的工作台。</p><a href="/" style="display:inline-block;margin-top:22px;padding:10px 16px;border-radius:10px;background:#0f172a;color:white;text-decoration:none;font-size:14px">返回首页</a></section></main></body>`);
+    logIosLoadDebug("guard_forbidden", {
+      path: req.path,
+      adoptId,
+      userId: user?.id,
+      clawUserId: (claw as any)?.userId,
+      ms: Date.now() - startedAt,
+    });
     return false;
   }
+  logIosLoadDebug("guard_ok", {
+    path: req.path,
+    adoptId,
+    userId: user?.id,
+    ms: Date.now() - startedAt,
+  });
   return true;
 }
 
@@ -369,11 +407,47 @@ async function startServer() {
         // 不需要手动设置压缩头，compression 中间件会根据内容类型自动处理
       },
     };
+  app.use((req, res, next) => {
+    if (!iosLoadDebugEnabled) return next();
+    const ext = path.extname(req.path).toLowerCase();
+    const shouldTrace = req.path === "/" || req.path === "/login" || [".js", ".css"].includes(ext);
+    if (!shouldTrace) return next();
+
+    const startedAt = Date.now();
+    let logged = false;
+    const logDone = (event: string) => {
+      if (logged) return;
+      logged = true;
+      logIosLoadDebug(event, {
+        method: req.method,
+        path: req.path,
+        statusCode: res.statusCode,
+        ms: Date.now() - startedAt,
+        host: req.headers.host,
+        ua: req.headers["user-agent"],
+        ip: getClientIp(req),
+      });
+    };
+    res.once("finish", () => logDone("request_finish"));
+    res.once("close", () => {
+      if (!res.writableEnded) logDone("request_close_before_finish");
+    });
+    next();
+  });
   app.use(express.static(clientDistPath, staticOptions));
     
     // SPA 路由回退：所有非 API 请求返回 index.html
     // 注意：这个路由必须在静态文件服务之后，确保静态文件优先匹配
     app.get("*", async (req, res, next) => {
+      const spaStartedAt = Date.now();
+      logIosLoadDebug("spa_route_start", {
+        method: req.method,
+        path: req.path,
+        originalUrl: req.originalUrl,
+        host: req.headers.host,
+        ua: req.headers["user-agent"],
+        ip: getClientIp(req),
+      });
       // 跳过 API 路由和 health 检查
       if (req.path.startsWith("/api") || req.path.startsWith("/health")) {
         return next();
@@ -414,9 +488,18 @@ async function startServer() {
       }
       
       res.sendFile(indexPath, (err) => {
-        if (err && !res.headersSent) {
+        const isClientAbort = (err as any)?.code === "ECONNABORTED" || /request aborted/i.test(String((err as any)?.message || ""));
+        logIosLoadDebug("spa_sendfile_done", {
+          path: req.path,
+          ms: Date.now() - spaStartedAt,
+          statusCode: res.statusCode,
+          error: err ? String((err as any)?.message || err) : "",
+          headersSent: res.headersSent,
+        });
+        if (err) {
+          if (isClientAbort) return;
           console.error("[SPA Fallback] Error sending index.html:", err);
-          next(err);
+          if (!res.headersSent) next(err);
         }
       });
     });
@@ -534,6 +617,21 @@ async function startServer() {
     console.log(`✅ Backend API server running on http://localhost:${port}/`);
     console.log(`   API endpoint: http://localhost:${port}/api/trpc`);
     console.log(`   CORS allowed origins: ${allowedOrigins.join(', ')}`);
+    const dbWarmupStartedAt = Date.now();
+    getDb()
+      .then((db) => {
+        logIosLoadDebug("db_warmup_done", {
+          ok: Boolean(db),
+          ms: Date.now() - dbWarmupStartedAt,
+        });
+      })
+      .catch((error) => {
+        console.warn("[Database] Warmup failed:", (error as any)?.message || error);
+        logIosLoadDebug("db_warmup_error", {
+          error: String((error as any)?.message || error),
+          ms: Date.now() - dbWarmupStartedAt,
+        });
+      });
   });
   startRecycler();
 }

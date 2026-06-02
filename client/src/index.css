@@ -2316,6 +2316,198 @@ select.settings-input {
   align-items: center;
   gap: 4px;
 }
+.skills-mcp-card {
+  cursor: default;
+}
+.skills-mcp-card:hover {
+  transform: none;
+}
+.skills-mcp-server-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+}
+.skills-mcp-related {
+  color: var(--oc-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skills-mcp-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.skills-mcp-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+.skills-mcp-group__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+.skills-mcp-group__title-wrap {
+  min-width: 0;
+}
+.skills-mcp-group__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--oc-text-primary);
+  font-size: 14px;
+  font-weight: var(--oc-weight-semibold);
+  line-height: 1.35;
+}
+.skills-mcp-group__title span,
+.skills-mcp-child__name,
+.skills-mcp-child__server,
+.skills-mcp-tool__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skills-mcp-group__desc {
+  margin-top: 4px;
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.skills-mcp-group__status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.skills-mcp-children {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skills-mcp-child {
+  border: 1px solid var(--oc-border-subtle);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--oc-bg-surface) 92%, transparent);
+  overflow: hidden;
+}
+.skills-mcp-child__row {
+  width: 100%;
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  padding: 10px 12px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.skills-mcp-child__row:hover {
+  background: color-mix(in oklab, var(--oc-bg-hover) 78%, transparent);
+}
+.skills-mcp-child__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--oc-text-secondary);
+}
+.skills-mcp-child__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.skills-mcp-child__name {
+  color: var(--oc-text-primary);
+  font-size: 13px;
+  font-weight: var(--oc-weight-medium);
+}
+.skills-mcp-child__desc {
+  color: var(--oc-text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skills-mcp-child__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.skills-mcp-child__server {
+  max-width: 150px;
+  color: var(--oc-text-secondary);
+  font-size: 11px;
+}
+.skills-mcp-child__panel {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height .18s ease, opacity .16s ease;
+}
+.skills-mcp-child[data-open="true"] .skills-mcp-child__panel {
+  max-height: 420px;
+  opacity: 1;
+}
+.skills-mcp-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 12px 12px 44px;
+}
+.skills-mcp-tool {
+  min-width: 0;
+  border: 1px solid var(--oc-border-subtle);
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: color-mix(in oklab, var(--oc-bg-soft) 70%, transparent);
+}
+.skills-mcp-tool__name {
+  color: var(--oc-text-primary);
+  font-size: 12px;
+  font-weight: var(--oc-weight-medium);
+}
+.skills-mcp-tool__desc {
+  margin-top: 4px;
+  color: var(--oc-text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+@media (max-width: 760px) {
+  .skills-mcp-group__head,
+  .skills-mcp-child__meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .skills-mcp-child__row {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+  .skills-mcp-child__meta {
+    grid-column: 2;
+    gap: 6px;
+  }
+  .skills-mcp-tools {
+    grid-template-columns: 1fr;
+    padding-left: 34px;
+  }
+  .skills-mcp-child__server {
+    max-width: 100%;
+  }
+}
 .skills-market-detail {
   position: fixed;
   inset: 0;

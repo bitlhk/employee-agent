@@ -29,7 +29,7 @@ import { applySettings as applyUiSettings, getSettings, subscribeSettings } from
 import { useLingxiaChat } from "@/hooks/useLingxiaChat";
 import { formatModelName } from "@/lib/modelDisplay";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Bot } from "lucide-react";
+import { Bot, History, Plus, Trash2 } from "lucide-react";
 
 
 const ENABLE_OPENCLAW_WS_CHAT = true;
@@ -2121,6 +2121,98 @@ export default function Home() {
           {activePage === "chat" ? (
           <ChatPage>
           <main className="relative flex-1 min-w-0 flex flex-col overflow-hidden">
+            <div className="md:hidden relative flex-none px-3 py-2" style={{ borderBottom: "1px solid var(--oc-border-subtle)", background: "var(--oc-bg)" }}>
+              <div ref={sessionMenuRef} className="relative flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSessionMenuOpen((v) => !v)}
+                  className="flex items-center gap-2 rounded-md px-3 py-2 text-sm"
+                  style={{
+                    border: "1px solid var(--oc-border-subtle)",
+                    background: "var(--oc-bg-surface)",
+                    color: "var(--oc-text-primary)",
+                  }}
+                >
+                  <History size={15} />
+                  <span>历史</span>
+                  <span style={{ color: "var(--oc-text-tertiary)" }}>{webSessions.length}</span>
+                </button>
+                <button
+                  type="button"
+                  title="新建会话"
+                  onClick={startNewLingxiaConversation}
+                  disabled={activeLingxiaStreaming || !!sessionSwitchingId}
+                  className="flex items-center justify-center rounded-md"
+                  style={{
+                    width: 36,
+                    height: 36,
+                    border: "1px solid var(--oc-border-subtle)",
+                    background: "var(--oc-bg-surface)",
+                    color: "var(--oc-text-primary)",
+                    opacity: activeLingxiaStreaming || sessionSwitchingId ? 0.5 : 1,
+                  }}
+                >
+                  <Plus size={16} />
+                </button>
+                {sessionMenuOpen ? (
+                  <div
+                    className="absolute left-0 right-0 top-[44px] z-50 rounded-lg p-2 shadow-xl"
+                    style={{
+                      maxHeight: "55vh",
+                      overflowY: "auto",
+                      border: "1px solid var(--oc-border-subtle)",
+                      background: "var(--oc-bg-surface)",
+                    }}
+                  >
+                    {webSessions.length === 0 ? (
+                      <div className="px-3 py-4 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>暂无历史会话</div>
+                    ) : (
+                      <div className="space-y-1">
+                        {webSessions.map((session) => {
+                          const active = session.conversationId === webConversationId;
+                          const switching = sessionSwitchingId === session.conversationId;
+                          return (
+                            <div
+                              key={session.conversationId}
+                              className="flex items-center gap-2 rounded-md"
+                              style={{
+                                background: active ? "var(--oc-sidebar-item-active)" : "transparent",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => void switchLingxiaConversation(session.conversationId)}
+                                disabled={!!sessionSwitchingId}
+                                className="min-w-0 flex-1 px-3 py-2 text-left"
+                              >
+                                <div className="truncate text-sm" style={{ color: "var(--oc-text-primary)" }}>
+                                  {switching ? "正在切换..." : session.title || "未命名会话"}
+                                </div>
+                                {session.preview ? (
+                                  <div className="mt-0.5 truncate text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
+                                    {session.preview}
+                                  </div>
+                                ) : null}
+                              </button>
+                              <button
+                                type="button"
+                                title="删除会话"
+                                onClick={() => void deleteLingxiaConversation(session.conversationId)}
+                                disabled={!!sessionSwitchingId}
+                                className="mr-1 flex items-center justify-center rounded-md"
+                                style={{ width: 32, height: 32, color: "var(--oc-text-tertiary)" }}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </div>
 
             {/* 消息区 */}
             <div

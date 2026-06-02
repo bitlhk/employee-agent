@@ -23,6 +23,12 @@ import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer } from "./skills/skill
 type UsageBucket = { total: number; days: Record<string, number>; lastTs: string; userId: number };
 type ChatHistoryMessage = { id: string; role: "user" | "assistant"; text: string; timeLabel: string; timestamp: number };
 type HistoryRunMessages = { source: string; runAt: number; messages: ChatHistoryMessage[] };
+const iosLoadDebugEnabled = process.env.IOS_LOAD_DEBUG === "1";
+
+function logIosLoadDebug(message: string, fields: Record<string, unknown> = {}): void {
+  if (!iosLoadDebugEnabled) return;
+  console.log(`[IOS-LOAD] ${message}`, fields);
+}
 
 function normalizeHistoryText(value: unknown): string {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -381,26 +387,46 @@ export function registerMiscRoutes(app: express.Express) {
   });
 
   app.get("/api/claw/chat-history/sessions", async (req, res) => {
+    const startedAt = Date.now();
+    let adoptId = "";
     try {
-      const adoptId = String(req.query.adoptId || "").trim();
+      adoptId = String(req.query.adoptId || "").trim();
       const limit = Math.min(Math.max(Number(req.query.limit || 50) || 50, 1), 100);
       if (!adoptId) {
+        logIosLoadDebug("chat_history_sessions_bad_request", {
+          ms: Date.now() - startedAt,
+          ip: req.ip,
+        });
         res.status(400).json({ error: "adoptId required" });
         return;
       }
       const claw = await requireClawOwner(req, res, adoptId);
-      if (!claw) return;
+      if (!claw) {
+        logIosLoadDebug("chat_history_sessions_owner_denied", {
+          adoptId,
+          ms: Date.now() - startedAt,
+          statusCode: res.statusCode,
+        });
+        return;
+      }
 
       const dbAgentId = String((claw as any).agentId || "").trim();
       const trialAgentId = `trial_${adoptId}`;
       const runtimeAgentId = existsSync(openClawAgentDir(trialAgentId)) ? trialAgentId : dbAgentId;
       const sessionsPath = path.join(openClawAgentDir(runtimeAgentId), "sessions", "sessions.json");
       if (!existsSync(sessionsPath)) {
+        logIosLoadDebug("chat_history_sessions_missing_index", {
+          adoptId,
+          runtimeAgentId,
+          sessionsPath,
+          ms: Date.now() - startedAt,
+        });
         res.json({ sessions: [] });
         return;
       }
 
       const rawIndex = JSON.parse(readFileSync(sessionsPath, "utf8") || "{}") || {};
+      const rawIndexCount = Object.keys(rawIndex).length;
       const byConversation = new Map<string, any>();
       const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
       const resolvedSessionsDir = path.resolve(sessionsDir);
@@ -466,23 +492,51 @@ export function registerMiscRoutes(app: express.Express) {
         })
         .filter((entry) => entry.messageCount > 0);
 
+      logIosLoadDebug("chat_history_sessions_done", {
+        adoptId,
+        runtimeAgentId,
+        rawIndexCount,
+        conversationCount: byConversation.size,
+        returnedCount: sessions.length,
+        ms: Date.now() - startedAt,
+      });
       res.json({ sessions });
     } catch (error: any) {
       console.warn("[chat-history] list failed", error?.message || error);
+      logIosLoadDebug("chat_history_sessions_error", {
+        adoptId,
+        error: String(error?.message || error),
+        ms: Date.now() - startedAt,
+      });
       res.status(500).json({ error: "chat_history_list_failed" });
     }
   });
 
   app.get("/api/claw/chat-history/messages", async (req, res) => {
+    const startedAt = Date.now();
+    let adoptId = "";
+    let sessionKey = "";
     try {
-      const adoptId = String(req.query.adoptId || "").trim();
-      const sessionKey = String(req.query.sessionKey || "").trim();
+      adoptId = String(req.query.adoptId || "").trim();
+      sessionKey = String(req.query.sessionKey || "").trim();
       if (!adoptId || !sessionKey) {
+        logIosLoadDebug("chat_history_messages_bad_request", {
+          adoptId,
+          hasSessionKey: Boolean(sessionKey),
+          ms: Date.now() - startedAt,
+        });
         res.status(400).json({ error: "adoptId and sessionKey required" });
         return;
       }
       const claw = await requireClawOwner(req, res, adoptId);
-      if (!claw) return;
+      if (!claw) {
+        logIosLoadDebug("chat_history_messages_owner_denied", {
+          adoptId,
+          ms: Date.now() - startedAt,
+          statusCode: res.statusCode,
+        });
+        return;
+      }
 
       const dbAgentId = String((claw as any).agentId || "").trim();
       const trialAgentId = `trial_${adoptId}`;
@@ -520,9 +574,22 @@ export function registerMiscRoutes(app: express.Express) {
         currentSessionFile: resolvedFile,
         maxMessages: 200,
       });
+      logIosLoadDebug("chat_history_messages_done", {
+        adoptId,
+        runtimeAgentId,
+        sessionKey,
+        messageCount: messages.length,
+        ms: Date.now() - startedAt,
+      });
       res.json({ conversationId: parsed.conversationId, sessionKey, sessionId, messages });
     } catch (error: any) {
       console.warn("[chat-history] messages failed", error?.message || error);
+      logIosLoadDebug("chat_history_messages_error", {
+        adoptId,
+        sessionKey,
+        error: String(error?.message || error),
+        ms: Date.now() - startedAt,
+      });
       res.status(500).json({ error: "chat_history_messages_failed" });
     }
   });

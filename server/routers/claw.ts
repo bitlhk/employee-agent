@@ -66,6 +66,12 @@ const resolveClawRuntime = (adoptId: unknown): "openclaw" | "hermes" | "jiuwencl
 };
 
 type RuntimeModelOption = { id: string; name: string; desc?: string; isDefault?: boolean };
+const iosLoadDebugEnabled = process.env.IOS_LOAD_DEBUG === "1";
+
+function logIosLoadDebug(message: string, fields: Record<string, unknown> = {}): void {
+  if (!iosLoadDebugEnabled) return;
+  console.log(`[IOS-LOAD] ${message}`, fields);
+}
 
 const parseEnvValue = (raw: string, key: string): string => {
   const line = raw.split(/\r?\n/).find((entry) => entry.trim().startsWith(`${key}=`));
@@ -210,9 +216,26 @@ export const clawRouter = router({
     getByAdoptId: protectedProcedure
       .input(z.object({ adoptId: z.string().min(1).max(64) }))
       .query(async ({ input, ctx }) => {
+        const startedAt = Date.now();
         const claw = await assertClawOwnerOrThrow(ctx, input.adoptId);
-        if (!claw) return null;
+        if (!claw) {
+          logIosLoadDebug("trpc_claw_getByAdoptId", {
+            adoptId: input.adoptId,
+            userId: ctx.user?.id,
+            found: false,
+            ms: Date.now() - startedAt,
+          });
+          return null;
+        }
         const profile = await getClawProfileSettings(Number((claw as any).id || 0));
+        logIosLoadDebug("trpc_claw_getByAdoptId", {
+          adoptId: input.adoptId,
+          userId: ctx.user?.id,
+          clawId: (claw as any).id,
+          found: true,
+          status: (claw as any).status,
+          ms: Date.now() - startedAt,
+        });
         return {
           adoptId: claw.adoptId,
           status: claw.status,
@@ -231,7 +254,15 @@ export const clawRouter = router({
     getAvailableModels: publicProcedure
       .input(z.object({ adoptId: z.string().min(1).max(64).optional() }).optional())
       .query(({ input }) => {
-        return getAvailableModelsForRuntime(input?.adoptId);
+        const startedAt = Date.now();
+        const models = getAvailableModelsForRuntime(input?.adoptId);
+        logIosLoadDebug("trpc_claw_getAvailableModels", {
+          adoptId: input?.adoptId || "",
+          count: models.length,
+          defaultModel: models.find((model) => model.isDefault)?.id || "",
+          ms: Date.now() - startedAt,
+        });
+        return models;
       }),
 
     switchModel: protectedProcedure
@@ -1098,6 +1129,7 @@ export const clawRouter = router({
     getSettings: protectedProcedure
       .input(z.object({ adoptId: z.string().min(1).max(64) }))
       .query(async ({ input }) => {
+        const startedAt = Date.now();
         const claw = await getClawByAdoptId(input.adoptId);
         if (!claw) throw new Error("智能体实例不存在");
         const settings = await getClawProfileSettings(Number(claw.id));
@@ -1118,6 +1150,13 @@ export const clawRouter = router({
           contextTurns: 20,
           crossSessionContext: "yes",
         };
+        logIosLoadDebug("trpc_claw_getSettings", {
+          adoptId: input.adoptId,
+          clawId: (claw as any).id,
+          hasSettings: Boolean(settings),
+          modelOverride: modelOverride || "",
+          ms: Date.now() - startedAt,
+        });
         return { ...base, model: modelOverride };
       }),
 

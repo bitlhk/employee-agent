@@ -20,7 +20,7 @@ import {
 import { toast } from "sonner";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
-type OriginKey = "opensource" | "squad";
+type OriginKey = "opensource" | "finance" | "squad";
 
 const CATEGORY_MAP: Record<string, { label: string; Icon: ComponentType<{ size?: number; className?: string }> }> = {
   all: { label: "全部", Icon: Layers },
@@ -33,8 +33,9 @@ const CATEGORY_MAP: Record<string, { label: string; Icon: ComponentType<{ size?:
 };
 
 const ORIGIN_META: Record<OriginKey, { label: string; Icon: ComponentType<{ size?: number; className?: string }> }> = {
-  opensource: { label: "开源社区", Icon: Compass },
-  squad: { label: "金融专业", Icon: Sparkles },
+  opensource: { label: "开源技能", Icon: Compass },
+  finance: { label: "金融专业", Icon: BarChart3 },
+  squad: { label: "中队专区", Icon: Sparkles },
 };
 
 interface MarketSkill {
@@ -50,14 +51,38 @@ interface MarketSkill {
   license: string;
 }
 
+const MARKET_CACHE_KEY = "employee-agent:skill-market:v2";
+
 function categoryMeta(category: string) {
   return CATEGORY_MAP[category] || { label: category || "其他", Icon: BriefcaseBusiness };
+}
+
+function marketOriginOf(skill: { origin?: string; category?: string; author?: string; license?: string; skillId?: string }): OriginKey {
+  if (skill.origin !== "squad") return "opensource";
+  const license = String(skill.license || "").toLowerCase();
+  const author = String(skill.author || "").toLowerCase();
+  const skillId = String(skill.skillId || "").toLowerCase();
+  if (
+    skill.category === "finance" &&
+    (license.includes("wind") ||
+      license.includes("yingmi") ||
+      license.includes("qieman") ||
+      author.includes("wind") ||
+      author.includes("盈米") ||
+      skillId.includes("wealth"))
+  ) {
+    return "finance";
+  }
+  return "squad";
 }
 
 function financeTagOf(item: MarketSkill): string {
   const license = item.license.toLowerCase();
   const author = item.author.toLowerCase();
   const skillId = item.skillId.toLowerCase();
+  if (skillId === "bond-quote-parse") {
+    return "债券承销";
+  }
   if (license.includes("yingmi") || license.includes("qieman") || author.includes("盈米") || skillId.includes("wealth")) {
     return "个人财富";
   }
@@ -72,6 +97,27 @@ function skillTitleOf(item: MarketSkill): string {
   return item.title;
 }
 
+function normalizeMarketSkills(list: any[]): MarketSkill[] {
+  return list.map((s: any) => ({
+    id: Number(s.id),
+    skillId: String(s.skillId || s.skill_id || ""),
+    title: String(s.name || s.skillId || s.skill_id || "未命名技能"),
+    description: String(s.description || "暂无说明"),
+    author: String(s.author || "官方"),
+    installCount: Number(s.downloadCount || s.download_count || 0),
+    version: String(s.version || "1.0.0"),
+    category: String(s.category || "general"),
+    origin: marketOriginOf({
+      origin: s.origin,
+      category: s.category,
+      author: s.author,
+      license: s.license,
+      skillId: s.skillId || s.skill_id,
+    }),
+    license: String(s.license || "MIT"),
+  }));
+}
+
 export function MarketplacePage({ adoptId }: { adoptId?: string }) {
   const { confirm, dialog } = useConfirmDialog();
   const [items, setItems] = useState<MarketSkill[]>([]);
@@ -83,28 +129,46 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
   const [selectedSkill, setSelectedSkill] = useState<MarketSkill | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    fetch("/api/trpc/claw.marketList")
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 8000);
+    let hasCachedItems = false;
+
+    try {
+      const cached = window.localStorage.getItem(MARKET_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          hasCachedItems = true;
+          setItems(parsed);
+          setLoading(false);
+        }
+      }
+    } catch {}
+
+    if (!hasCachedItems) setLoading(true);
+    fetch("/api/trpc/claw.marketList", { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
+        if (cancelled) return;
         const list = d?.result?.data?.json || d?.result?.data || [];
-        setItems(
-          list.map((s: any) => ({
-            id: s.id,
-            skillId: s.skillId,
-            title: s.name || s.skillId,
-            description: s.description || "暂无说明",
-            author: s.author || "官方",
-            installCount: s.downloadCount || 0,
-            version: s.version || "1.0.0",
-            category: s.category || "general",
-            origin: s.origin === "squad" ? "squad" : "opensource",
-            license: s.license || "MIT",
-          })),
-        );
+        const normalized = normalizeMarketSkills(Array.isArray(list) ? list : []);
+        setItems(normalized);
+        try { window.localStorage.setItem(MARKET_CACHE_KEY, JSON.stringify(normalized)); } catch {}
       })
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) setItems((prev) => prev);
+      })
+      .finally(() => {
+        window.clearTimeout(timer);
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {
