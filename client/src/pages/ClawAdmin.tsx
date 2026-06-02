@@ -994,11 +994,11 @@ export default function ClawAdmin() {
                 <div className="space-y-2">
                   {(marketSkills || []).map((item: any) => {
                     const catLabels: any = { finance: "金融", dev: "开发", data: "数据", writing: "写作", general: "通用" };
-                    const originLabels: any = { opensource: "开源技能", squad: "中队专区" };
+                    const originLabels: any = { opensource: "开源技能", finance: "金融专业", squad: "中队专区" };
                     const itemAuthor = String(item.author || "").toLowerCase();
                     const itemLicense = String(item.license || "").toLowerCase();
                     const itemSkillId = String(item.skillId || "").toLowerCase();
-                    const originLabel = item.origin === "squad" && item.category === "finance" && (
+                    const originLabel = item.origin === "finance" || (item.origin === "opensource" && item.category === "finance") ? "金融专业" : item.origin === "squad" && item.category === "finance" && (
                       itemLicense.includes("wind") ||
                       itemLicense.includes("yingmi") ||
                       itemLicense.includes("qieman") ||

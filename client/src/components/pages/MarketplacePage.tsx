@@ -51,14 +51,18 @@ interface MarketSkill {
   license: string;
 }
 
-const MARKET_CACHE_KEY = "employee-agent:skill-market:v2";
+const MARKET_CACHE_KEY = "employee-agent:skill-market:v3";
 
 function categoryMeta(category: string) {
   return CATEGORY_MAP[category] || { label: category || "其他", Icon: BriefcaseBusiness };
 }
 
 function marketOriginOf(skill: { origin?: string; category?: string; author?: string; license?: string; skillId?: string }): OriginKey {
-  if (skill.origin !== "squad") return "opensource";
+  if (skill.origin === "finance") return "finance";
+  if (skill.origin !== "squad") {
+    if (skill.category === "finance") return "finance";
+    return "opensource";
+  }
   const license = String(skill.license || "").toLowerCase();
   const author = String(skill.author || "").toLowerCase();
   const skillId = String(skill.skillId || "").toLowerCase();

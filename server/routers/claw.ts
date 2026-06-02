@@ -702,7 +702,7 @@ export const clawRouter = router({
         author: z.string().optional(),
         version: z.string().optional(),
         category: z.enum(["finance", "dev", "data", "writing", "general"]).optional(),
-        origin: z.enum(["opensource", "squad"]).optional(),
+        origin: z.enum(["opensource", "finance", "squad"]).optional(),
         license: z.string().optional(),
         status: z.enum(["pending", "approved", "rejected", "offline"]).optional(),
       }))
