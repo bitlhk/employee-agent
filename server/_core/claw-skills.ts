@@ -162,6 +162,25 @@ const MCP_TOOL_CATALOG = [
     ],
     recommendedSkills: ["bond-quote-parse"],
   },
+  {
+    id: "wealth-assistant",
+    name: "客户经理财富助手",
+    category: "财富管理",
+    description: "面向客户经理的财富助手能力，支持获取自己负责的客户数据，并结合推荐产品数据辅助客户经营和产品推荐。",
+    children: [
+      {
+        id: "wealth-assistant",
+        name: "客户经理财富助手",
+        description: "聚合客户数据与推荐产品数据，可查询客户列表、客户详情、基金/理财产品、净值历史和市场新闻。",
+        serverIds: ["wealth_assistant"],
+        tools: [
+          { name: "客户数据查询", description: "查询客户列表、搜索客户，并获取客户完整画像和资产信息。" },
+          { name: "推荐产品数据", description: "查询基金、理财产品、净值历史和市场新闻，辅助客户经理做产品匹配。" },
+        ],
+      },
+    ],
+    recommendedSkills: [],
+  },
 ];
 
 function readOpenClawMcpServers(): Record<string, any> {
