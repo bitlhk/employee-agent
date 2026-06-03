@@ -86,6 +86,8 @@ const SKILL_TAB_KEYS = ["mine", "market", "mcp"] as const;
 type SkillTab = (typeof SKILL_TAB_KEYS)[number];
 type SourceFilter = "all" | SourceKind;
 type StateFilter = "all" | "ready" | "attention" | "disabled";
+const SKILL_TAB_CACHE_KEY = "employee-agent:skills:last-tab";
+const MCP_TOOLS_CACHE_PREFIX = "employee-agent:mcp-tools:";
 
 type McpServerStatus = "available" | "disabled" | "missing";
 type McpToolSummary = {
@@ -238,6 +240,19 @@ function SkillPill({ children, tone = "neutral" }: { children: ReactNode; tone?:
   return <span className={`skills-chip ${pillToneClass(tone)}`}>{children}</span>;
 }
 
+function cachedSkillTab(): SkillTab {
+  if (typeof window === "undefined") return "mine";
+  try {
+    const value = window.localStorage.getItem(SKILL_TAB_CACHE_KEY);
+    if (value === "mine" || value === "market" || value === "mcp") return value;
+  } catch {}
+  return "mine";
+}
+
+function mcpToolsCacheKey(adoptId?: string) {
+  return `${MCP_TOOLS_CACHE_PREFIX}${adoptId || "none"}`;
+}
+
 function mcpStatusTone(status: McpServerStatus): "ok" | "warn" | "neutral" {
   if (status === "available") return "ok";
   if (status === "disabled") return "warn";
@@ -253,35 +268,86 @@ function mcpStatusLabel(status: McpServerStatus) {
 function McpToolsPage({ adoptId }: { adoptId?: string }) {
   const [items, setItems] = useState<McpToolGroup[]>([]);
   const [loading, setLoading] = useState(false);
-  const [openChildId, setOpenChildId] = useState<string | null>(null);
+  const [openGroupIds, setOpenGroupIds] = useState<Set<string>>(new Set());
+  const [openChildIds, setOpenChildIds] = useState<Set<string>>(new Set());
 
-  const loadMcpTools = async () => {
+  const loadMcpTools = async (options?: { silent?: boolean }) => {
     if (!adoptId) return;
-    setLoading(true);
+    const silent = Boolean(options?.silent);
+    if (!silent) setLoading(true);
     try {
       const data = await fetchJson<McpToolsResponse>(`/api/claw/mcp-tools/status?adoptId=${encodeURIComponent(adoptId)}`);
-      setItems(Array.isArray(data.items) ? data.items : []);
+      const nextItems = Array.isArray(data.items) ? data.items : [];
+      setItems(nextItems);
+      try {
+        window.localStorage.setItem(mcpToolsCacheKey(adoptId), JSON.stringify(nextItems));
+      } catch {}
     } catch (e: any) {
-      toast.error(`MCP 工具加载失败${e?.message ? `: ${e.message}` : ""}`);
-      setItems([]);
+      if (!silent && items.length === 0) {
+        toast.error(`MCP 工具加载失败${e?.message ? `: ${e.message}` : ""}`);
+      }
+      if (!silent && items.length === 0) setItems([]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadMcpTools();
+    if (!adoptId) {
+      setItems([]);
+      return;
+    }
+    let hadCache = false;
+    try {
+      const cached = window.localStorage.getItem(mcpToolsCacheKey(adoptId));
+      const parsed = cached ? JSON.parse(cached) : null;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        hadCache = true;
+        setItems(parsed);
+        setLoading(false);
+      }
+    } catch {}
+    void loadMcpTools({ silent: hadCache });
   }, [adoptId]);
 
   useEffect(() => {
-    setOpenChildId((current) => {
-      if (current && items.some((item) => item.children?.some((child) => `${item.id}:${child.id}` === current))) return current;
+    setOpenGroupIds((current) => {
+      const validIds = new Set(items.map((item) => item.id));
+      const retained = new Set([...current].filter((id) => validIds.has(id)));
+      if (retained.size > 0) return retained;
+      const firstAvailable = items.find((item) => item.status === "available") || items[0];
+      return firstAvailable ? new Set([firstAvailable.id]) : new Set();
+    });
+    setOpenChildIds((current) => {
+      const validIds = new Set(
+        items.flatMap((item) => (item.children || []).map((child) => `${item.id}:${child.id}`)),
+      );
+      const retained = new Set([...current].filter((id) => validIds.has(id)));
+      if (retained.size > 0) return retained;
       const firstAvailable = items
         .flatMap((item) => (item.children || []).map((child) => ({ item, child })))
         .find(({ child }) => child.status === "available");
-      return firstAvailable ? `${firstAvailable.item.id}:${firstAvailable.child.id}` : null;
+      return firstAvailable ? new Set([`${firstAvailable.item.id}:${firstAvailable.child.id}`]) : new Set();
     });
   }, [items]);
+
+  const toggleGroup = (groupId: string) => {
+    setOpenGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
+
+  const toggleChild = (childKey: string) => {
+    setOpenChildIds((current) => {
+      const next = new Set(current);
+      if (next.has(childKey)) next.delete(childKey);
+      else next.add(childKey);
+      return next;
+    });
+  };
 
   const availableGroups = items.filter((item) => item.status === "available").length;
   const configuredServers = items.reduce((sum, item) => sum + item.configuredCount, 0);
@@ -313,67 +379,80 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
 
       {!loading && items.length > 0 && (
         <div className="skills-mcp-groups">
-          {items.map((item) => (
-            <section key={item.id} className="settings-card skills-mcp-group">
-              <div className="skills-mcp-group__head">
-                <div className="skills-mcp-group__title-wrap">
-                  <div className="skills-mcp-group__title">
-                    <Wrench size={16} />
-                    <span>{item.name}</span>
-                  </div>
-                  <div className="skills-mcp-group__desc">{item.description}</div>
-                </div>
-                <div className="skills-mcp-group__status">
-                  <span className="skills-chip skills-chip--neutral">{item.category}</span>
-                  <span className={`skills-chip ${pillToneClass(mcpStatusTone(item.status))}`}>
-                    {mcpStatusLabel(item.status)} {item.availableCount}/{item.serverCount}
+          {items.map((item) => {
+            const groupOpen = openGroupIds.has(item.id);
+            return (
+              <section key={item.id} className="settings-card skills-mcp-group" data-open={groupOpen ? "true" : "false"}>
+                <button
+                  className="skills-mcp-group__head"
+                  type="button"
+                  aria-expanded={groupOpen}
+                  onClick={() => toggleGroup(item.id)}
+                >
+                  <span className="skills-mcp-group__chevron">
+                    {groupOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </span>
-                </div>
-              </div>
+                  <span className="skills-mcp-group__title-wrap">
+                    <span className="skills-mcp-group__title">
+                      <Wrench size={16} />
+                      <span>{item.name}</span>
+                    </span>
+                    <span className="skills-mcp-group__desc">{item.description}</span>
+                  </span>
+                  <span className="skills-mcp-group__status">
+                    <span className="skills-chip skills-chip--neutral">{item.category}</span>
+                    <span className={`skills-chip ${pillToneClass(mcpStatusTone(item.status))}`}>
+                      {mcpStatusLabel(item.status)} {item.availableCount}/{item.serverCount}
+                    </span>
+                  </span>
+                </button>
 
-              <div className="skills-mcp-children">
-                {(item.children || []).map((child) => {
-                  const childKey = `${item.id}:${child.id}`;
-                  const open = openChildId === childKey;
-                  const childTone = mcpStatusTone(child.status);
-                  return (
-                    <div key={child.id} className="skills-mcp-child" data-open={open ? "true" : "false"}>
-                      <button className="skills-mcp-child__row" onClick={() => setOpenChildId(open ? null : childKey)}>
-                        <span className="skills-mcp-child__chevron">
-                          {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                        </span>
-                        <span className="skills-mcp-child__main">
-                          <span className="skills-mcp-child__name">{child.name}</span>
-                          <span className="skills-mcp-child__desc">{child.description}</span>
-                        </span>
-                        <span className="skills-mcp-child__meta">
-                          <span className="skills-mcp-child__server">{child.serverId}</span>
-                          <span className={`skills-chip ${pillToneClass(childTone)}`}>{mcpStatusLabel(child.status)}</span>
-                        </span>
-                      </button>
+                <div className="skills-mcp-group__body" aria-hidden={!groupOpen}>
+                  <div className="skills-mcp-children">
+                    {(item.children || []).map((child) => {
+                      const childKey = `${item.id}:${child.id}`;
+                      const open = openChildIds.has(childKey);
+                      const childTone = mcpStatusTone(child.status);
+                      return (
+                        <div key={child.id} className="skills-mcp-child" data-open={open ? "true" : "false"}>
+                          <button className="skills-mcp-child__row" type="button" onClick={() => toggleChild(childKey)}>
+                            <span className="skills-mcp-child__chevron">
+                              {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                            </span>
+                            <span className="skills-mcp-child__main">
+                              <span className="skills-mcp-child__name">{child.name}</span>
+                              <span className="skills-mcp-child__desc">{child.description}</span>
+                            </span>
+                            <span className="skills-mcp-child__meta">
+                              <span className="skills-mcp-child__server">{child.serverId}</span>
+                              <span className={`skills-chip ${pillToneClass(childTone)}`}>{mcpStatusLabel(child.status)}</span>
+                            </span>
+                          </button>
 
-                      <div className="skills-mcp-child__panel" aria-hidden={!open}>
-                        <div className="skills-mcp-tools">
-                          {(child.tools && child.tools.length > 0 ? child.tools : [{ name: "工具清单", description: "该 MCP 已接入，工具明细以管理员配置为准。" }]).map((tool) => (
-                            <div key={`${child.id}:${tool.name}`} className="skills-mcp-tool">
-                              <div className="skills-mcp-tool__name">{tool.name}</div>
-                              <div className="skills-mcp-tool__desc">{tool.description}</div>
+                          <div className="skills-mcp-child__panel" aria-hidden={!open}>
+                            <div className="skills-mcp-tools">
+                              {(child.tools && child.tools.length > 0 ? child.tools : [{ name: "工具清单", description: "该 MCP 已接入，工具明细以管理员配置为准。" }]).map((tool) => (
+                                <div key={`${child.id}:${tool.name}`} className="skills-mcp-tool">
+                                  <div className="skills-mcp-tool__name">{tool.name}</div>
+                                  <div className="skills-mcp-tool__desc">{tool.description}</div>
+                                </div>
+                              ))}
                             </div>
-                          ))}
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                      );
+                    })}
+                  </div>
 
-              {item.recommendedSkills && item.recommendedSkills.length > 0 && (
-                <div className="skills-mcp-related">
-                  关联技能：{item.recommendedSkills.join("、")}
+                  {item.recommendedSkills && item.recommendedSkills.length > 0 && (
+                    <div className="skills-mcp-related">
+                      关联技能：{item.recommendedSkills.join("、")}
+                    </div>
+                  )}
                 </div>
-              )}
-            </section>
-          ))}
+              </section>
+            );
+          })}
         </div>
       )}
     </div>
@@ -602,7 +681,7 @@ export function SkillsPage({ adoptId }: {
   adoptId?: string;
 }) {
   const { confirm, dialog } = useConfirmDialog();
-  const [skillTab, setSkillTab] = useState<SkillTab>("mine");
+  const [skillTab, setSkillTab] = useState<SkillTab>(() => cachedSkillTab());
   const [items, setItems] = useState<RegistrySkill[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -629,8 +708,11 @@ export function SkillsPage({ adoptId }: {
   };
 
   useEffect(() => {
-    void load();
-  }, [adoptId]);
+    try {
+      window.localStorage.setItem(SKILL_TAB_CACHE_KEY, skillTab);
+    } catch {}
+    if (skillTab === "mine") void load();
+  }, [adoptId, skillTab]);
 
   useEffect(() => {
     const t = setTimeout(() => setQDebounced(q.trim().toLowerCase()), 180);

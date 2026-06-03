@@ -953,8 +953,8 @@ export default function Home() {
     const uploads: UploadedLingxiaAttachment[] = [];
 
     for (const file of files) {
-      if (file.size > 10 * 1024 * 1024) {
-        throw new Error(`${file.name} 超过 10MB 上传限制`);
+      if (file.size > 50 * 1024 * 1024) {
+        throw new Error(`${file.name} 超过 50MB 上传限制`);
       }
       const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());
       const response = await fetch(`${apiBase}/api/claw/files/upload`, {

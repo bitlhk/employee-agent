@@ -181,7 +181,7 @@ export function sanitizeObject<T extends Record<string, any>>(obj: T): Partial<T
 /**
  * 请求大小限制中间件
  */
-export function requestSizeLimiter(maxSize: number = 10 * 1024 * 1024) {
+export function requestSizeLimiter(maxSize: number = 50 * 1024 * 1024) {
   return (req: Request, res: Response, next: NextFunction) => {
     const contentLength = req.headers["content-length"];
     if (contentLength && parseInt(contentLength) > maxSize) {

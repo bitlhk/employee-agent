@@ -14,14 +14,14 @@ const OPENCLAW_FILES_CAPABILITIES: FilesProviderCapabilities = {
   supportsDownload: true,
   supportsUpload: true,
   supportsDelete: true,
-  maxUploadBytes: 10 * 1024 * 1024,
+  maxUploadBytes: 50 * 1024 * 1024,
 };
 
 const MAX_LIST_DEPTH = 4;
 const MAX_FILES_PER_LIST = 500;
 const MAX_READ_BYTES = 10 * 1024 * 1024;
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const TASK_WORKBENCH_AUDIO_UPLOAD_BYTES = 32 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const TASK_WORKBENCH_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_FILES_PER_WORKSPACE = 2000;
 const PROTECTED_ROOT_FILES = new Set([
   "AGENT.md",
@@ -217,7 +217,7 @@ export function registerFilesRoutes(app: express.Express) {
   });
 
   // POST upload — body { adoptId, path?, filename, contentBase64 }
-  // 4 道安全限制: type 白名单 / 10MB / 200 文件 quota / filename sanitize
+  // 4 道安全限制: type 白名单 / 50MB / 200 文件 quota / filename sanitize
   app.post("/api/claw/files/upload", async (req, res) => {
     try {
       const body = (req.body || {}) as any;

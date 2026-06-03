@@ -3,7 +3,7 @@
  *
  * - 上传：POST /api/coop/upload  body { sessionId, requestId, filename, contentBase64 }
  *   * 权限：登录 user 必须是 session 成员（targetUserId）或 creator_user_id
- *   * 安全：sanitize 文件名 + 大小限制 20MB + 路径不可逃逸
+ *   * 安全：sanitize 文件名 + 大小限制 50MB + 路径不可逃逸
  *   * 存储：/root/linggan-platform/data/coop-uploads/{sessionId}/{requestId}/{ts}-{safeName}
  *   * 返回：{ ok: true, name, url, size }
  *
@@ -19,7 +19,7 @@ import { resolveRequesterUserId } from "./helpers";
 
 const APP_ROOT = process.env.APP_ROOT || process.cwd();
 const COOP_UPLOAD_DIR = `${APP_ROOT}/data/coop-uploads`;
-const MAX_BYTES = 20 * 1024 * 1024; // 20MB
+const MAX_BYTES = 50 * 1024 * 1024; // 50MB
 
 // 文件名安全化：只保留字母/数字/中文/常见标点，截断 200 字符
 function safeFilename(s: string): string {

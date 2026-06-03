@@ -929,7 +929,7 @@ export function registerMiscRoutes(app: express.Express) {
         try {
           const buf = Buffer.concat(chunks);
           if (buf.length === 0) { res.status(400).json({ error: "No data" }); return; }
-          if (buf.length > MAX_SKILL_PACKAGE_BYTES) { res.status(413).json({ error: "File too large (max 30MB)" }); return; }
+          if (buf.length > MAX_SKILL_PACKAGE_BYTES) { res.status(413).json({ error: "File too large (max 50MB)" }); return; }
 
           const filename = decodeURIComponent(String(req.header("x-skill-filename") || "uploaded.zip")).trim() || "uploaded.zip";
           const parsed = await parseSkillPackageBuffer(buf, filename);

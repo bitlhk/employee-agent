@@ -33,7 +33,7 @@ type ExcelFillRecord = {
 
 type ExcelStatus = "idle" | "uploading" | "planning" | "applying" | "error";
 
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const WORKBOOK_ACCEPT = ".xlsx,.xls";
 const CONTEXT_ACCEPT = ".pdf,.docx,.xlsx,.xls,.pptx,.txt,.md,.csv,.json,image/*";
 const QUICK_REQUIREMENTS = [
@@ -136,7 +136,7 @@ export function ExcelFillPage({ adoptId, onBack }: ExcelFillPageProps) {
 
   const uploadToWorkspace = useCallback(async (file: File): Promise<UploadedOfficeFile> => {
     if (file.size <= 0) throw new Error("文件为空");
-    if (file.size > MAX_UPLOAD_BYTES) throw new Error("文件超过 10MB，请先压缩或拆分");
+    if (file.size > MAX_UPLOAD_BYTES) throw new Error("文件超过 50MB，请先压缩或拆分");
     const contentBase64 = await fileToBase64(file);
     const resp = await fetch("/api/claw/files/upload", {
       method: "POST",

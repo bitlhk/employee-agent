@@ -52,6 +52,11 @@ interface MarketSkill {
 }
 
 const MARKET_CACHE_KEY = "employee-agent:skill-market:v3";
+const MARKET_INSTALLED_CACHE_PREFIX = "employee-agent:skill-market-installed:";
+
+function marketInstalledCacheKey(adoptId?: string) {
+  return `${MARKET_INSTALLED_CACHE_PREFIX}${adoptId || "none"}`;
+}
 
 function categoryMeta(category: string) {
   return CATEGORY_MAP[category] || { label: category || "其他", Icon: BriefcaseBusiness };
@@ -180,7 +185,16 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
       setInstalledMarket({});
       return;
     }
-    fetch(`/api/claw/skills/registry?adoptId=${encodeURIComponent(adoptId)}`)
+    const cacheKey = marketInstalledCacheKey(adoptId);
+    try {
+      const cached = window.localStorage.getItem(cacheKey);
+      const parsed = cached ? JSON.parse(cached) : null;
+      if (parsed && typeof parsed === "object") setInstalledMarket(parsed);
+    } catch {}
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 5000);
+    fetch(`/api/claw/skills/registry?adoptId=${encodeURIComponent(adoptId)}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
         const rows = Array.isArray(d?.items) ? d.items : [];
@@ -197,8 +211,13 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
           if (installedSkillId) next[`skill:${installedSkillId}`] = { skillId: installedSkillId, version: installedVersion };
         }
         setInstalledMarket(next);
+        try { window.localStorage.setItem(cacheKey, JSON.stringify(next)); } catch {}
       })
-      .catch(() => setInstalledMarket({}));
+      .catch(() => setInstalledMarket((prev) => prev));
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [adoptId]);
 
   const installState = (item: MarketSkill) => {
@@ -221,11 +240,15 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
       if (d?.error) throw new Error(d.error?.message || "安装失败");
       toast.success(`已安装：${item.title}`);
       const installedSkillId = String(d?.result?.data?.json?.skillId || d?.result?.data?.skillId || item.skillId);
-      setInstalledMarket((prev) => ({
-        ...prev,
-        [String(item.id)]: { skillId: installedSkillId, version: item.version },
-        [`skill:${installedSkillId}`]: { skillId: installedSkillId, version: item.version },
-      }));
+      setInstalledMarket((prev) => {
+        const next = {
+          ...prev,
+          [String(item.id)]: { skillId: installedSkillId, version: item.version },
+          [`skill:${installedSkillId}`]: { skillId: installedSkillId, version: item.version },
+        };
+        try { window.localStorage.setItem(marketInstalledCacheKey(adoptId), JSON.stringify(next)); } catch {}
+        return next;
+      });
       setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, installCount: (x.installCount || 0) + 1 } : x)));
     } catch (e: any) {
       toast.error(`安装失败${e?.message ? `：${e.message}` : ""}`);
@@ -259,6 +282,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
         const next = { ...prev };
         delete next[String(item.id)];
         delete next[`skill:${item.skillId}`];
+        try { window.localStorage.setItem(marketInstalledCacheKey(adoptId), JSON.stringify(next)); } catch {}
         return next;
       });
     } catch (e: any) {

@@ -20,12 +20,14 @@ export async function getDb() {
         uri: databaseUrl,
         waitForConnections: true,
         connectionLimit: 10,
+        maxIdle: 2,
+        idleTimeout: 45_000,
         queueLimit: 0,
         // 连接超时设置
-        connectTimeout: 60000, // 60秒连接超时
+        connectTimeout: 10_000,
         // 启用 TCP keepalive 以保持连接活跃
         enableKeepAlive: true,
-        keepAliveInitialDelay: 0,
+        keepAliveInitialDelay: 10_000,
       });
 
       connection.on('connection', (conn) => {
@@ -49,14 +51,15 @@ export async function getDb() {
       await connection.query("SELECT 1");
       console.log("[Database] Connected successfully");
 
-      // 定期检查连接健康（每5分钟）
+      // 定期检查连接健康。连接池空闲连接会在 idleTimeout 后主动释放；
+      // 这里主要用于尽早发现数据库不可达，不依赖它保持所有池连接存活。
       setInterval(async () => {
         try {
           await connection.query("SELECT 1");
         } catch (error) {
           console.error("[Database] Health check failed:", error);
         }
-      }, 5 * 60 * 1000);
+      }, 60 * 1000);
     } catch (error) {
       console.error("[Database] Failed to connect:", error);
       _db = null;

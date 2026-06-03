@@ -223,8 +223,8 @@ async function startServer() {
   app.use(trackResponseErrors);
   app.use(block4xxAbuse);
   
-  // 5. 请求大小限制
-  app.use(requestSizeLimiter(50 * 1024 * 1024)); // 50MB
+  // 5. 请求大小限制；50MB 文件经 base64 JSON 上传后约 66.7MB。
+  app.use(requestSizeLimiter(80 * 1024 * 1024)); // 80MB request envelope
   
   // 6. 通用速率限制
   app.use(generalLimiter);
@@ -256,9 +256,9 @@ async function startServer() {
     next();
   });
 
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // Configure body parser with larger size limit for 50MB base64 file uploads.
+  app.use(express.json({ limit: "80mb" }));
+  app.use(express.urlencoded({ limit: "80mb", extended: true }));
   
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);

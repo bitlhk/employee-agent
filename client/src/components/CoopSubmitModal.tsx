@@ -41,7 +41,7 @@ interface CoopSubmitModalProps {
   parsedFiles: SubmitAttachment[];        // __files: 解析出的所有文件（chat 来源）
 }
 
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB，跟 server 一致
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50MB，跟 server 一致
 
 function formatSize(bytes?: number): string {
   if (!bytes || bytes <= 0) return "";

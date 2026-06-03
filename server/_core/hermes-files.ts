@@ -17,6 +17,7 @@ import { hermesProfileWorkspaceDir } from "./helpers";
 const MAX_LIST_DEPTH = 4;        // Anti-DOS: limit recursion
 const MAX_FILES_PER_LIST = 500;  // Anti-DOS: cap result size
 const MAX_READ_BYTES = 10 * 1024 * 1024; // 10MB max single-file read
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const PROTECTED_HERMES_FILES = new Set([
   "SOUL.md",
   "memories/MEMORY.md",
@@ -81,9 +82,9 @@ const HERMES_FILES_CAPABILITIES: FilesProviderCapabilities = {
   supportsList: true,
   supportsRead: true,
   supportsDownload: true,
-  supportsUpload: true,    // 2026-04-20 enabled with safety: type whitelist + 10MB + filename sanitize
+  supportsUpload: true,    // 2026-04-20 enabled with safety: type whitelist + 50MB + filename sanitize
   supportsDelete: true,
-  maxUploadBytes: 10 * 1024 * 1024,
+  maxUploadBytes: MAX_UPLOAD_BYTES,
 };
 
 // ────────────────────────────────────────────────────────────────────
@@ -170,7 +171,7 @@ export const hermesFiles = {
     if (!workspace) return { ok: false, reason: "invalid adoptId" };
     const abs = resolveSafePath(workspace, relPath);
     if (!abs) return { ok: false, reason: "path_not_allowed" };
-    if (content.length > 10 * 1024 * 1024) return { ok: false, reason: "file_too_large" };
+    if (content.length > MAX_UPLOAD_BYTES) return { ok: false, reason: "file_too_large" };
     try {
       mkdirSync(path.dirname(abs), { recursive: true });
       writeFileSync(abs, content);

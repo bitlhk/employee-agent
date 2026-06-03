@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from "fs";
 import path from "path";
 import { sanitizeRelPath } from "../helpers";
 
-export const MAX_SKILL_PACKAGE_BYTES = 30 * 1024 * 1024;
+export const MAX_SKILL_PACKAGE_BYTES = 50 * 1024 * 1024;
 
 export type SkillSourceFile = {
   path: string;
@@ -93,7 +93,7 @@ export function parseSkillSourceFiles(files: SkillSourceFile[], fallbackName = "
     totalBytes += buf.length;
     normalized.push({ path: rel, content: file.content });
   }
-  if (totalBytes > MAX_SKILL_PACKAGE_BYTES) errors.push("技能包超过 30MB 限制");
+  if (totalBytes > MAX_SKILL_PACKAGE_BYTES) errors.push("技能包超过 50MB 限制");
 
   const skillMd = normalized.find((file) => file.path.toLowerCase().endsWith("skill.md"));
   if (!skillMd) errors.push("技能缺少 SKILL.md");

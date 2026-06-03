@@ -364,7 +364,7 @@ async function readSkillPackagePayload(req: express.Request): Promise<{
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as any);
     total += buf.length;
     if (total > MAX_SKILL_PACKAGE_BYTES) {
-      const err = new Error("file too large (max 30MB)") as Error & { statusCode?: number };
+      const err = new Error("file too large (max 50MB)") as Error & { statusCode?: number };
       err.statusCode = 413;
       throw err;
     }
@@ -559,7 +559,7 @@ export function registerSkillRoutes(app: express.Express) {
         return;
       }
       if (fileBuf.length > MAX_SKILL_PACKAGE_BYTES) {
-        res.status(400).json({ error: "file too large (max 30MB)" });
+        res.status(400).json({ error: "file too large (max 50MB)" });
         return;
       }
       const parsed = await parseSkillPackageBuffer(fileBuf, filename);
@@ -600,7 +600,7 @@ export function registerSkillRoutes(app: express.Express) {
         return;
       }
       if (fileBuf.length > MAX_SKILL_PACKAGE_BYTES) {
-        res.status(400).json({ error: "file too large (max 30MB)" });
+        res.status(400).json({ error: "file too large (max 50MB)" });
         return;
       }
       const parsed = await parseSkillPackageBuffer(fileBuf, filename);

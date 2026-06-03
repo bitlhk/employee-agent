@@ -713,8 +713,8 @@ function formatSize(bytes?: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-const DEFAULT_UPLOAD_BYTES = 10 * 1024 * 1024;
-const MEETING_AUDIO_UPLOAD_BYTES = 32 * 1024 * 1024;
+const DEFAULT_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MEETING_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024;
 const DEFAULT_ATTACHMENT_ACCEPT =
   ".md,.txt,.csv,.json,.pdf,.docx,.xls,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.html,.zip";
 const MEETING_NOTES_ATTACHMENT_ACCEPT =

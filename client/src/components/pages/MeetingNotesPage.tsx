@@ -27,7 +27,7 @@ const QUICK_ACTIONS = [
   "整理风险清单",
 ];
 const ACCEPTED_AUDIO_TYPES = ".mp3,.wav,.m4a,.aac,.webm,.ogg,audio/*";
-const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 type MeetingFollowup = {
   id: string;
@@ -192,7 +192,7 @@ export function MeetingNotesPage({ adoptId, onBack }: MeetingNotesPageProps) {
     if (status === "uploading" || status === "processing" || status === "recording") return;
     if (!file) return;
     if (file.size > MAX_UPLOAD_BYTES) {
-      setError("录音文件过大，请上传 200MB 以内的音频文件。");
+      setError("录音文件过大，请上传 50MB 以内的音频文件。");
       setStatus("error");
       return;
     }

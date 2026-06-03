@@ -723,7 +723,7 @@ export function registerVoiceRoutes(app: express.Express) {
           res.status(400).json({ error: "No audio data" });
           return;
         }
-        if (audioBuffer.length > 10 * 1024 * 1024) {
+        if (audioBuffer.length > 50 * 1024 * 1024) {
           res.status(413).json({ error: "Audio too large" });
           return;
         }
@@ -1056,7 +1056,7 @@ export function registerVoiceRoutes(app: express.Express) {
 
       const audioBuffer = await readRawBody(
         req,
-        Number(process.env.MEETING_NOTES_MAX_AUDIO_BYTES || 200 * 1024 * 1024)
+        Number(process.env.MEETING_NOTES_MAX_AUDIO_BYTES || 50 * 1024 * 1024)
       );
       if (audioBuffer.length < 100) {
         res.status(400).json({ error: "audio required" });
