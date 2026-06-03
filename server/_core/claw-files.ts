@@ -3,10 +3,12 @@
  * Per CODING_GUIDELINES rules 1-6 (entry-point dispatch / runtime-specific in *-files.ts / IO layer only).
  */
 import express from "express";
+import { createHash } from "crypto";
 import path from "path";
 import { existsSync, statSync, readdirSync, readFileSync, createReadStream, mkdirSync, writeFileSync, unlinkSync, rmSync } from "fs";
 import { isJiuwenClawAdoptId, requireClawOwner, resolveRuntimeWorkspace } from "./helpers";
 import { hermesFiles, type LinggFileNode, type FilesProviderCapabilities, type FilesProviderHandle, adoptIdToWorkspace } from "./hermes-files";
+import { auditActor, auditErrorMetadata, auditRequest, recordAuditBestEffort, recordAuditRequired } from "./audit-events";
 
 const OPENCLAW_FILES_CAPABILITIES: FilesProviderCapabilities = {
   supportsList: true,
@@ -89,6 +91,90 @@ function toFilesHandle(claw: any): FilesProviderHandle {
 
 function runtimeWorkspace(claw: any, adoptId: string): string {
   return resolveRuntimeWorkspace(claw, adoptId);
+}
+
+function fileSha256(buf: Buffer) {
+  return createHash("sha256").update(buf).digest("hex");
+}
+
+function auditFileMetadata(args: {
+  path: string;
+  filename?: string;
+  ext?: string;
+  size?: number | null;
+  sha256?: string | null;
+  operation: string;
+  uploadLimitBytes?: number;
+  deleted?: string;
+}) {
+  return {
+    path: args.path,
+    filename: args.filename || path.posix.basename(args.path),
+    ext: args.ext || getExt(args.filename || args.path),
+    sizeBytes: args.size ?? null,
+    sha256: args.sha256 || null,
+    operation: args.operation,
+    uploadLimitBytes: args.uploadLimitBytes,
+    deleted: args.deleted,
+  };
+}
+
+async function recordFileAudit(args: {
+  req: express.Request;
+  claw: any;
+  adoptId: string;
+  action: "file.uploaded" | "file.read" | "file.downloaded" | "file.deleted" | "file.delete.denied" | "file.upload.denied";
+  result?: "success" | "failed" | "denied" | "warning";
+  severity?: "info" | "low" | "medium" | "high" | "critical";
+  path: string;
+  filename?: string;
+  ext?: string;
+  size?: number | null;
+  sha256?: string | null;
+  runtime?: string;
+  errorCode?: string | null;
+  policyCode?: string | null;
+  metadata?: Record<string, unknown>;
+  required?: boolean;
+}) {
+  const runtime = args.runtime || runtimeName(args.adoptId);
+  const input = {
+    action: args.action,
+    result: args.result || "success",
+    severity: args.severity || "info",
+    ...auditActor({
+      id: args.claw?.userId,
+      name: args.claw?.userName,
+      email: args.claw?.userEmail,
+      role: args.claw?.permissionProfile,
+      groupId: args.claw?.userGroupId,
+    }),
+    ...auditRequest(args.req),
+    targetType: "file",
+    targetId: args.path,
+    targetName: args.filename || path.posix.basename(args.path),
+    resourceType: "workspace_file",
+    resourceId: args.sha256 || args.path,
+    resourceName: args.path,
+    agentInstanceId: args.adoptId,
+    runtimeType: runtime,
+    runtimeAgentId: args.claw?.agentId ? String(args.claw.agentId) : null,
+    errorCode: args.errorCode || null,
+    policyCode: args.policyCode || null,
+    metadata: {
+      ...auditFileMetadata({
+        path: args.path,
+        filename: args.filename,
+        ext: args.ext,
+        size: args.size,
+        sha256: args.sha256,
+        operation: args.action,
+      }),
+      ...args.metadata,
+    },
+  };
+  if (args.required) await recordAuditRequired(input);
+  else await recordAuditBestEffort(input);
 }
 
 function safeJoin(workspace: string, relPath: string): string | null {
@@ -177,6 +263,16 @@ export function registerFilesRoutes(app: express.Express) {
       if (isHermesAdopt(adoptId)) {
         const r = hermesFiles.readFile(toFilesHandle(claw), relPath);
         if (!r) return res.status(404).json({ error: "file not found or too large" });
+        await recordFileAudit({
+          req,
+          claw,
+          adoptId,
+          action: "file.read",
+          path: relPath,
+          size: Number(r.size || 0),
+          runtime: "hermes",
+          metadata: { readLimitBytes: MAX_READ_BYTES },
+        });
         return res.json({ runtime: "hermes", path: relPath, ...r });
       }
       const workspace = runtimeWorkspace(claw, adoptId);
@@ -185,6 +281,16 @@ export function registerFilesRoutes(app: express.Express) {
       const st = statSync(abs);
       if (!st.isFile() || st.size > MAX_READ_BYTES) return res.status(413).json({ error: "not a file or too large" });
       const content = readFileSync(abs, "utf8");
+      await recordFileAudit({
+        req,
+        claw,
+        adoptId,
+        action: "file.read",
+        path: relPath,
+        size: Number(st.size),
+        runtime: runtimeName(adoptId),
+        metadata: { readLimitBytes: MAX_READ_BYTES },
+      });
       return res.json({ runtime: runtimeName(adoptId), path: relPath, content, size: Number(st.size), modifiedAt: st.mtime.toISOString() });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || "read failed") });
@@ -208,6 +314,18 @@ export function registerFilesRoutes(app: express.Express) {
       }
       if (!absPath) return res.status(404).json({ error: "file not found" });
       const filename = path.basename(absPath);
+      const st = statSync(absPath);
+      await recordFileAudit({
+        req,
+        claw,
+        adoptId,
+        action: "file.downloaded",
+        path: relPath,
+        filename,
+        size: Number(st.size),
+        runtime: isHermesAdopt(adoptId) ? "hermes" : runtimeName(adoptId),
+        required: true,
+      });
       res.setHeader("Content-Disposition", `attachment; filename=\"${encodeURIComponent(filename)}\"`);
       res.setHeader("Content-Type", "application/octet-stream");
       createReadStream(absPath).pipe(res);
@@ -229,13 +347,55 @@ export function registerFilesRoutes(app: express.Express) {
       const filename = safeFilename(filenameRaw);
       if (!filename) return res.status(400).json({ error: "invalid filename" });
       const ext = getExt(filename);
-      if (!isAllowedUploadExtension(ext, subPath)) return res.status(400).json({ error: `file type .${ext} not allowed` });
+      if (!isAllowedUploadExtension(ext, subPath)) {
+        const claw = await requireClawOwner(req, res, adoptId);
+        if (claw) {
+          await recordFileAudit({
+            req,
+            claw,
+            adoptId,
+            action: "file.upload.denied",
+            result: "denied",
+            severity: "medium",
+            path: subPath ? `${subPath}/${filename}` : filename,
+            filename,
+            ext,
+            runtime: runtimeName(adoptId),
+            errorCode: "FILE_TYPE_NOT_ALLOWED",
+            policyCode: "upload_extension_whitelist",
+            metadata: { allowedExtensions: Array.from(ALLOWED_EXTENSIONS) },
+          });
+        }
+        return res.status(400).json({ error: `file type .${ext} not allowed` });
+      }
       let buf: Buffer;
       try { buf = Buffer.from(contentBase64, "base64"); } catch { return res.status(400).json({ error: "invalid base64" }); }
       const maxUploadBytes = uploadLimitFor(ext, subPath);
-      if (buf.length > maxUploadBytes) return res.status(413).json({ error: `file too large: ${buf.length}` });
+      if (buf.length > maxUploadBytes) {
+        const claw = await requireClawOwner(req, res, adoptId);
+        if (claw) {
+          await recordFileAudit({
+            req,
+            claw,
+            adoptId,
+            action: "file.upload.denied",
+            result: "denied",
+            severity: "medium",
+            path: subPath ? `${subPath}/${filename}` : filename,
+            filename,
+            ext,
+            size: buf.length,
+            runtime: runtimeName(adoptId),
+            errorCode: "FILE_TOO_LARGE",
+            policyCode: "upload_size_limit",
+            metadata: { uploadLimitBytes: maxUploadBytes },
+          });
+        }
+        return res.status(413).json({ error: `file too large: ${buf.length}` });
+      }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
+      const sha256 = fileSha256(buf);
       let existingFiles: LinggFileNode[];
       if (isHermesAdopt(adoptId)) {
         existingFiles = hermesFiles.listFiles(toFilesHandle(claw));
@@ -243,19 +403,82 @@ export function registerFilesRoutes(app: express.Express) {
         existingFiles = openclawListFiles(runtimeWorkspace(claw, adoptId));
       }
       const fileCount = existingFiles.filter(f => f.type === "file").length;
-      if (fileCount >= MAX_FILES_PER_WORKSPACE) return res.status(429).json({ error: `workspace file count >= ${MAX_FILES_PER_WORKSPACE}` });
+      if (fileCount >= MAX_FILES_PER_WORKSPACE) {
+        await recordFileAudit({
+          req,
+          claw,
+          adoptId,
+          action: "file.upload.denied",
+          result: "denied",
+          severity: "medium",
+          path: subPath ? `${subPath}/${filename}` : filename,
+          filename,
+          ext,
+          size: buf.length,
+          sha256,
+          runtime: isHermesAdopt(adoptId) ? "hermes" : runtimeName(adoptId),
+          errorCode: "WORKSPACE_FILE_QUOTA_EXCEEDED",
+          policyCode: "workspace_file_quota",
+          metadata: { fileCount, maxFilesPerWorkspace: MAX_FILES_PER_WORKSPACE },
+        });
+        return res.status(429).json({ error: `workspace file count >= ${MAX_FILES_PER_WORKSPACE}` });
+      }
       const targetRel = subPath ? `${subPath}/${filename}` : filename;
       if (isHermesAdopt(adoptId)) {
         const r = hermesFiles.writeFile(toFilesHandle(claw), targetRel, buf);
         if (!r.ok) return res.status(400).json({ error: r.reason });
+        await recordFileAudit({
+          req,
+          claw,
+          adoptId,
+          action: "file.uploaded",
+          path: targetRel,
+          filename,
+          ext,
+          size: r.size,
+          sha256,
+          runtime: "hermes",
+          metadata: { uploadLimitBytes: maxUploadBytes, sourcePath: subPath || null },
+        });
         return res.json({ runtime: "hermes", ok: true, path: targetRel, size: r.size });
       }
       const ws = runtimeWorkspace(claw, adoptId);
       const abs = safeJoin(ws, targetRel);
-      if (!abs) return res.status(400).json({ error: "path_not_allowed" });
+      if (!abs) {
+        await recordFileAudit({
+          req,
+          claw,
+          adoptId,
+          action: "file.upload.denied",
+          result: "denied",
+          severity: "high",
+          path: targetRel,
+          filename,
+          ext,
+          size: buf.length,
+          sha256,
+          runtime: runtimeName(adoptId),
+          errorCode: "PATH_NOT_ALLOWED",
+          policyCode: "workspace_path_boundary",
+        });
+        return res.status(400).json({ error: "path_not_allowed" });
+      }
       try {
         mkdirSync(path.dirname(abs), { recursive: true });
         writeFileSync(abs, buf);
+        await recordFileAudit({
+          req,
+          claw,
+          adoptId,
+          action: "file.uploaded",
+          path: targetRel,
+          filename,
+          ext,
+          size: buf.length,
+          sha256,
+          runtime: runtimeName(adoptId),
+          metadata: { uploadLimitBytes: maxUploadBytes, sourcePath: subPath || null },
+        });
         return res.json({ runtime: runtimeName(adoptId), ok: true, path: targetRel, size: buf.length });
       } catch (e: any) {
         return res.status(500).json({ error: `write failed: ${e?.message || e}` });
@@ -278,6 +501,21 @@ export function registerFilesRoutes(app: express.Express) {
         return res.status(400).json({ error: "refuse to delete workspace root" });
       }
       if (isProtectedRootFile(normalized)) {
+        const claw = await requireClawOwner(req, res, adoptId);
+        if (claw) {
+          await recordFileAudit({
+            req,
+            claw,
+            adoptId,
+            action: "file.delete.denied",
+            result: "denied",
+            severity: "high",
+            path: normalized,
+            runtime: runtimeName(adoptId),
+            errorCode: "PROTECTED_CORE_FILE",
+            policyCode: "protected_root_file",
+          });
+        }
         return res.status(403).json({ error: "protected_core_file", message: "system files can be edited but not deleted" });
       }
       const claw = await requireClawOwner(req, res, adoptId);
@@ -285,6 +523,14 @@ export function registerFilesRoutes(app: express.Express) {
       if (isHermesAdopt(adoptId)) {
         const r = hermesFiles.deleteFile(toFilesHandle(claw), relPath);
         if (!r.ok) return res.status(400).json({ error: r.reason });
+        await recordFileAudit({
+          req,
+          claw,
+          adoptId,
+          action: "file.deleted",
+          path: relPath,
+          runtime: "hermes",
+        });
         return res.json({ runtime: "hermes", ok: true });
       }
       const ws = runtimeWorkspace(claw, adoptId);
@@ -295,9 +541,32 @@ export function registerFilesRoutes(app: express.Express) {
       try {
         if (st.isDirectory()) {
           rmSync(abs, { recursive: true, force: true });
+          await recordFileAudit({
+            req,
+            claw,
+            adoptId,
+            action: "file.deleted",
+            path: relPath,
+            runtime: runtimeName(adoptId),
+            metadata: { deleted: "directory" },
+          });
           return res.json({ runtime: runtimeName(adoptId), ok: true, deleted: "directory" });
         }
+        const size = Number(st.size);
+        let sha256: string | null = null;
+        try { sha256 = fileSha256(readFileSync(abs)); } catch {}
         unlinkSync(abs);
+        await recordFileAudit({
+          req,
+          claw,
+          adoptId,
+          action: "file.deleted",
+          path: relPath,
+          size,
+          sha256,
+          runtime: runtimeName(adoptId),
+          metadata: { deleted: "file" },
+        });
         return res.json({ runtime: runtimeName(adoptId), ok: true, deleted: "file" });
       } catch (e: any) {
         return res.status(500).json({ error: `delete failed: ${e?.message || e}` });

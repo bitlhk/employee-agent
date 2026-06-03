@@ -28,6 +28,7 @@ import {
   touchChatRun,
 } from "./chat-inflight";
 import { restoreDeletedProtectedCoreFiles, snapshotProtectedCoreFiles } from "./core-file-guard";
+import { scheduleOpenClawToolAudit } from "./openclaw-tool-audit";
 
 type ChatRuntimeMode = "fast" | "plan";
 
@@ -1105,6 +1106,17 @@ const options = {
         stopToolHeartbeat(); // 清理心跳 interval
         stopGatewayGapDetection(); // 清理 Gateway 空白检测
         const streamEndMs = Date.now();
+        scheduleOpenClawToolAudit({
+          runtimeAgentId,
+          sessionKey,
+          adoptId: String(adoptId),
+          userId: Number((claw as any).userId || 0),
+          startedAtMs: startedAt,
+          endedAtMs: streamEndMs,
+          channel,
+          transport: "http",
+          req,
+        });
         if (!res.writableEnded) {
           // 扫描 workspace 目录（递归 + 含根目录），只推本次流期间新生成的文件
           // 关键：技能/exec 写到根目录的 .html 等产物也要被发现，不只是 output/

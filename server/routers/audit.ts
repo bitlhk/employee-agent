@@ -22,6 +22,9 @@ const auditFilterSchema = z.object({
   actorUserId: z.number().int().positive().optional(),
   targetId: z.string().trim().min(1).max(128).optional(),
   agentInstanceId: z.string().trim().min(1).max(128).optional(),
+  resourceType: z.string().trim().min(1).max(64).optional(),
+  resourceName: z.string().trim().min(1).max(256).optional(),
+  toolName: z.string().trim().min(1).max(128).optional(),
   result: z.enum(["success", "failed", "denied", "warning"]).optional(),
   severity: z.enum(["info", "low", "medium", "high", "critical"]).optional(),
   q: z.string().trim().min(1).max(128).optional(),
@@ -41,6 +44,9 @@ function buildConditions(input: z.infer<typeof auditFilterSchema>) {
   if (input.actorUserId) conditions.push(eq(auditEvents.actorUserId, input.actorUserId));
   if (input.targetId) conditions.push(eq(auditEvents.targetId, input.targetId));
   if (input.agentInstanceId) conditions.push(eq(auditEvents.agentInstanceId, input.agentInstanceId));
+  if (input.resourceType) conditions.push(eq(auditEvents.resourceType, input.resourceType));
+  if (input.resourceName) conditions.push(like(auditEvents.resourceName, `%${input.resourceName.replace(/[%_]/g, "\\$&")}%`));
+  if (input.toolName) conditions.push(eq(auditEvents.toolName, input.toolName));
   if (input.result) conditions.push(eq(auditEvents.result, input.result));
   if (input.severity) conditions.push(eq(auditEvents.severity, input.severity));
   if (input.q) {
@@ -51,6 +57,9 @@ function buildConditions(input: z.infer<typeof auditFilterSchema>) {
       like(auditEvents.actorEmail, pattern),
       like(auditEvents.targetName, pattern),
       like(auditEvents.resourceName, pattern),
+      like(auditEvents.runtimeAgentId, pattern),
+      like(auditEvents.agentInstanceId, pattern),
+      like(auditEvents.toolName, pattern),
     ));
   }
   return conditions.length ? and(...conditions) : undefined;

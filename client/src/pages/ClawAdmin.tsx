@@ -37,7 +37,7 @@ import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, 
 import { UsageStatsTab } from "@/components/pages/UsageStatsTab";
 import { TenantAuditTab } from "@/components/pages/TenantAuditTab";
 import { BizAgentsPanel } from "@/components/BizAgentsPanel";
-import { CollaborationTab } from "./admin/CollaborationTab";
+import { CollaborationTab } from "@/components/pages/CollaborationTab";
 import { toast } from "sonner";
 import { useBrand, invalidateBrandClientCache } from "@/lib/useBrand";
 import { DEFAULT_BRAND } from "@shared/brand";
@@ -107,6 +107,40 @@ const formatAuditJson = (value: unknown) => {
     return String(value);
   }
 };
+
+const getAuditMeta = (event: any, path: string) => {
+  const root = event?.metadataJson;
+  if (!root || typeof root !== "object") return undefined;
+  return path.split(".").reduce<any>((acc, key) => (acc && typeof acc === "object" ? acc[key] : undefined), root);
+};
+
+const auditCategoryLabel = (category?: string) => {
+  const map: Record<string, string> = {
+    auth: "认证",
+    admin: "管理",
+    agent: "Agent",
+    audit: "审计",
+    browser: "浏览器",
+    channel: "通道",
+    file: "文件",
+    mcp: "MCP",
+    model: "模型",
+    skill: "技能",
+    system: "系统",
+    tool: "工具",
+  };
+  return map[String(category || "")] || category || "-";
+};
+
+function AuditMetricCard({ title, value, desc }: { title: string; value: number | string; desc: string }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+      <div className="text-xs text-muted-foreground">{title}</div>
+      <div className="mt-1 font-mono text-xl font-semibold text-gray-900">{value}</div>
+      <div className="mt-1 text-[11px] text-muted-foreground">{desc}</div>
+    </div>
+  );
+}
 
 const HealthBadge = ({ ok, warn, label }: { ok?: boolean; warn?: boolean; label?: string }) => (
   <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${
@@ -372,6 +406,10 @@ export default function ClawAdmin() {
     q: "",
     category: "all",
     action: "",
+    agentInstanceId: "",
+    resourceName: "",
+    resourceType: "all",
+    toolName: "",
     result: "all",
     severity: "all",
     from: "",
@@ -552,6 +590,10 @@ export default function ClawAdmin() {
     q: auditFilters.q.trim() || undefined,
     category: auditFilters.category === "all" ? undefined : auditFilters.category,
     action: auditFilters.action.trim() || undefined,
+    agentInstanceId: auditFilters.agentInstanceId.trim() || undefined,
+    resourceName: auditFilters.resourceName.trim() || undefined,
+    resourceType: auditFilters.resourceType === "all" ? undefined : auditFilters.resourceType,
+    toolName: auditFilters.toolName.trim() || undefined,
     result: auditFilters.result === "all" ? undefined : auditFilters.result as any,
     severity: auditFilters.severity === "all" ? undefined : auditFilters.severity as any,
     from: auditFilters.from ? new Date(auditFilters.from).toISOString() : undefined,
@@ -575,6 +617,10 @@ export default function ClawAdmin() {
   });
   const auditRows = Array.isArray((auditEventsData as any)?.rows) ? (auditEventsData as any).rows : [];
   const auditTotal = Number((auditEventsData as any)?.total || 0);
+  const auditPageToolCount = auditRows.filter((event: any) => event.category === "mcp" || event.category === "tool" || String(event.action || "").startsWith("mcp.") || String(event.action || "").startsWith("tool.")).length;
+  const auditPageFileCount = auditRows.filter((event: any) => event.category === "file" || String(event.action || "").startsWith("file.")).length;
+  const auditPageRiskCount = auditRows.filter((event: any) => event.result !== "success" || ["high", "critical"].includes(String(event.severity || ""))).length;
+  const auditPageModelCount = auditRows.filter((event: any) => event.category === "model" || String(event.action || "").startsWith("model.")).length;
   const auditExports = Array.isArray(auditExportsData) ? auditExportsData : [];
   const requestAuditExport = (format: "csv" | "json") => {
     const { page: _page, pageSize: _pageSize, ...filters } = auditQueryInput;
@@ -1342,13 +1388,20 @@ export default function ClawAdmin() {
                 </div>
               </div>
 
-              <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+              <div className="mb-4 grid gap-3 md:grid-cols-4">
+                <AuditMetricCard title="当前结果" value={auditTotal} desc="匹配当前过滤条件的审计事件" />
+                <AuditMetricCard title="风险事件" value={auditPageRiskCount} desc="当前页失败、拒绝或高危事件" />
+                <AuditMetricCard title="MCP / 工具" value={auditPageToolCount} desc="当前页 MCP 与 OpenClaw 工具事件" />
+                <AuditMetricCard title="文件 / 模型" value={`${auditPageFileCount}/${auditPageModelCount}`} desc="当前页文件操作 / 模型调用事件" />
+              </div>
+
+              <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-8">
                 <div className="xl:col-span-2">
                   <Label className="text-xs">关键词</Label>
                   <Input
                     value={auditFilters.q}
                     onChange={(e) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, q: e.target.value })); }}
-                    placeholder="event/action/email/target"
+                    placeholder="event/action/email/target/hash"
                     className="mt-1 h-9"
                   />
                 </div>
@@ -1362,6 +1415,8 @@ export default function ClawAdmin() {
                       <SelectItem value="admin">admin</SelectItem>
                       <SelectItem value="agent">agent</SelectItem>
                       <SelectItem value="channel">channel</SelectItem>
+                      <SelectItem value="file">file</SelectItem>
+                      <SelectItem value="mcp">mcp</SelectItem>
                       <SelectItem value="model">model</SelectItem>
                       <SelectItem value="skill">skill</SelectItem>
                       <SelectItem value="tool">tool</SelectItem>
@@ -1379,6 +1434,47 @@ export default function ClawAdmin() {
                     placeholder="auth.login.success"
                     className="mt-1 h-9"
                   />
+                </div>
+                <div>
+                  <Label className="text-xs">Agent</Label>
+                  <Input
+                    value={auditFilters.agentInstanceId}
+                    onChange={(e) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, agentInstanceId: e.target.value })); }}
+                    placeholder="adoptId / agentId"
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Tool</Label>
+                  <Input
+                    value={auditFilters.toolName}
+                    onChange={(e) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, toolName: e.target.value })); }}
+                    placeholder="mcp/tool name"
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Resource</Label>
+                  <Input
+                    value={auditFilters.resourceName}
+                    onChange={(e) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, resourceName: e.target.value })); }}
+                    placeholder="文件路径 / MCP server"
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">资源类型</Label>
+                  <Select value={auditFilters.resourceType} onValueChange={(value) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, resourceType: value })); }}>
+                    <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部</SelectItem>
+                      <SelectItem value="workspace_file">workspace_file</SelectItem>
+                      <SelectItem value="mcp_server">mcp_server</SelectItem>
+                      <SelectItem value="openclaw_tool">openclaw_tool</SelectItem>
+                      <SelectItem value="agent">agent</SelectItem>
+                      <SelectItem value="audit_export">audit_export</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label className="text-xs">Result</Label>
@@ -1426,8 +1522,8 @@ export default function ClawAdmin() {
               </div>
 
               <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-                <div className="grid min-w-[1040px] grid-cols-[170px_90px_240px_90px_90px_minmax(160px,1fr)_minmax(120px,180px)_74px] border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
-                  <span>Time</span><span>Category</span><span>Action</span><span>Result</span><span>Severity</span><span>Actor / Target</span><span>Agent</span><span>Detail</span>
+                <div className="grid min-w-[1240px] grid-cols-[170px_86px_230px_90px_90px_minmax(160px,1fr)_minmax(180px,1fr)_minmax(130px,190px)_74px] border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+                  <span>Time</span><span>Type</span><span>Action</span><span>Result</span><span>Risk</span><span>Actor / Target</span><span>Resource</span><span>Agent / Tool</span><span>Detail</span>
                 </div>
                 {auditEventsLoading ? (
                   <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted-foreground">
@@ -1435,9 +1531,9 @@ export default function ClawAdmin() {
                     正在加载审计事件
                   </div>
                 ) : auditRows.length > 0 ? auditRows.map((event: any) => (
-                  <div key={event.eventId} className="grid min-w-[1040px] grid-cols-[170px_90px_240px_90px_90px_minmax(160px,1fr)_minmax(120px,180px)_74px] items-center border-b border-gray-100 px-3 py-2 text-xs last:border-b-0">
+                  <div key={event.eventId} className="grid min-w-[1240px] grid-cols-[170px_86px_230px_90px_90px_minmax(160px,1fr)_minmax(180px,1fr)_minmax(130px,190px)_74px] items-center border-b border-gray-100 px-3 py-2 text-xs last:border-b-0">
                     <span className="font-mono text-[11px] text-gray-600">{event.eventTime ? new Date(event.eventTime).toLocaleString("zh-CN") : "-"}</span>
-                    <span className="truncate font-mono text-gray-700">{event.category}</span>
+                    <span className="truncate text-gray-700">{auditCategoryLabel(event.category)}</span>
                     <span className="truncate font-mono text-gray-900" title={event.action}>{event.action}</span>
                     <span><HealthBadge ok={event.result === "success"} warn={event.result === "warning"} label={event.result} /></span>
                     <span className="font-mono text-gray-700">{event.severity}</span>
@@ -1445,7 +1541,14 @@ export default function ClawAdmin() {
                       <span className="block truncate text-gray-800">{event.actorEmail || event.actorName || event.actorUserId || event.actorType}</span>
                       <span className="block truncate text-[11px] text-muted-foreground">{event.targetType || "-"}:{event.targetName || event.targetId || "-"}</span>
                     </span>
-                    <span className="truncate font-mono text-[11px] text-gray-600">{event.agentInstanceId || event.runtimeAgentId || "-"}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-gray-800" title={event.resourceName || event.resourceId || ""}>{event.resourceName || event.resourceId || "-"}</span>
+                      <span className="block truncate font-mono text-[11px] text-muted-foreground">{event.resourceType || "-"}</span>
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-mono text-[11px] text-gray-700">{event.agentInstanceId || event.runtimeAgentId || "-"}</span>
+                      <span className="block truncate font-mono text-[11px] text-muted-foreground">{event.toolName || "-"}</span>
+                    </span>
                     <span>
                       <Button size="sm" variant="outline" className="h-8 w-8 p-0" title="查看详情" onClick={() => setSelectedAuditEvent(event)}>
                         <Eye className="h-3.5 w-3.5" />
@@ -1528,6 +1631,69 @@ export default function ClawAdmin() {
                   </div>
                 ))}
               </div>
+              {(selectedAuditEvent.category === "mcp" || selectedAuditEvent.category === "tool" || String(selectedAuditEvent.action || "").startsWith("mcp.") || String(selectedAuditEvent.action || "").startsWith("tool.")) ? (
+                <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+                  <div className="mb-3 text-xs font-semibold text-blue-900">工具 / MCP 调用</div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {[
+                      ["Server", selectedAuditEvent.resourceName || selectedAuditEvent.resourceId || "-"],
+                      ["Tool", selectedAuditEvent.toolName || selectedAuditEvent.targetName || "-"],
+                      ["Host", getAuditMeta(selectedAuditEvent, "endpointHost") || "-"],
+                      ["Args Hash", getAuditMeta(selectedAuditEvent, "args.argsHash") || "-"],
+                      ["Args Bytes", getAuditMeta(selectedAuditEvent, "args.argsBytes") ?? "-"],
+                      ["Duration", getAuditMeta(selectedAuditEvent, "durationMs") ? `${getAuditMeta(selectedAuditEvent, "durationMs")} ms` : "-"],
+                      ["Response Bytes", getAuditMeta(selectedAuditEvent, "responseBytes") ?? "-"],
+                      ["Fields", Array.isArray(getAuditMeta(selectedAuditEvent, "args.fieldNames")) ? getAuditMeta(selectedAuditEvent, "args.fieldNames").join(", ") : "-"],
+                      ["Message Bytes", getAuditMeta(selectedAuditEvent, "args.messageBytes") ?? "-"],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs">
+                        <div className="text-blue-700/70">{label}</div>
+                        <div className="mt-1 break-words font-mono text-blue-950">{String(value || "-")}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {(selectedAuditEvent.category === "file" || String(selectedAuditEvent.action || "").startsWith("file.")) ? (
+                <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
+                  <div className="mb-3 text-xs font-semibold text-emerald-900">文件操作</div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {[
+                      ["Filename", getAuditMeta(selectedAuditEvent, "filename") || selectedAuditEvent.targetName || "-"],
+                      ["Path", getAuditMeta(selectedAuditEvent, "path") || selectedAuditEvent.resourceName || "-"],
+                      ["Ext", getAuditMeta(selectedAuditEvent, "ext") || "-"],
+                      ["Size", getAuditMeta(selectedAuditEvent, "sizeBytes") ? formatBytes(Number(getAuditMeta(selectedAuditEvent, "sizeBytes"))) : "-"],
+                      ["SHA256", getAuditMeta(selectedAuditEvent, "sha256") || selectedAuditEvent.resourceId || "-"],
+                      ["Runtime", selectedAuditEvent.runtimeType || "-"],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-lg border border-emerald-100 bg-white px-3 py-2 text-xs">
+                        <div className="text-emerald-700/70">{label}</div>
+                        <div className="mt-1 break-words font-mono text-emerald-950">{String(value || "-")}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {(selectedAuditEvent.category === "model" || String(selectedAuditEvent.action || "").startsWith("model.")) ? (
+                <div className="mt-4 rounded-xl border border-purple-100 bg-purple-50/50 p-4">
+                  <div className="mb-3 text-xs font-semibold text-purple-900">模型调用</div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {[
+                      ["Provider", getAuditMeta(selectedAuditEvent, "provider") || "-"],
+                      ["Model", getAuditMeta(selectedAuditEvent, "model") || selectedAuditEvent.resourceName || "-"],
+                      ["Reasoning", String(getAuditMeta(selectedAuditEvent, "reasoning") ?? "-")],
+                      ["Duration", getAuditMeta(selectedAuditEvent, "durationMs") ? `${getAuditMeta(selectedAuditEvent, "durationMs")} ms` : "-"],
+                      ["Tokens", getAuditMeta(selectedAuditEvent, "tokens") ? JSON.stringify(getAuditMeta(selectedAuditEvent, "tokens")) : "-"],
+                      ["Channel", selectedAuditEvent.channel || "-"],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-lg border border-purple-100 bg-white px-3 py-2 text-xs">
+                        <div className="text-purple-700/70">{label}</div>
+                        <div className="mt-1 break-words font-mono text-purple-950">{String(value || "-")}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <div className="mt-4">
                 <div className="mb-2 text-xs font-semibold text-gray-900">Metadata</div>
                 <pre className="max-h-80 overflow-auto rounded-lg border border-gray-200 bg-gray-950 p-3 text-xs leading-5 text-gray-100">

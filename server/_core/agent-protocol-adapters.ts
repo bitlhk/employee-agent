@@ -1,5 +1,6 @@
 import type express from "express";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
+import { auditErrorMetadata, auditRequest, recordAuditBestEffort } from "./audit-events";
 
 type ProtocolAdapterInput = {
   providerType: "mcp" | "a2a";
@@ -11,6 +12,8 @@ type ProtocolAdapterInput = {
   endpointConfig: Record<string, any>;
   message: string;
   res: express.Response;
+  req?: express.Request;
+  userId?: number | null;
   appendDelta?: (text: string) => void;
 };
 
@@ -152,6 +155,81 @@ function extractA2AText(value: any): string {
   return texts.join("\n").trim();
 }
 
+function stableJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, (_key, item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+      return Object.keys(item as Record<string, unknown>).sort().reduce((acc: Record<string, unknown>, key) => {
+        acc[key] = (item as Record<string, unknown>)[key];
+        return acc;
+      }, {});
+    });
+  } catch {
+    return String(value);
+  }
+}
+
+function sha256Text(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function summarizeArgs(args: Record<string, unknown>, messageParam: string) {
+  const json = stableJson(args);
+  const fieldNames = Object.keys(args).sort();
+  return {
+    argsHash: sha256Text(json),
+    argsBytes: Buffer.byteLength(json, "utf8"),
+    fieldNames,
+    messageParam,
+    messageBytes: Buffer.byteLength(String(args[messageParam] || ""), "utf8"),
+    staticArgKeys: fieldNames.filter((key) => key !== messageParam),
+  };
+}
+
+async function recordMcpAudit(input: ProtocolAdapterInput, args: {
+  action: "mcp.tool.started" | "mcp.tool.completed" | "mcp.tool.failed";
+  toolName: string;
+  rpcUrl: string;
+  result?: "success" | "failed" | "denied" | "warning";
+  severity?: "info" | "low" | "medium" | "high" | "critical";
+  durationMs?: number;
+  responseBytes?: number;
+  argsSummary?: Record<string, unknown>;
+  error?: unknown;
+}) {
+  await recordAuditBestEffort({
+    action: args.action,
+    result: args.result || "success",
+    severity: args.severity || (args.action === "mcp.tool.failed" ? "medium" : "info"),
+    actorType: input.userId ? "user" : "system",
+    actorUserId: input.userId ?? null,
+    ...(input.req ? auditRequest(input.req) : {}),
+    targetType: "mcp_tool",
+    targetId: args.toolName,
+    targetName: args.toolName,
+    resourceType: "mcp_server",
+    resourceId: input.agentId,
+    resourceName: input.endpointConfig.serverId || input.remoteAgentId || input.agentId,
+    agentInstanceId: input.agentId,
+    runtimeType: "mcp",
+    runtimeAgentId: input.remoteAgentId || input.agentId,
+    toolName: args.toolName,
+    errorCode: args.error ? "MCP_TOOL_CALL_FAILED" : null,
+    metadata: {
+      providerType: input.providerType,
+      adapterProtocol: input.adapterProtocol,
+      endpointHost: (() => {
+        try { return new URL(args.rpcUrl).host; } catch { return null; }
+      })(),
+      rpcPath: input.endpointConfig.rpcPath ?? input.endpointConfig.path ?? "/mcp",
+      durationMs: args.durationMs ?? null,
+      responseBytes: args.responseBytes ?? null,
+      args: args.argsSummary || null,
+      ...(args.error ? auditErrorMetadata(args.error) : {}),
+    },
+  });
+}
+
 async function runMcpToolsV1(input: ProtocolAdapterInput) {
   const rpcUrl = endpoint(input.apiUrl, input.endpointConfig.rpcPath ?? input.endpointConfig.path ?? "/mcp");
   const baseHeaders: Record<string, string> = {
@@ -185,13 +263,39 @@ async function runMcpToolsV1(input: ProtocolAdapterInput) {
   const messageParam = String(input.endpointConfig.messageParam || "message");
   const args = { ...staticArgs, [messageParam]: input.message };
   status(input.res, `MCP: 调用 ${toolName}...`);
-  const callResp = await postJsonRpc(rpcUrl, {
-    jsonrpc: "2.0",
-    id: 3,
-    method: "tools/call",
-    params: { name: toolName, arguments: args },
-  }, headers);
-  delta(input.res, extractMcpText(callResp.resp.result), input.appendDelta);
+  const argsSummary = summarizeArgs(args, messageParam);
+  const startedAt = Date.now();
+  await recordMcpAudit(input, { action: "mcp.tool.started", toolName, rpcUrl, argsSummary });
+  try {
+    const callResp = await postJsonRpc(rpcUrl, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: toolName, arguments: args },
+    }, headers);
+    const text = extractMcpText(callResp.resp.result);
+    await recordMcpAudit(input, {
+      action: "mcp.tool.completed",
+      toolName,
+      rpcUrl,
+      durationMs: Date.now() - startedAt,
+      responseBytes: Buffer.byteLength(text, "utf8"),
+      argsSummary,
+    });
+    delta(input.res, text, input.appendDelta);
+  } catch (error) {
+    await recordMcpAudit(input, {
+      action: "mcp.tool.failed",
+      toolName,
+      rpcUrl,
+      result: "failed",
+      severity: "medium",
+      durationMs: Date.now() - startedAt,
+      argsSummary,
+      error,
+    });
+    throw error;
+  }
 }
 
 async function runA2ATaskV1(input: ProtocolAdapterInput) {

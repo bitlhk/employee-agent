@@ -1561,6 +1561,8 @@ export function registerBusinessRoutes(app: express.Express) {
           remoteAgentId: bizAgentCfg?.remoteAgentId,
           endpointConfig,
           message: msgStr,
+          req,
+          userId,
           res,
           appendDelta: (text) => memAcc.appendDelta(text),
         });

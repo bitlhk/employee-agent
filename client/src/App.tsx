@@ -55,6 +55,9 @@ function Router() {
             <ClawAdmin />
           </AdminRoute>
         </Route>
+        <Route path={"/claw-admin"}>
+          <Redirect to="/admin" />
+        </Route>
 
         {/* ── 智能体工作台 ── */}
         <Route path={"/claw/:adoptId"}>

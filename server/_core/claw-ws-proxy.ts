@@ -42,6 +42,7 @@ import {
   normalizeClientRunId,
   touchChatRun,
 } from "./chat-inflight";
+import { scheduleOpenClawToolAudit } from "./openclaw-tool-audit";
 
 // ── Ed25519 设备身份（进程级复用）──
 const ED25519_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -263,6 +264,18 @@ export function registerWSProxy(server: Server) {
       chatFinalized = true;
       activeChat = false;
       markChatRunComplete(String(sessionKey || ""), activeClientRunId, "lifecycle_end");
+      if (sessionKey && chatStartedAt > 0) {
+        scheduleOpenClawToolAudit({
+          runtimeAgentId: meta.agentId,
+          sessionKey,
+          adoptId: meta.adoptId,
+          userId: meta.userId,
+          startedAtMs: chatStartedAt,
+          endedAtMs: Date.now(),
+          channel: meta.channel || "web",
+          transport: "ws",
+        });
+      }
       appendLogAsync("claw-exec-detail.log", {
         ts: new Date().toISOString(),
         event: "ws_chat_response",
@@ -292,6 +305,18 @@ export function registerWSProxy(server: Server) {
         || (flagMode === "allowlist" && allowlist.includes(Number(meta.userId)));
 
       const streamEndMs = Date.now();
+      if (sessionKey && chatStartedAt > 0) {
+        scheduleOpenClawToolAudit({
+          runtimeAgentId: meta.agentId,
+          sessionKey,
+          adoptId: meta.adoptId,
+          userId: meta.userId,
+          startedAtMs: chatStartedAt,
+          endedAtMs: streamEndMs,
+          channel: meta.channel || "web",
+          transport: "ws",
+        });
+      }
       if (flagOn) {
         sendToClient({
           __stream_truncated: true,
@@ -591,6 +616,18 @@ export function registerWSProxy(server: Server) {
                   choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
                 });
                 markChatRunComplete(String(sessionKey || ""), activeClientRunId, "chat_final");
+                if (sessionKey && chatStartedAt > 0) {
+                  scheduleOpenClawToolAudit({
+                    runtimeAgentId: meta.agentId,
+                    sessionKey,
+                    adoptId: meta.adoptId,
+                    userId: meta.userId,
+                    startedAtMs: chatStartedAt,
+                    endedAtMs: Date.now(),
+                    channel: meta.channel || "web",
+                    transport: "ws",
+                  });
+                }
                 break;
 
               case "error":
