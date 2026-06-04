@@ -82,6 +82,12 @@ type SkillPackageInspectResponse = {
   };
 };
 
+type SkillIntroductionResponse = {
+  skillId: string;
+  introduction: string;
+  source: "runtime" | "source" | "registry" | "fallback";
+};
+
 const SKILL_TAB_KEYS = ["mine", "market", "mcp"] as const;
 type SkillTab = (typeof SKILL_TAB_KEYS)[number];
 type SourceFilter = "all" | SourceKind;
@@ -269,7 +275,6 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
   const [items, setItems] = useState<McpToolGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [openGroupIds, setOpenGroupIds] = useState<Set<string>>(new Set());
-  const [openChildIds, setOpenChildIds] = useState<Set<string>>(new Set());
 
   const loadMcpTools = async (options?: { silent?: boolean }) => {
     if (!adoptId) return;
@@ -313,21 +318,7 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
   useEffect(() => {
     setOpenGroupIds((current) => {
       const validIds = new Set(items.map((item) => item.id));
-      const retained = new Set([...current].filter((id) => validIds.has(id)));
-      if (retained.size > 0) return retained;
-      const firstAvailable = items.find((item) => item.status === "available") || items[0];
-      return firstAvailable ? new Set([firstAvailable.id]) : new Set();
-    });
-    setOpenChildIds((current) => {
-      const validIds = new Set(
-        items.flatMap((item) => (item.children || []).map((child) => `${item.id}:${child.id}`)),
-      );
-      const retained = new Set([...current].filter((id) => validIds.has(id)));
-      if (retained.size > 0) return retained;
-      const firstAvailable = items
-        .flatMap((item) => (item.children || []).map((child) => ({ item, child })))
-        .find(({ child }) => child.status === "available");
-      return firstAvailable ? new Set([`${firstAvailable.item.id}:${firstAvailable.child.id}`]) : new Set();
+      return new Set([...current].filter((id) => validIds.has(id)));
     });
   }, [items]);
 
@@ -336,15 +327,6 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
       const next = new Set(current);
       if (next.has(groupId)) next.delete(groupId);
       else next.add(groupId);
-      return next;
-    });
-  };
-
-  const toggleChild = (childKey: string) => {
-    setOpenChildIds((current) => {
-      const next = new Set(current);
-      if (next.has(childKey)) next.delete(childKey);
-      else next.add(childKey);
       return next;
     });
   };
@@ -410,15 +392,13 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
                 <div className="skills-mcp-group__body" aria-hidden={!groupOpen}>
                   <div className="skills-mcp-children">
                     {(item.children || []).map((child) => {
-                      const childKey = `${item.id}:${child.id}`;
-                      const open = openChildIds.has(childKey);
                       const childTone = mcpStatusTone(child.status);
+                      const tools = child.tools && child.tools.length > 0
+                        ? child.tools
+                        : [{ name: "工具清单", description: "该 MCP 已接入，工具明细以管理员配置为准。" }];
                       return (
-                        <div key={child.id} className="skills-mcp-child" data-open={open ? "true" : "false"}>
-                          <button className="skills-mcp-child__row" type="button" onClick={() => toggleChild(childKey)}>
-                            <span className="skills-mcp-child__chevron">
-                              {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                            </span>
+                        <div key={child.id} className="skills-mcp-child" data-open="true">
+                          <div className="skills-mcp-child__row">
                             <span className="skills-mcp-child__main">
                               <span className="skills-mcp-child__name">{child.name}</span>
                               <span className="skills-mcp-child__desc">{child.description}</span>
@@ -427,11 +407,11 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
                               <span className="skills-mcp-child__server">{child.serverId}</span>
                               <span className={`skills-chip ${pillToneClass(childTone)}`}>{mcpStatusLabel(child.status)}</span>
                             </span>
-                          </button>
+                          </div>
 
-                          <div className="skills-mcp-child__panel" aria-hidden={!open}>
+                          <div className="skills-mcp-child__panel" aria-hidden="false">
                             <div className="skills-mcp-tools">
-                              {(child.tools && child.tools.length > 0 ? child.tools : [{ name: "工具清单", description: "该 MCP 已接入，工具明细以管理员配置为准。" }]).map((tool) => (
+                              {tools.map((tool) => (
                                 <div key={`${child.id}:${tool.name}`} className="skills-mcp-tool">
                                   <div className="skills-mcp-tool__name">{tool.name}</div>
                                   <div className="skills-mcp-tool__desc">{tool.description}</div>
@@ -575,7 +555,32 @@ function SkillDetailDrawer({
   busy: boolean;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [intro, setIntro] = useState<SkillIntroductionResponse | null>(null);
+  const [introLoading, setIntroLoading] = useState(false);
   useEffect(() => setAdvancedOpen(false), [skill?.id]);
+  useEffect(() => {
+    setIntro(null);
+    if (!skill) return;
+    let cancelled = false;
+    setIntroLoading(true);
+    fetchJson<SkillIntroductionResponse>(
+      `/api/claw/skills/introduction?adoptId=${encodeURIComponent(skill.adoptId)}&skillId=${encodeURIComponent(skill.id)}`,
+    )
+      .then((data) => {
+        if (!cancelled) setIntro(data);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setIntro({ skillId: skill.id, introduction: descriptionOf(skill), source: "fallback" });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIntroLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [skill?.adoptId, skill?.id]);
   if (!skill) return null;
   const tone = stateTone(skill.state);
 
@@ -603,6 +608,13 @@ function SkillDetailDrawer({
 
             <div className="skills-body-text text-xs">
               {descriptionOf(skill)}
+            </div>
+
+            <div className="skills-intro-card">
+              <div className="settings-label">技能介绍</div>
+              <div className="skills-intro-text">
+                {introLoading ? "正在加载技能介绍..." : intro?.introduction || descriptionOf(skill)}
+              </div>
             </div>
 
             {reasonOf(skill) && (

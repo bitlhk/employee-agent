@@ -183,6 +183,33 @@ sessionKey = agent:{runtimeAgentId}:{channel}:{conversationId}
 
 当前策略强调“企业可控”：默认关闭业务 Agent 预置、任务工作台灰度开启、外部搜索/MCP 能力显式配置、管理员后台统一管理用户和智能体能力。
 
+### 子 Agent 岗位模板与工具权限
+
+演示环境可以在“申请子 Agent”时让用户选择自己的岗位，平台按岗位模板自动生成 OpenClaw 工具策略。正式客户部署时，岗位模板不应由用户自选，而应由客户的统一身份与权限系统下发，例如 AD/LDAP、企微、统一门户、HR 岗位表或行内权限系统。
+
+对外演示口径：
+
+> 演示环境为了便于体验，允许用户在创建智能体时选择岗位模板；正式部署时，该模板由客户统一身份和权限系统自动下发，用户不能自行选择。
+
+权限设计分两层：
+
+- 工具可见权限：控制用户、岗位或 Agent 能否看到某类工具，例如 Wind、且慢、债券报价解析、客户经理财富助手、Office 文档等。OpenClaw 侧建议使用 `tools.profile="full"` 加 `tools.allow=[...]` 做白名单，而不是沿用 `tools.profile="coding"`；`coding` 会按编码工具画像裁剪第三方 plugin tool。
+- 数据行级权限：用户已经有权限调用某个业务工具，但返回哪些客户、产品、报表或资产数据，应由 employee-agent 服务端根据真实用户、岗位、部门和业务授权过滤，不能依赖模型参数。
+
+工具类型按治理要求区分：
+
+- 公共或半公共数据工具可以继续走 MCP，例如 Wind、且慢、债券报价解析，重点治理“能不能用”。
+- 涉及客户数据、内部业务数据、银行内控和按人分权的能力，要求工具服务端拿到可信 runtime 上下文，再由 employee-agent 映射真实用户并调用内部受控 API。
+- 在已应用 OpenClaw MCP trusted runtime context patch 的环境中，MCP 工具可以从 handler `extra._meta.openclaw` 读取 `agentId`、`sessionKey`、`sessionId`、`workspaceDir`，因此可以统一走 MCP；未应用该 patch 的环境，敏感数据工具仍不应依赖纯 stdio MCP 独立判断用户身份。
+- OpenClaw 原生 tool plugin 只作为兜底方案或特殊 runtime 能力入口，不再作为客户经理财富助手的首选路径。
+
+演示岗位模板建议先收敛为四类：
+
+- 客户经理：客户经理财富助手、推荐产品、Wind/且慢、Office 文档。
+- 投研分析师：Wind、债券报价解析、研报/PPT、文件分析。
+- 运营管理：技能市场、MCP 工具查看、审计查询、基础办公。
+- 通用办公：搜索、文件、PPT/文档、基础技能。
+
 ---
 
 ## 七、部署模式

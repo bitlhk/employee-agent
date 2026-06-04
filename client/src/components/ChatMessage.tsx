@@ -46,65 +46,6 @@ const GATEWAY_TOOL_META: Record<string, { icon: string; label: string }> = {
   thinking:      { icon: "💭", label: "深度思考" },
 };
 
-function GatewayToolInline({ tc }: { tc: ToolCallEntry }) {
-  const meta = GATEWAY_TOOL_META[tc.name] || { icon: "⚙️", label: tc.name };
-  const isRunning = tc.status === "running";
-  const elapsed = tc.durationMs != null ? tc.durationMs : (isRunning ? Date.now() - tc.ts : 0);
-  const elapsedSec = Math.max(0, Math.round(elapsed / 1000));
-
-  return (
-    <div className="gw-tool-inline" style={{
-      display: "flex", alignItems: "center", gap: 8,
-      padding: "8px 12px", margin: "6px 0",
-      borderRadius: 10,
-      background: isRunning ? "rgba(99,102,241,0.06)" : "rgba(120,120,140,0.04)",
-      border: `1px solid ${isRunning ? "rgba(99,102,241,0.15)" : "rgba(120,120,140,0.1)"}`,
-      fontSize: "var(--oc-text-base)", color: isRunning ? "#818cf8" : "#8b8fa3",
-      transition: "all 0.3s ease",
-      position: "relative", overflow: "hidden",
-    }}>
-      {/* shimmer 动画条 */}
-      {isRunning && (
-        <div style={{
-          position: "absolute", bottom: 0, left: 0, right: 0, height: 2,
-          background: "linear-gradient(90deg, transparent 0%, rgba(99,102,241,0.4) 50%, transparent 100%)",
-          backgroundSize: "200% 100%",
-          animation: "gw-shimmer 1.8s ease-in-out infinite",
-        }} />
-      )}
-      <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>{meta.icon}</span>
-      <span style={{ fontWeight: "var(--oc-weight-medium)" }}>
-        {isRunning ? `正在${meta.label}` : meta.label}
-      </span>
-      {isRunning ? (
-        <span style={{ display: "inline-flex", gap: 2, marginLeft: 2 }}>
-          <span style={{ animation: "gw-dot 1.4s infinite", animationDelay: "0s" }}>·</span>
-          <span style={{ animation: "gw-dot 1.4s infinite", animationDelay: "0.2s" }}>·</span>
-          <span style={{ animation: "gw-dot 1.4s infinite", animationDelay: "0.4s" }}>·</span>
-        </span>
-      ) : (
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-          <polyline points="20 6 9 17 4 12"/>
-        </svg>
-      )}
-      {elapsedSec > 0 && (
-        <span style={{ fontSize: "var(--oc-text-xs)", opacity: 0.6, marginLeft: "auto" }}>{elapsedSec}s</span>
-      )}
-      <style>{`
-        @keyframes gw-shimmer {
-          0% { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
-        }
-        @keyframes gw-dot {
-          0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
-          40% { opacity: 1; transform: scale(1.3); }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-
 function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; filePath: string; fileName: string }) {
   const [state, setState] = useState<"idle" | "running" | "done">("idle");
   const [result, setResult] = useState<{ exitCode: number; stdout: string; stderr: string } | null>(null);
@@ -391,6 +332,70 @@ function ToolCallCard({ tc }: { tc: ToolCallEntry }) {
   );
 }
 
+function toolCallLabel(tc: ToolCallEntry): string {
+  return GATEWAY_TOOL_META[tc.name]?.label || tc.name.replace(/[_-]+/g, " ");
+}
+
+function toolCallDurationLabel(tc: ToolCallEntry): string {
+  const duration = tc.durationMs ?? (tc.status === "running" ? Date.now() - tc.ts : 0);
+  if (!duration || duration < 1000) return "";
+  const seconds = Math.round(duration / 1000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function ToolCallTimeline({ toolCalls }: { toolCalls: ToolCallEntry[] }) {
+  const visibleCalls = toolCalls.filter((tc) => tc?.id && tc?.name);
+  if (visibleCalls.length === 0) return null;
+  const detailCalls = visibleCalls.filter((tc) => !tc._gateway);
+
+  return (
+    <div className="lingxia-tool-timeline-wrap">
+      <div className="lingxia-tool-timeline" aria-label="工具调用时间线">
+        {visibleCalls.map((tc, index) => {
+          const duration = toolCallDurationLabel(tc);
+          return (
+            <div key={tc.id} className={`lingxia-tool-step is-${tc.status}`}>
+              <span className="lingxia-tool-step__rail" aria-hidden="true">
+                <span className="lingxia-tool-step__dot" />
+                {index < visibleCalls.length - 1 ? <span className="lingxia-tool-step__line" /> : null}
+              </span>
+              <span className="lingxia-tool-step__body">
+                <span className="lingxia-tool-step__title">{toolCallLabel(tc)}</span>
+                <span className="lingxia-tool-step__meta">
+                  {tc.status === "running" ? "执行中" : tc.status === "error" ? "失败" : "完成"}
+                  {duration ? ` · ${duration}` : ""}
+                  {tc.outputFiles?.length ? ` · ${tc.outputFiles.length} 个文件` : ""}
+                </span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {detailCalls.length > 0 ? (
+        <div className="lingxia-tool-timeline-details">
+          {detailCalls.map((tc) => <ToolCallCard key={tc.id} tc={tc} />)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function toolCallsRenderSignature(toolCalls?: ToolCallEntry[]): string {
+  if (!toolCalls?.length) return "";
+  return toolCalls
+    .map((tc) => [
+      tc.id,
+      tc.name,
+      tc.status,
+      tc.durationMs ?? "",
+      tc.result ? tc.result.length : 0,
+      tc.outputFiles?.length ?? 0,
+      tc.truncated ? "truncated" : "",
+      tc.policyDenyReason || "",
+    ].join(":"))
+    .join("|");
+}
+
 function ChatMessageInner({
   role,
   text,
@@ -438,11 +443,7 @@ function ChatMessageInner({
         <div>
           {showToolCalls && toolCalls && toolCalls.length > 0 && (
             <div className="mb-2">
-              {toolCalls.map((tc) =>
-                tc._gateway
-                  ? <GatewayToolInline key={tc.id} tc={tc} />
-                  : <ToolCallCard key={tc.id} tc={tc} />
-              )}
+              <ToolCallTimeline toolCalls={toolCalls} />
             </div>
           )}
           <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-2 lingxia-bubble-ai" style={{ color: "var(--oc-text-tertiary)" }}>
@@ -472,11 +473,7 @@ function ChatMessageInner({
       <div>
         {showToolCalls && toolCalls && toolCalls.length > 0 && (
           <div className="mb-2">
-            {toolCalls.map((tc) =>
-              tc._gateway
-                ? <GatewayToolInline key={tc.id} tc={tc} />
-                : <ToolCallCard key={tc.id} tc={tc} />
-            )}
+            <ToolCallTimeline toolCalls={toolCalls} />
           </div>
         )}
         <div className="relative group">
@@ -582,7 +579,7 @@ export const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.modelId === next.modelId &&
     prev.timeLabel === next.timeLabel &&
     prev.showToolCalls === next.showToolCalls &&
-    prev.toolCalls?.length === next.toolCalls?.length &&
+    toolCallsRenderSignature(prev.toolCalls) === toolCallsRenderSignature(next.toolCalls) &&
     prev.usage?.input === next.usage?.input &&
     prev.usage?.output === next.usage?.output &&
     prev.contextPercent === next.contextPercent

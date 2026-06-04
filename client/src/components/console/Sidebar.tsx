@@ -3,28 +3,18 @@ import {
   CalendarClock,
   FolderTree,
   MessageSquareText,
-  Plus,
   Settings2,
   Sparkles,
-  Trash2,
   Users,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { SessionList, type SessionListConversation } from "./SessionList";
 
 export type PageKey = "chat" | "skills" | "weixin" | "agent" | "workspace" | "office" | "schedule" | "collab" | "meeting" | "settings";
 
 type NavItem = { key: PageKey; label: string; icon: any; adminOnly?: boolean };
 
-export type SidebarConversation = {
-  conversationId: string;
-  sessionKey?: string;
-  sessionId?: string;
-  title: string;
-  preview: string;
-  messageCount: number;
-  createdAt: number;
-  updatedAt: number;
-};
+export type SidebarConversation = SessionListConversation;
 
 const primaryItems: NavItem[] = [
   { key: "chat", label: "聊天", icon: MessageSquareText },
@@ -38,19 +28,6 @@ const workbenchItems: NavItem[] = [
   { key: "schedule", label: "定时任务", icon: CalendarClock },
 ];
 
-function formatUpdatedAt(ts: number) {
-  if (!Number.isFinite(ts) || ts <= 0) return "";
-  const d = new Date(ts);
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
-
-function shortTitle(session: SidebarConversation) {
-  return (session.title || "未命名会话").replace(/\s+/g, " ").trim();
-}
-
 export function Sidebar({
   activePage,
   setActivePage,
@@ -62,7 +39,10 @@ export function Sidebar({
   sessionSwitchingId,
   onSwitchConversation,
   onDeleteConversation,
+  onRenameConversation,
+  onTogglePinConversation,
   onNewConversation,
+  sessionsLoading,
   footer,
 }: {
   activePage: PageKey;
@@ -75,7 +55,10 @@ export function Sidebar({
   sessionSwitchingId?: string | null;
   onSwitchConversation?: (conversationId: string) => void;
   onDeleteConversation?: (conversationId: string) => void;
+  onRenameConversation?: (conversationId: string, title: string) => void;
+  onTogglePinConversation?: (conversationId: string, pinned: boolean) => void;
   onNewConversation?: () => void;
+  sessionsLoading?: boolean;
   footer?: ReactNode;
 }) {
   const [openMenu, setOpenMenu] = useState<"settings" | "workbench" | null>(null);
@@ -164,79 +147,19 @@ export function Sidebar({
 
       {!collapsed ? (
         <div className="mt-6 flex-1 min-h-0 flex flex-col">
-          <div className="px-3 mb-1 flex items-center justify-between">
-            <span style={{ color: "var(--oc-sidebar-muted)", fontSize: 12, fontWeight: 400 }}>历史会话</span>
-            {onNewConversation ? (
-              <button
-                type="button"
-                title="新建会话"
-                onClick={onNewConversation}
-                disabled={!!sessionSwitchingId}
-                className="rounded-md flex items-center justify-center"
-                style={{
-                  width: 24,
-                  height: 24,
-                  border: "none",
-                  background: "transparent",
-                  color: "var(--oc-sidebar-muted)",
-                  opacity: sessionSwitchingId ? 0.45 : 1,
-                  cursor: sessionSwitchingId ? "not-allowed" : "pointer",
-                }}
-              >
-                <Plus size={14} />
-              </button>
-            ) : null}
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto stealth-scrollbar pr-1">
-            {sessions.length === 0 ? (
-              <div className="px-3 py-4 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>暂无历史会话</div>
-            ) : (
-              <div className="space-y-0.5">
-                {sessions.map((session) => {
-                  const active = session.conversationId === currentConversationId;
-                  const switching = sessionSwitchingId === session.conversationId;
-                  return (
-                    <button
-                      key={session.conversationId}
-                      type="button"
-                      title={shortTitle(session)}
-                      onClick={() => onSwitchConversation?.(session.conversationId)}
-                      disabled={!!sessionSwitchingId}
-                      className={`group w-full text-left flex items-center gap-3 sidebar-item relative ${active ? "active" : ""}`}
-                      style={{
-                        padding: "10px 16px",
-                        minHeight: 44,
-                        opacity: sessionSwitchingId && !switching ? 0.52 : 1,
-                        cursor: sessionSwitchingId ? "wait" : "pointer",
-                      }}
-                    >
-                      {active && <span className="sidebar-item-indicator" />}
-                      <MessageSquareText size={16} className="sidebar-item-icon" style={{ flexShrink: 0 }} />
-                      <span className="sidebar-item-label min-w-0 flex-1 truncate" style={{ fontSize: 14, fontWeight: 400 }}>
-                        {switching ? "正在切换…" : shortTitle(session)}
-                      </span>
-                      <span className="group-hover:hidden" style={{ color: "var(--oc-sidebar-subtle)", fontSize: 11, flexShrink: 0 }}>
-                        {formatUpdatedAt(session.updatedAt)}
-                      </span>
-                      <span
-                        role="button"
-                        tabIndex={-1}
-                        title="删除会话"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (!sessionSwitchingId) onDeleteConversation?.(session.conversationId);
-                        }}
-                        className="hidden group-hover:flex items-center justify-center rounded-md"
-                        style={{ width: 22, height: 22, color: "var(--oc-sidebar-subtle)", flexShrink: 0 }}
-                      >
-                        <Trash2 size={13} />
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <SessionList
+            sessions={sessions}
+            currentConversationId={currentConversationId}
+            sessionSwitchingId={sessionSwitchingId}
+            onSwitchConversation={onSwitchConversation}
+            onDeleteConversation={onDeleteConversation}
+            onRenameConversation={onRenameConversation}
+            onTogglePinConversation={onTogglePinConversation}
+            onNewConversation={onNewConversation}
+            variant="sidebar"
+            searchable={sessions.length > 8}
+            loading={sessionsLoading}
+          />
         </div>
       ) : (
         <div className="flex-1" />

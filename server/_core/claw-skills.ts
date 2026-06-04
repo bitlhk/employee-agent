@@ -193,6 +193,37 @@ function readOpenClawMcpServers(): Record<string, any> {
   }
 }
 
+function readSkillMarkdownCandidate(dir?: string): { text: string; source: "runtime" | "source" } | null {
+  if (!dir || !existsSync(dir)) return null;
+  try {
+    const st = statSync(dir);
+    if (!st.isDirectory()) return null;
+    const file = path.join(dir, "SKILL.md");
+    if (!existsSync(file)) return null;
+    const fileStat = statSync(file);
+    if (!fileStat.isFile() || fileStat.size > 200 * 1024) return null;
+    const text = String(readFileSync(file, "utf-8") || "");
+    if (!text.trim() || text.includes("\u0000")) return null;
+    return { text, source: "runtime" };
+  } catch {
+    return null;
+  }
+}
+
+function extractSkillIntroduction(skillMd: string, fallback: string): string {
+  const raw = String(skillMd || "");
+  const fm = raw.match(/^---\s*[\r\n]+([\s\S]*?)[\r\n]+---\s*[\r\n]*/);
+  const fmBlock = fm?.[1] || "";
+  const description = fmBlock.match(/^description:\s*['"]?([^'"\n]+)['"]?/mi)?.[1]?.trim();
+  let body = fm ? raw.slice(fm[0].length) : raw;
+  body = body
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/^\s*#\s+.+$/m, "")
+    .trim();
+  const intro = body || description || fallback || "暂无说明";
+  return intro.length > 6000 ? `${intro.slice(0, 6000).trimEnd()}\n\n（内容较长，已截断）` : intro;
+}
+
 function mcpServerExistsOnDisk(serverId: string, raw: any): boolean {
   const command = typeof raw?.command === "string" ? raw.command : "";
   const args = Array.isArray(raw?.args) ? raw.args.map((x: any) => String(x || "")) : [];
@@ -429,6 +460,58 @@ export function registerSkillRoutes(app: express.Express) {
     } catch (e) {
       console.error("[skills registry] list failed", e);
       res.status(500).json({ error: "list skills failed" });
+    }
+  });
+
+  app.get("/api/claw/skills/introduction", async (req, res) => {
+    try {
+      const adoptId = String(req.query.adoptId || "").trim();
+      const skillId = String(req.query.skillId || "").trim();
+      if (!adoptId || !skillId) {
+        res.status(400).json({ error: "adoptId and skillId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      const listed = await skillRegistry.listSkills(adoptId);
+      if (!listed.ok) {
+        res.status(registryErrorStatus(listed.error.kind)).json({ error: listed.error.detail, kind: listed.error.kind });
+        return;
+      }
+      const skill = listed.value.find((item) => item.id === skillId);
+      if (!skill) {
+        res.status(404).json({ error: "skill not found" });
+        return;
+      }
+
+      const runtimeRead = readSkillMarkdownCandidate(skill.sync?.runtimePath);
+      if (runtimeRead) {
+        res.json({
+          skillId,
+          introduction: extractSkillIntroduction(runtimeRead.text, skill.source.description || ""),
+          source: "runtime",
+        });
+        return;
+      }
+
+      const sourceRead = readSkillMarkdownCandidate(skill.source?.sourcePath);
+      if (sourceRead) {
+        res.json({
+          skillId,
+          introduction: extractSkillIntroduction(sourceRead.text, skill.source.description || ""),
+          source: "source",
+        });
+        return;
+      }
+
+      res.json({
+        skillId,
+        introduction: skill.source.description || "暂无说明",
+        source: skill.source.description ? "registry" : "fallback",
+      });
+    } catch (e) {
+      console.error("[skills registry] introduction failed", e);
+      res.status(500).json({ error: "load skill introduction failed" });
     }
   });
 

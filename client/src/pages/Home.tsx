@@ -19,6 +19,7 @@ import { ChatMessage, type ToolCallEntry } from "@/components/ChatMessage";
 import { AgentTaskCard, type AgentTask } from "@/components/AgentTaskCard";
 import { BrandIcon } from "@/components/BrandIcon";
 import { Sidebar, type PageKey } from "@/components/console/Sidebar";
+import { SessionList } from "@/components/console/SessionList";
 import { TopBar } from "@/components/console/TopBar";
 import { MainPanel } from "@/components/console/MainPanel";
 import { SettingsOverlay } from "@/components/settings/SettingsOverlay";
@@ -29,7 +30,7 @@ import { applySettings as applyUiSettings, getSettings, subscribeSettings } from
 import { useLingxiaChat } from "@/hooks/useLingxiaChat";
 import { formatModelName } from "@/lib/modelDisplay";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Bot, History, Plus, Trash2 } from "lucide-react";
+import { Bot, History } from "lucide-react";
 
 
 const ENABLE_OPENCLAW_WS_CHAT = true;
@@ -85,6 +86,7 @@ const webConversationStorageKey = (userId: string, adoptId: string) => `lingxia_
 const legacyWebConversationStorageKey = (adoptId: string) => `lingxia_web_conversation_${adoptId}`;
 const webMessagesStorageKey = (userId: string, adoptId: string, conversationId: string) => `lgc_msgs_${userId}_${adoptId}_${conversationId}`;
 const legacyWebMessagesStorageKey = (adoptId: string, conversationId: string) => `lgc_msgs_${adoptId}_${conversationId}`;
+const webDraftStorageKey = (userId: string, adoptId: string, conversationId: string) => `lingxia_web_draft_${userId}_${adoptId}_${conversationId}`;
 const webSessionIndexStorageKey = (userId: string, adoptId: string) => `lingxia_web_sessions_${userId}_${adoptId}`;
 const webHiddenSessionsStorageKey = (userId: string, adoptId: string) => `lingxia_web_sessions_hidden_${userId}_${adoptId}`;
 const clawStatusStorageKey = (userId: string, adoptId: string) => `lingxia_claw_status_${userId}_${adoptId}`;
@@ -96,10 +98,12 @@ type WebChatSessionRecord = {
   sessionKey?: string;
   sessionId?: string;
   title: string;
+  customTitle?: string;
   preview: string;
   messageCount: number;
   createdAt: number;
   updatedAt: number;
+  pinnedAt?: number;
 };
 
 function normalizeSessionText(text: string) {
@@ -158,11 +162,19 @@ function writeHiddenWebSessions(key: string, hidden: Set<string>) {
   } catch {}
 }
 
+function sortWebSessionRecords(sessions: WebChatSessionRecord[]) {
+  return [...sessions].sort((a, b) => {
+    const aPinned = Number(a.pinnedAt || 0);
+    const bPinned = Number(b.pinnedAt || 0);
+    if (aPinned || bPinned) return bPinned - aPinned;
+    return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+  });
+}
+
 function visibleWebSessionIndex(key: string, hiddenKey?: string | null): WebChatSessionRecord[] {
   const hidden = hiddenKey ? readHiddenWebSessions(hiddenKey) : new Set<string>();
-  return readWebSessionIndex(key)
-    .filter((item) => item?.conversationId && !hidden.has(item.conversationId))
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  return sortWebSessionRecords(readWebSessionIndex(key)
+    .filter((item) => item?.conversationId && !hidden.has(item.conversationId)));
 }
 
 function mergeWebSessionRecords(local: WebChatSessionRecord[], remote: WebChatSessionRecord[], hidden: Set<string>) {
@@ -174,15 +186,19 @@ function mergeWebSessionRecords(local: WebChatSessionRecord[], remote: WebChatSe
     const previousHasBackendSession = Boolean(previous?.sessionKey);
     const itemUpdatedAt = Number(item.updatedAt || 0);
     const previousUpdatedAt = Number(previous?.updatedAt || 0);
+    const localMeta = {
+      customTitle: previous?.customTitle || item.customTitle,
+      pinnedAt: previous?.pinnedAt || item.pinnedAt,
+    };
     if (!previous || itemUpdatedAt >= previousUpdatedAt) {
-      byConversation.set(item.conversationId, { ...previous, ...item });
+      byConversation.set(item.conversationId, { ...previous, ...item, ...localMeta });
     } else if (item.sessionKey && !previous.sessionKey) {
-      byConversation.set(item.conversationId, { ...previous, sessionKey: item.sessionKey, sessionId: item.sessionId });
+      byConversation.set(item.conversationId, { ...previous, ...localMeta, sessionKey: item.sessionKey, sessionId: item.sessionId });
     } else if (itemHasBackendSession && !previousHasBackendSession) {
-      byConversation.set(item.conversationId, { ...item, ...previous, sessionKey: item.sessionKey, sessionId: item.sessionId });
+      byConversation.set(item.conversationId, { ...item, ...previous, ...localMeta, sessionKey: item.sessionKey, sessionId: item.sessionId });
     }
   }
-  return Array.from(byConversation.values()).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 30);
+  return sortWebSessionRecords(Array.from(byConversation.values())).slice(0, 30);
 }
 
 function compactModelDisplayName(name: string) {
@@ -247,6 +263,46 @@ type LxMsg = {
   recoveryFailed?: boolean;
   partialText?: string;            // 截断时已显示的内容（恢复失败时保留）
 };
+
+type ClawReadinessIssue = {
+  code: string;
+  severity: "warning" | "error";
+  message: string;
+};
+
+type ClawHealthSummary = {
+  ok?: boolean;
+  model?: {
+    selected?: string;
+    defaultModel?: string;
+    availableCount?: number;
+    sourceError?: string | null;
+  };
+  readiness?: {
+    ok?: boolean;
+    status?: "ready" | "degraded" | "blocked" | string;
+    summary?: string;
+    issues?: ClawReadinessIssue[];
+    checkedAt?: string;
+  };
+  timings?: Record<string, number>;
+};
+
+function ChatStartupSkeleton() {
+  return (
+    <div className="chat-startup-skeleton max-w-4xl" aria-label="正在加载对话">
+      <div className="chat-startup-skeleton__avatar" />
+      <div className="chat-startup-skeleton__body">
+        <div className="chat-startup-skeleton__bubble">
+          <span style={{ width: "54%" }} />
+          <span style={{ width: "72%" }} />
+          <span style={{ width: "36%" }} />
+        </div>
+        <div className="chat-startup-skeleton__meta" />
+      </div>
+    </div>
+  );
+}
 
 function isLingxiaChatV2Enabled(userId?: number | string | null): boolean {
   const mode = String(import.meta.env.VITE_LINGXIA_CHAT_V2 || "off").toLowerCase();
@@ -642,8 +698,11 @@ export default function Home() {
   const [wsConnected, setWsConnected] = useState(false);
   const MSGS_KEY = resolvedAdoptId && userStorageId && webConversationId ? webMessagesStorageKey(userStorageId, resolvedAdoptId, webConversationId) : null;
   const LEGACY_MSGS_KEY = resolvedAdoptId && webConversationId ? legacyWebMessagesStorageKey(resolvedAdoptId, webConversationId) : null;
+  const DRAFT_KEY = resolvedAdoptId && userStorageId && webConversationId ? webDraftStorageKey(userStorageId, resolvedAdoptId, webConversationId) : null;
   const SESSION_INDEX_KEY = resolvedAdoptId && userStorageId ? webSessionIndexStorageKey(userStorageId, resolvedAdoptId) : null;
   const HIDDEN_SESSION_KEY = resolvedAdoptId && userStorageId ? webHiddenSessionsStorageKey(userStorageId, resolvedAdoptId) : null;
+  const draftHydratingRef = useRef(false);
+  const currentDraftKeyRef = useRef("");
   useEffect(() => {
     if (!MSGS_KEY || !LEGACY_MSGS_KEY) return;
     try {
@@ -653,6 +712,40 @@ export default function Home() {
       }
     } catch {}
   }, [MSGS_KEY, LEGACY_MSGS_KEY]);
+
+  useEffect(() => {
+    draftHydratingRef.current = true;
+    currentDraftKeyRef.current = DRAFT_KEY || "";
+    if (!DRAFT_KEY) {
+      setLingxiaInput("");
+      return;
+    }
+    try {
+      setLingxiaInput(localStorage.getItem(DRAFT_KEY) || "");
+    } catch {
+      setLingxiaInput("");
+    }
+  }, [DRAFT_KEY]);
+
+  useEffect(() => {
+    if (!DRAFT_KEY || currentDraftKeyRef.current !== DRAFT_KEY) return;
+    if (draftHydratingRef.current) {
+      draftHydratingRef.current = false;
+      return;
+    }
+    try {
+      const value = String(lingxiaInput || "");
+      if (value.trim()) localStorage.setItem(DRAFT_KEY, value);
+      else localStorage.removeItem(DRAFT_KEY);
+    } catch {}
+  }, [DRAFT_KEY, lingxiaInput]);
+
+  const clearLingxiaDraft = useCallback(() => {
+    if (!DRAFT_KEY) return;
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {}
+  }, [DRAFT_KEY]);
 
   const chatV2Enabled = isLingxiaChatV2Enabled((user as any)?.id);
   const chatV2 = useLingxiaChat({
@@ -667,9 +760,18 @@ export default function Home() {
   });
   const activeLingxiaMsgs = chatV2Enabled ? chatV2.messages : lingxiaMsgs;
   const activeLingxiaStreaming = chatV2Enabled ? chatV2.isStreaming : lingxiaStreaming;
+  const activeLingxiaMsgsRef = useRef<LxMsg[]>([]);
+  const webConversationIdRef = useRef("");
+  useEffect(() => { activeLingxiaMsgsRef.current = activeLingxiaMsgs as LxMsg[]; }, [activeLingxiaMsgs]);
+  useEffect(() => { webConversationIdRef.current = webConversationId; }, [webConversationId]);
   const [webSessions, setWebSessions] = useState<WebChatSessionRecord[]>([]);
+  const [webSessionsLoading, setWebSessionsLoading] = useState(false);
   const lastBackendHistoryRefreshRef = useRef("");
   const [cachedClawStatus, setCachedClawStatus] = useState<string | null>(null);
+  const [clawHealthSummary, setClawHealthSummary] = useState<ClawHealthSummary | null>(null);
+  const [clawHealthLoading, setClawHealthLoading] = useState(false);
+  const [clawHealthError, setClawHealthError] = useState("");
+  const [showSlowReadinessHint, setShowSlowReadinessHint] = useState(false);
   const CLAW_STATUS_KEY = resolvedAdoptId && userStorageId ? clawStatusStorageKey(userStorageId, resolvedAdoptId) : null;
 
   useEffect(() => {
@@ -701,9 +803,62 @@ export default function Home() {
     } catch {}
   }, [CLAW_STATUS_KEY, clawByAdoptId]);
 
-  const refreshBackendWebSessions = useCallback(async () => {
+  const refreshClawHealthSummary = useCallback(async (silent = true) => {
+    if (!resolvedAdoptId || !user || isDirectHttpRuntime) {
+      setClawHealthSummary(null);
+      setClawHealthError("");
+      return;
+    }
+    const apiBase = import.meta.env.VITE_API_URL || "";
+    if (!silent) setClawHealthLoading(true);
+    try {
+      const response = await fetch(`${apiBase}/api/claw/health-summary?adoptId=${encodeURIComponent(resolvedAdoptId)}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`健康检查失败 (${response.status})`);
+      const data = await response.json().catch(() => null);
+      setClawHealthSummary(data || null);
+      setClawHealthError("");
+    } catch (error: any) {
+      setClawHealthError(String(error?.message || error || "健康检查失败"));
+    } finally {
+      if (!silent) setClawHealthLoading(false);
+    }
+  }, [isDirectHttpRuntime, resolvedAdoptId, user]);
+
+  useEffect(() => {
+    if (!resolvedAdoptId || !user || isDirectHttpRuntime) return;
+    let cancelled = false;
+    const run = async (silent = true) => {
+      if (cancelled) return;
+      await refreshClawHealthSummary(silent);
+    };
+    void run(false);
+    const interval = window.setInterval(() => void run(true), 30000);
+    const onFocus = () => void run(true);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [isDirectHttpRuntime, refreshClawHealthSummary, resolvedAdoptId, user]);
+
+  useEffect(() => {
+    const pending = Boolean(resolvedAdoptId && !isDirectHttpRuntime && ((clawByAdoptLoading && !clawByAdoptId) || clawHealthLoading));
+    if (!pending) {
+      setShowSlowReadinessHint(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowSlowReadinessHint(true), 1500);
+    return () => window.clearTimeout(timer);
+  }, [clawByAdoptId, clawByAdoptLoading, clawHealthLoading, isDirectHttpRuntime, resolvedAdoptId]);
+
+  const refreshBackendWebSessions = useCallback(async (silent = false) => {
     if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return [];
     const apiBase = import.meta.env.VITE_API_URL || "";
+    if (!silent) setWebSessionsLoading(true);
     try {
       const response = await fetch(`${apiBase}/api/claw/chat-history/sessions?adoptId=${encodeURIComponent(resolvedAdoptId)}&limit=60`, {
         credentials: "include",
@@ -727,6 +882,8 @@ export default function Home() {
     } catch (error) {
       console.warn("[history] backend sync failed; keeping local session cache", error);
       return [];
+    } finally {
+      if (!silent) setWebSessionsLoading(false);
     }
   }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime]);
 
@@ -776,18 +933,46 @@ export default function Home() {
       sessionKey: previous?.sessionKey,
       sessionId: previous?.sessionId,
       title: previous?.sessionKey && previous.title ? previous.title : title,
+      customTitle: previous?.customTitle,
       preview: previous?.sessionKey && previous.preview ? previous.preview : preview,
       messageCount: meaningfulMessages.length,
       createdAt: previous?.createdAt || now,
       updatedAt: now,
+      pinnedAt: previous?.pinnedAt,
     };
     const next = [
       nextRecord,
       ...existing.filter((item) => item.conversationId !== webConversationId),
-    ].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 30);
-    writeWebSessionIndex(SESSION_INDEX_KEY, next);
-    setWebSessions(next);
+    ];
+    const sorted = sortWebSessionRecords(next).slice(0, 30);
+    writeWebSessionIndex(SESSION_INDEX_KEY, sorted);
+    setWebSessions(sorted);
   }, [SESSION_INDEX_KEY, webConversationId, activeLingxiaMsgs, isDirectHttpRuntime]);
+
+  const updateWebSessionMeta = useCallback((conversationId: string, patch: Partial<WebChatSessionRecord>) => {
+    if (!SESSION_INDEX_KEY) return;
+    let nextSessions: WebChatSessionRecord[] = [];
+    setWebSessions((previous) => {
+      const source = previous.length > 0 ? previous : readWebSessionIndex(SESSION_INDEX_KEY);
+      nextSessions = sortWebSessionRecords(source.map((item) =>
+        item.conversationId === conversationId ? { ...item, ...patch } : item
+      ));
+      writeWebSessionIndex(SESSION_INDEX_KEY, nextSessions);
+      return nextSessions;
+    });
+  }, [SESSION_INDEX_KEY]);
+
+  const renameLingxiaConversation = useCallback((conversationId: string, title: string) => {
+    const customTitle = normalizeSessionText(title).slice(0, 60);
+    if (!customTitle) return;
+    updateWebSessionMeta(conversationId, { customTitle });
+    toast.success("会话已重命名");
+  }, [updateWebSessionMeta]);
+
+  const togglePinLingxiaConversation = useCallback((conversationId: string, pinned: boolean) => {
+    updateWebSessionMeta(conversationId, { pinnedAt: pinned ? Date.now() : 0 });
+    toast.success(pinned ? "会话已置顶" : "已取消置顶");
+  }, [updateWebSessionMeta]);
 
   const restoreLingxiaMessages = (messages: any[]) => {
     const nextMessages = backfillLxMsgIds(messages || []);
@@ -819,6 +1004,104 @@ export default function Home() {
     setMentionedUsers([]);
     setLingxiaNearBottom(true);
   };
+
+  const applyCanonicalConversationText = useCallback((args: {
+    conversationId: string;
+    assistantMessageId: string;
+    streamSeq: number;
+    messages: any[];
+  }) => {
+    if (streamSeqRef.current !== args.streamSeq) return false;
+    if (webConversationIdRef.current !== args.conversationId) return false;
+    const canonical = backfillLxMsgIds(args.messages || []);
+    const canonicalLastAssistant = [...canonical].reverse().find((msg) => msg.role === "assistant" && normalizeSessionText(msg.text || ""));
+    if (!canonicalLastAssistant) return false;
+
+    const merge = (current: LxMsg[]) => {
+      const idx = current.findIndex((msg) => msg.id === args.assistantMessageId && msg.role === "assistant");
+      if (idx < 0 || idx !== current.length - 1) return current;
+      const currentMessage = current[idx];
+      const canonicalText = String(canonicalLastAssistant.text || "");
+      if (!canonicalText || canonicalText === currentMessage.text) return current;
+      if (normalizeSessionText(canonicalText).length < normalizeSessionText(currentMessage.text || "").length) {
+        return current;
+      }
+      const next = [...current];
+      next[idx] = {
+        ...currentMessage,
+        text: canonicalText,
+        status: undefined,
+        recovering: false,
+        recovered: false,
+        recoveryFailed: false,
+      };
+      return next;
+    };
+
+    if (chatV2Enabled) {
+      const current = activeLingxiaMsgsRef.current || [];
+      const next = merge(current);
+      if (next === current) return false;
+      chatV2.restore(next as any);
+      return true;
+    }
+
+    let changed = false;
+    setLingxiaMsgs((current) => {
+      const next = merge(current);
+      changed = next !== current;
+      return next;
+    });
+    return changed;
+  }, [chatV2, chatV2Enabled]);
+
+  const reconcileStreamedConversation = useCallback(async (args: {
+    conversationId: string;
+    assistantMessageId: string;
+    streamSeq: number;
+  }) => {
+    if (!resolvedAdoptId || isDirectHttpRuntime) return;
+    const delays = [450, 1200, 2400];
+    const apiBase = import.meta.env.VITE_API_URL || "";
+    for (const delayMs of delays) {
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+      if (streamSeqRef.current !== args.streamSeq || webConversationIdRef.current !== args.conversationId) return;
+      let sessionKey = "";
+      try {
+        const sessions = await refreshBackendWebSessions(true);
+        sessionKey = String(sessions.find((item) => item.conversationId === args.conversationId)?.sessionKey || "");
+      } catch {}
+      if (!sessionKey) continue;
+
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 1800);
+      try {
+        const response = await fetch(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(sessionKey)}`, {
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!response.ok) continue;
+        const payload = await response.json().catch(() => null);
+        if (!Array.isArray(payload?.messages)) continue;
+        const changed = applyCanonicalConversationText({
+          ...args,
+          messages: payload.messages,
+        });
+        if (changed) {
+          console.log("[reconcile] canonical conversation text applied", {
+            conversationId: args.conversationId,
+            sessionKey,
+            messageCount: payload.messages.length,
+          });
+        }
+        return;
+      } catch {
+        // 对账是后台补偿，失败不影响主聊天。
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+  }, [applyCanonicalConversationText, isDirectHttpRuntime, refreshBackendWebSessions, resolvedAdoptId]);
 
   useEffect(() => {
     const pending = pendingConversationRestoreRef.current;
@@ -1170,6 +1453,7 @@ export default function Home() {
         { id: makeLxMsgId(), role: "user" as const, text, timeLabel: nowLabel },
         { id: makeLxMsgId(), role: "assistant" as const, text: helpMd, timeLabel: assistantTimeLabel },
       ]);
+      clearLingxiaDraft();
       setLingxiaInput("");
       return;
     }
@@ -1177,11 +1461,13 @@ export default function Home() {
     const userMessageId = makeLxMsgId();
     const assistantMessageId = makeLxMsgId();
     const clientRunId = makeClientRunId();
+    const conversationIdAtSend = webConversationId;
     setLingxiaMsgs((prev) => [
       ...prev,
       { id: userMessageId, role: "user", text, timeLabel: nowLabel },
       { id: assistantMessageId, role: "assistant", text: "", timeLabel: assistantTimeLabel },
     ]);
+    clearLingxiaDraft();
     setLingxiaInput("");
     setLingxiaStreaming(true);
     setLingxiaNearBottom(true);
@@ -1227,6 +1513,7 @@ export default function Home() {
                 console.log("[DIAG] ✅ WSS 收到 __stream_end，流结束");
                 setLingxiaStreaming(false);
                 wsClient.setRawHandler(null);
+                if (conversationIdAtSend) void reconcileStreamedConversation({ conversationId: conversationIdAtSend, assistantMessageId, streamSeq: myStreamSeq });
                 return;
               }
               // ── 2026-04-29 批次 2 A3：上游 EOF 但 runtime 未确认完成 ──
@@ -1409,6 +1696,7 @@ export default function Home() {
                 console.log("[DIAG] ✅ WSS finish_reason=stop，流结束");
                 setLingxiaStreaming(false);
                 wsClient.setRawHandler(null);
+                if (conversationIdAtSend) void reconcileStreamedConversation({ conversationId: conversationIdAtSend, assistantMessageId, streamSeq: myStreamSeq });
               }
             } catch {}
           };
@@ -1501,6 +1789,7 @@ export default function Home() {
 
       let currentEvent = ""; // fix: 跨 chunk 保持 SSE event 状态
       let sseDone = false;
+      let shouldReconcileCanonical = false;
       while (!sseDone) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -1523,6 +1812,7 @@ export default function Home() {
           if (raw === "[DONE]") {
             console.log("[DIAG] ✅ 收到 [DONE]，流结束");
             flushDelta();
+            shouldReconcileCanonical = true;
             sseDone = true;
             break;
           }
@@ -1706,6 +1996,7 @@ export default function Home() {
             if (chunk.__stream_end) {
               console.log("[DIAG] ✅ 收到 __stream_end，流结束");
               flushDelta();
+              shouldReconcileCanonical = true;
               sseDone = true;
               break;
             }
@@ -1796,6 +2087,9 @@ export default function Home() {
         firstUpstreamChunkToFirstPaintMs: toDur(perf.upstreamFirstChunkMs, perf.firstPaintMs),
         firstPaintToDoneMs: toDur(perf.firstPaintMs, perf.clientDoneMs),
       });
+      if (shouldReconcileCanonical && !isStale() && conversationIdAtSend) {
+        void reconcileStreamedConversation({ conversationId: conversationIdAtSend, assistantMessageId, streamSeq: myStreamSeq });
+      }
     } catch (error: any) {
       // SSE race fix: stale 流的 AbortError / 网络错误都不要写 state，否则会污染新流
       if (isStale()) return;
@@ -1961,6 +2255,51 @@ export default function Home() {
   const lingxiaExpiryInfo = useMemo(() => ({ text: "长期持有", color: "var(--oc-success)" }), []);
   const sidebarClawStatus = String((clawByAdoptId as any)?.status || cachedClawStatus || "");
   const sidebarClawOnline = sidebarClawStatus === "active";
+  const chatReadinessBanner = useMemo(() => {
+    if (!resolvedAdoptId || isDirectHttpRuntime) return null;
+    if (showSlowReadinessHint && clawByAdoptLoading && !clawByAdoptId) {
+      return { severity: "info" as const, text: "正在连接 OpenClaw…", detail: "" };
+    }
+    if (!clawByAdoptLoading && !clawByAdoptId) {
+      return { severity: "error" as const, text: "未找到当前员工智能体实例", detail: "请确认实例仍有效，或切换到有权限的工作台。" };
+    }
+    if (clawHealthError) {
+      return { severity: "warning" as const, text: "健康检查暂时不可用", detail: clawHealthError };
+    }
+    const readiness = clawHealthSummary?.readiness;
+    if (!readiness && clawHealthLoading && showSlowReadinessHint) {
+      return { severity: "info" as const, text: "正在检查模型与 OpenClaw 配置…", detail: "" };
+    }
+    if (!readiness) return null;
+    const selectedModel = String(clawHealthSummary?.model?.selected || effectiveLingxiaModelId || "").trim();
+    const elapsed = Number(clawHealthSummary?.timings?.total || 0);
+    const elapsedText = elapsed > 0 ? ` · ${elapsed}ms` : "";
+    if (readiness.status === "blocked" || readiness.ok === false) {
+      return {
+        severity: "error" as const,
+        text: readiness.summary || "当前智能体配置不可用",
+        detail: selectedModel ? `当前模型：${selectedModel}${elapsedText}` : elapsedText.replace(/^ · /, ""),
+      };
+    }
+    if (readiness.status === "degraded" || (readiness.issues || []).length > 0) {
+      return {
+        severity: "warning" as const,
+        text: readiness.summary || "部分配置需要检查",
+        detail: selectedModel ? `当前模型：${selectedModel}${elapsedText}` : elapsedText.replace(/^ · /, ""),
+      };
+    }
+    return null;
+  }, [
+    clawByAdoptId,
+    clawByAdoptLoading,
+    clawHealthError,
+    clawHealthLoading,
+    clawHealthSummary,
+    effectiveLingxiaModelId,
+    isDirectHttpRuntime,
+    resolvedAdoptId,
+    showSlowReadinessHint,
+  ]);
 
   const navLabel = (key: string) => LINGXIA_SIDEBAR_NAV.find((i) => i.key === key)?.label || key;
   const NavIcon = ({ navKey }: { navKey: keyof typeof sidebarIconMap }) => {
@@ -2071,7 +2410,10 @@ export default function Home() {
               sessionSwitchingId={sessionSwitchingId}
               onSwitchConversation={(conversationId) => void switchLingxiaConversation(conversationId)}
               onDeleteConversation={(conversationId) => void deleteLingxiaConversation(conversationId)}
+              onRenameConversation={renameLingxiaConversation}
+              onTogglePinConversation={togglePinLingxiaConversation}
               onNewConversation={startNewLingxiaConversation}
+              sessionsLoading={webSessionsLoading && webSessions.length === 0}
               footer={(
                 <SidebarFooter
                   version={isJiuwenRuntime ? "JiuwenClaw" : isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
@@ -2137,78 +2479,31 @@ export default function Home() {
                   <span>历史</span>
                   <span style={{ color: "var(--oc-text-tertiary)" }}>{webSessions.length}</span>
                 </button>
-                <button
-                  type="button"
-                  title="新建会话"
-                  onClick={startNewLingxiaConversation}
-                  disabled={activeLingxiaStreaming || !!sessionSwitchingId}
-                  className="flex items-center justify-center rounded-md"
-                  style={{
-                    width: 36,
-                    height: 36,
-                    border: "1px solid var(--oc-border-subtle)",
-                    background: "var(--oc-bg-surface)",
-                    color: "var(--oc-text-primary)",
-                    opacity: activeLingxiaStreaming || sessionSwitchingId ? 0.5 : 1,
-                  }}
-                >
-                  <Plus size={16} />
-                </button>
                 {sessionMenuOpen ? (
                   <div
-                    className="absolute left-0 right-0 top-[44px] z-50 rounded-lg p-2 shadow-xl"
+                    className="absolute left-0 right-0 top-[44px] z-50 rounded-lg p-3 shadow-xl"
                     style={{
-                      maxHeight: "55vh",
-                      overflowY: "auto",
+                      maxHeight: "62vh",
                       border: "1px solid var(--oc-border-subtle)",
                       background: "var(--oc-bg-surface)",
+                      display: "flex",
+                      flexDirection: "column",
                     }}
                   >
-                    {webSessions.length === 0 ? (
-                      <div className="px-3 py-4 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>暂无历史会话</div>
-                    ) : (
-                      <div className="space-y-1">
-                        {webSessions.map((session) => {
-                          const active = session.conversationId === webConversationId;
-                          const switching = sessionSwitchingId === session.conversationId;
-                          return (
-                            <div
-                              key={session.conversationId}
-                              className="flex items-center gap-2 rounded-md"
-                              style={{
-                                background: active ? "var(--oc-sidebar-item-active)" : "transparent",
-                              }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => void switchLingxiaConversation(session.conversationId)}
-                                disabled={!!sessionSwitchingId}
-                                className="min-w-0 flex-1 px-3 py-2 text-left"
-                              >
-                                <div className="truncate text-sm" style={{ color: "var(--oc-text-primary)" }}>
-                                  {switching ? "正在切换..." : session.title || "未命名会话"}
-                                </div>
-                                {session.preview ? (
-                                  <div className="mt-0.5 truncate text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
-                                    {session.preview}
-                                  </div>
-                                ) : null}
-                              </button>
-                              <button
-                                type="button"
-                                title="删除会话"
-                                onClick={() => void deleteLingxiaConversation(session.conversationId)}
-                                disabled={!!sessionSwitchingId}
-                                className="mr-1 flex items-center justify-center rounded-md"
-                                style={{ width: 32, height: 32, color: "var(--oc-text-tertiary)" }}
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <SessionList
+                      sessions={webSessions}
+                      currentConversationId={webConversationId}
+                      sessionSwitchingId={sessionSwitchingId}
+                      onSwitchConversation={(conversationId) => void switchLingxiaConversation(conversationId)}
+                      onDeleteConversation={(conversationId) => void deleteLingxiaConversation(conversationId)}
+                      onRenameConversation={renameLingxiaConversation}
+                      onTogglePinConversation={togglePinLingxiaConversation}
+                      onNewConversation={startNewLingxiaConversation}
+                      variant="mobile"
+                      searchable
+                      title="会话"
+                      loading={webSessionsLoading && webSessions.length === 0}
+                    />
                   </div>
                 ) : null}
               </div>
@@ -2221,8 +2516,7 @@ export default function Home() {
               className="flex-1 min-h-0 overflow-y-auto pt-6 px-6 space-y-5 stealth-scrollbar" style={{ paddingBottom: 100 }}
             >
 
-
-              {clawByAdoptLoading && <p className="text-sm" style={{ color: "var(--oc-text-tertiary)" }}>加载中…</p>}
+              {clawByAdoptLoading && activeLingxiaMsgs.length === 0 ? <ChatStartupSkeleton /> : null}
 
               {!clawByAdoptLoading && !clawByAdoptId && (
                 <div className="max-w-4xl rounded-xl p-4 text-sm" style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)", color: "#d4a030" }}>
@@ -2288,6 +2582,15 @@ export default function Home() {
             )}
 
             {/* 输入区 */}
+            {chatReadinessBanner ? (
+              <div className={`lingxia-readiness-banner lingxia-readiness-banner--${chatReadinessBanner.severity}`}>
+                <span className="lingxia-readiness-banner__dot" />
+                <span className="lingxia-readiness-banner__text">{chatReadinessBanner.text}</span>
+                {chatReadinessBanner.detail ? (
+                  <span className="lingxia-readiness-banner__detail">{chatReadinessBanner.detail}</span>
+                ) : null}
+              </div>
+            ) : null}
             <ChatInput
               value={lingxiaInput}
               onChange={setLingxiaInput}
@@ -2308,9 +2611,10 @@ export default function Home() {
                 if (chatV2Enabled) {
                   if (!finalText.trim() || chatV2.isStreaming) return false;
                   setMentionedUsers([]);
-                  setLingxiaInput("");
                   setLingxiaNearBottom(true);
                   await chatV2.send(finalText);
+                  clearLingxiaDraft();
+                  setLingxiaInput("");
                   return true;
                 }
                 // 重扫 text 里实际还有的 @userName，过滤掉用户已删除的 mention（防 mentionedUsers 状态 ghost）
@@ -2335,6 +2639,9 @@ export default function Home() {
 	                      subtask: finalText,
 	                    })),
 	                  });
+                    clearLingxiaDraft();
+                    setMentionedUsers([]);
+                    setLingxiaInput("");
 	                  return true;
 	                }
                 // ≥2 人 → 跳 /coop/new 让用户给每人分子任务（飞书+Linear 模式）
@@ -2346,6 +2653,7 @@ export default function Home() {
                   }));
                 } catch {}
 	                setMentionedUsers([]);
+                  clearLingxiaDraft();
 	                setLingxiaInput("");
 	                setLocationCoop("/coop/new");
 	                return true;

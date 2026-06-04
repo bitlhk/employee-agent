@@ -13,6 +13,7 @@ import {
   openClawSkillMarketDir,
   openClawWorkspaceDir,
   readSessionEpoch,
+  resolveRuntimeAgentId,
   requireClawOwner,
   upsertSessionRegistry,
 } from "./helpers";
@@ -23,7 +24,21 @@ import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer } from "./skills/skill
 type UsageBucket = { total: number; days: Record<string, number>; lastTs: string; userId: number };
 type ChatHistoryMessage = { id: string; role: "user" | "assistant"; text: string; timeLabel: string; timestamp: number };
 type HistoryRunMessages = { source: string; runAt: number; messages: ChatHistoryMessage[] };
+type ChatHistorySessionSummary = {
+  title: string;
+  preview: string;
+  messageCount: number;
+};
+type ChatHistorySummaryCache = {
+  version: 1;
+  entries: Record<string, {
+    fingerprint: string;
+    summary: ChatHistorySessionSummary;
+    cachedAt: number;
+  }>;
+};
 const iosLoadDebugEnabled = process.env.IOS_LOAD_DEBUG === "1";
+const CHAT_HISTORY_SUMMARY_CACHE_FILE = ".employee-agent-chat-history-summary-cache.json";
 
 function logIosLoadDebug(message: string, fields: Record<string, unknown> = {}): void {
   if (!iosLoadDebugEnabled) return;
@@ -363,6 +378,109 @@ function listTrajectoryFiles(rootDir: string, maxFiles: number): string[] {
     .map((item) => item.path);
 }
 
+function sessionSummaryCachePath(sessionsDir: string): string {
+  return path.join(sessionsDir, CHAT_HISTORY_SUMMARY_CACHE_FILE);
+}
+
+function readSessionSummaryCache(sessionsDir: string): ChatHistorySummaryCache {
+  try {
+    const cachePath = sessionSummaryCachePath(sessionsDir);
+    if (!existsSync(cachePath)) return { version: 1, entries: {} };
+    const parsed = JSON.parse(readFileSync(cachePath, "utf8") || "{}");
+    if (parsed?.version !== 1 || !parsed.entries || typeof parsed.entries !== "object") {
+      return { version: 1, entries: {} };
+    }
+    return { version: 1, entries: parsed.entries };
+  } catch {
+    return { version: 1, entries: {} };
+  }
+}
+
+function writeSessionSummaryCache(sessionsDir: string, cache: ChatHistorySummaryCache): void {
+  try {
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(sessionSummaryCachePath(sessionsDir), JSON.stringify(cache, null, 2), "utf8");
+  } catch (error: any) {
+    console.warn("[chat-history] summary cache write failed", error?.message || error);
+  }
+}
+
+function trajectoryDirectoryFingerprint(sessionsDir: string): string {
+  let count = 0;
+  let latestMtime = 0;
+  let totalSize = 0;
+  try {
+    const entries = readdirSync(sessionsDir, { withFileTypes: true }) as any;
+    for (const entry of entries as any[]) {
+      if (!entry.isFile() || !entry.name.endsWith(".trajectory.jsonl")) continue;
+      const st = statSync(path.join(sessionsDir, entry.name));
+      count += 1;
+      latestMtime = Math.max(latestMtime, Math.round(st.mtimeMs || 0));
+      totalSize += Number(st.size || 0);
+    }
+  } catch {}
+  return `${count}:${latestMtime}:${totalSize}`;
+}
+
+function sessionFileFingerprint(sessionFile: string): string {
+  try {
+    if (!sessionFile || !existsSync(sessionFile)) return "missing";
+    const st = statSync(sessionFile);
+    return `${Math.round(st.mtimeMs || 0)}:${Number(st.size || 0)}`;
+  } catch {
+    return "error";
+  }
+}
+
+function buildSessionSummaryFingerprint(entry: any, trajectoryFingerprint: string): string {
+  return [
+    String(entry?.sessionId || ""),
+    String(entry?.sessionKey || ""),
+    Math.round(Number(entry?.updatedAt || 0) || 0),
+    sessionFileFingerprint(String(entry?.sessionFile || "")),
+    trajectoryFingerprint,
+  ].join("|");
+}
+
+function summarizeChatHistorySession(args: {
+  sessionsDir: string;
+  entry: any;
+  cache: ChatHistorySummaryCache;
+  trajectoryFingerprint: string;
+  stats: { hits: number; misses: number };
+}): ChatHistorySessionSummary {
+  const cacheKey = String(args.entry?.sessionKey || args.entry?.conversationId || "");
+  const fingerprint = buildSessionSummaryFingerprint(args.entry, args.trajectoryFingerprint);
+  const cached = cacheKey ? args.cache.entries[cacheKey] : null;
+  if (cached?.fingerprint === fingerprint) {
+    args.stats.hits += 1;
+    return cached.summary;
+  }
+
+  args.stats.misses += 1;
+  const messages = collectOpenClawChatHistoryMessages({
+    sessionsDir: args.sessionsDir,
+    sessionKey: args.entry.sessionKey,
+    currentSessionFile: args.entry.sessionFile,
+    maxMessages: 80,
+  });
+  const firstUser = messages.find((m) => m.role === "user");
+  const last = [...messages].reverse().find((m) => normalizeHistoryText(m.text));
+  const summary = {
+    title: truncateHistoryText(firstUser?.text || "", 24) || "新对话",
+    preview: truncateHistoryText(last?.text || "", 42),
+    messageCount: messages.length,
+  };
+  if (cacheKey) {
+    args.cache.entries[cacheKey] = {
+      fingerprint,
+      summary,
+      cachedAt: Date.now(),
+    };
+  }
+  return summary;
+}
+
 export function registerMiscRoutes(app: express.Express) {
 
   // ── Runtime info ──────────────────────────────────────
@@ -383,6 +501,151 @@ export function registerMiscRoutes(app: express.Express) {
       res.json({ adoptId, dbAgentId, runtimeAgentId, skillsDir, trialAgentDirExists: existsSync(trialAgentDir) });
     } catch (e) {
       res.status(500).json({ error: "runtime info failed" });
+    }
+  });
+
+  app.get("/api/claw/health-summary", async (req, res) => {
+    const startedAt = Date.now();
+    const timings: Record<string, number> = {};
+    let stepStartedAt = startedAt;
+    const mark = (name: string) => {
+      timings[name] = Date.now() - stepStartedAt;
+      stepStartedAt = Date.now();
+    };
+    try {
+      const adoptId = String(req.query.adoptId || "").trim();
+      if (!adoptId) {
+        res.status(400).json({ error: "adoptId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      mark("auth");
+      if (!claw) return;
+
+      const dbAgentId = String((claw as any).agentId || "").trim();
+      const runtimeAgentId = resolveRuntimeAgentId(adoptId, dbAgentId);
+      const agentDir = openClawAgentDir(runtimeAgentId);
+      const workspaceDir = openClawWorkspaceDir(runtimeAgentId);
+      const sessionsDir = path.join(agentDir, "sessions");
+      const sessionsPath = path.join(sessionsDir, "sessions.json");
+      const trialAgentDir = openClawAgentDir(`trial_${adoptId}`);
+      mark("runtime");
+
+      let rawIndexCount = 0;
+      let sessionIndexReadable = false;
+      try {
+        if (existsSync(sessionsPath)) {
+          const rawIndex = JSON.parse(readFileSync(sessionsPath, "utf8") || "{}") || {};
+          rawIndexCount = Object.keys(rawIndex).length;
+          sessionIndexReadable = true;
+        }
+      } catch {}
+      const cachePath = sessionSummaryCachePath(sessionsDir);
+      let cacheEntryCount = 0;
+      let cacheMtimeMs = 0;
+      try {
+        const cache = readSessionSummaryCache(sessionsDir);
+        cacheEntryCount = Object.keys(cache.entries || {}).length;
+        cacheMtimeMs = existsSync(cachePath) ? Math.round(statSync(cachePath).mtimeMs || 0) : 0;
+      } catch {}
+      mark("history");
+
+      let models: Array<{ id: string; name: string; desc?: string; isDefault?: boolean }> = [];
+      let modelSourceError = "";
+      try {
+        const { getAvailableClawModelsFromConfig } = await import("../routers/helpers");
+        models = getAvailableClawModelsFromConfig();
+      } catch (error: any) {
+        modelSourceError = String(error?.message || error);
+      }
+      let profileModel = "";
+      let modelOverride = "";
+      try {
+        const { getClawProfileSettings } = await import("../db");
+        const settings = await getClawProfileSettings(Number((claw as any).id || 0));
+        profileModel = String((settings as any)?.model || "");
+      } catch {}
+      try {
+        const overridesPath = path.join(APP_ROOT, "data", "claw-model-overrides.json");
+        const overrides = existsSync(overridesPath)
+          ? JSON.parse(readFileSync(overridesPath, "utf8") || "{}")
+          : {};
+        modelOverride = String(overrides?.[adoptId] || "");
+      } catch {}
+      const defaultModel = models.find((model) => model.isDefault)?.id || models[0]?.id || "";
+      const selectedModel = modelOverride || profileModel || defaultModel;
+      const modelIds = new Set(models.map((model) => model.id));
+      const readinessIssues: Array<{ code: string; severity: "warning" | "error"; message: string }> = [];
+      if (!existsSync(OPENCLAW_JSON_PATH)) {
+        readinessIssues.push({ code: "openclaw_config_missing", severity: "error", message: "OpenClaw 配置文件不存在" });
+      }
+      if (!existsSync(agentDir)) {
+        readinessIssues.push({ code: "agent_dir_missing", severity: "error", message: "OpenClaw agent 目录不存在" });
+      }
+      if (!existsSync(workspaceDir)) {
+        readinessIssues.push({ code: "workspace_dir_missing", severity: "warning", message: "OpenClaw workspace 目录不存在" });
+      }
+      if (models.length === 0) {
+        readinessIssues.push({ code: "models_empty", severity: "error", message: "未读取到可用模型" });
+      }
+      if (modelSourceError) {
+        readinessIssues.push({ code: "model_source_error", severity: "warning", message: `模型配置读取异常：${modelSourceError}` });
+      }
+      if (selectedModel && models.length > 0 && !modelIds.has(selectedModel)) {
+        readinessIssues.push({ code: "selected_model_unavailable", severity: "warning", message: `当前模型 ${selectedModel} 不在前端可用模型列表中` });
+      }
+      const readinessOk = !readinessIssues.some((issue) => issue.severity === "error");
+      mark("model");
+
+      timings.total = Date.now() - startedAt;
+      res.json({
+        ok: true,
+        adoptId,
+        runtime: {
+          dbAgentId,
+          runtimeAgentId,
+          trialAgentDirExists: existsSync(trialAgentDir),
+          agentDirExists: existsSync(agentDir),
+          workspaceDirExists: existsSync(workspaceDir),
+        },
+        openclaw: {
+          home: OPENCLAW_HOME,
+          configPath: OPENCLAW_JSON_PATH,
+          configExists: existsSync(OPENCLAW_JSON_PATH),
+        },
+        model: {
+          selected: selectedModel,
+          defaultModel,
+          profileModel,
+          overrideModel: modelOverride,
+          availableCount: models.length,
+          availableModels: models.slice(0, 20),
+          sourceError: modelSourceError || null,
+        },
+        readiness: {
+          ok: readinessOk,
+          status: readinessOk ? (readinessIssues.length > 0 ? "degraded" : "ready") : "blocked",
+          summary: readinessOk
+            ? (readinessIssues.length > 0 ? readinessIssues[0]?.message || "部分配置需要检查" : "ready")
+            : readinessIssues[0]?.message || "当前智能体不可用",
+          issues: readinessIssues,
+          checkedAt: new Date(startedAt).toISOString(),
+        },
+        history: {
+          sessionsPath,
+          sessionsDirExists: existsSync(sessionsDir),
+          sessionIndexReadable,
+          rawIndexCount,
+          summaryCachePath: cachePath,
+          summaryCacheExists: existsSync(cachePath),
+          summaryCacheEntryCount: cacheEntryCount,
+          summaryCacheMtimeMs: cacheMtimeMs,
+        },
+        timings,
+      });
+    } catch (error: any) {
+      console.warn("[health-summary] failed", error?.message || error);
+      res.status(500).json({ error: "health_summary_failed" });
     }
   });
 
@@ -467,30 +730,36 @@ export function registerMiscRoutes(app: express.Express) {
         }
       }
 
+      const summaryStartedAt = Date.now();
+      const summaryCache = readSessionSummaryCache(sessionsDir);
+      const summaryCacheStats = { hits: 0, misses: 0 };
+      const trajectoryFingerprint = trajectoryDirectoryFingerprint(sessionsDir);
       const sessions = Array.from(byConversation.values())
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, limit)
         .map((entry) => {
-          const messages = collectOpenClawChatHistoryMessages({
+          const summary = summarizeChatHistorySession({
             sessionsDir,
-            sessionKey: entry.sessionKey,
-            currentSessionFile: entry.sessionFile,
-            maxMessages: 80,
+            entry,
+            cache: summaryCache,
+            trajectoryFingerprint,
+            stats: summaryCacheStats,
           });
-          const firstUser = messages.find((m) => m.role === "user");
-          const last = [...messages].reverse().find((m) => normalizeHistoryText(m.text));
           return {
             conversationId: entry.conversationId,
             sessionKey: entry.sessionKey,
             sessionId: entry.sessionId,
-            title: truncateHistoryText(firstUser?.text || "", 24) || "新对话",
-            preview: truncateHistoryText(last?.text || "", 42),
-            messageCount: messages.length,
+            title: summary.title,
+            preview: summary.preview,
+            messageCount: summary.messageCount,
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,
           };
         })
         .filter((entry) => entry.messageCount > 0);
+      if (summaryCacheStats.misses > 0) {
+        writeSessionSummaryCache(sessionsDir, summaryCache);
+      }
 
       logIosLoadDebug("chat_history_sessions_done", {
         adoptId,
@@ -498,9 +767,21 @@ export function registerMiscRoutes(app: express.Express) {
         rawIndexCount,
         conversationCount: byConversation.size,
         returnedCount: sessions.length,
+        summaryCacheHits: summaryCacheStats.hits,
+        summaryCacheMisses: summaryCacheStats.misses,
+        summaryMs: Date.now() - summaryStartedAt,
         ms: Date.now() - startedAt,
       });
-      res.json({ sessions });
+      res.json({
+        sessions,
+        meta: {
+          cache: summaryCacheStats,
+          timings: {
+            summaryMs: Date.now() - summaryStartedAt,
+            totalMs: Date.now() - startedAt,
+          },
+        },
+      });
     } catch (error: any) {
       console.warn("[chat-history] list failed", error?.message || error);
       logIosLoadDebug("chat_history_sessions_error", {
