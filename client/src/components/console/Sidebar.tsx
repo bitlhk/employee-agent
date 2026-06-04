@@ -37,6 +37,7 @@ export function Sidebar({
   sessions = [],
   currentConversationId,
   sessionSwitchingId,
+  messageSearchProvider,
   onSwitchConversation,
   onDeleteConversation,
   onRenameConversation,
@@ -53,6 +54,7 @@ export function Sidebar({
   sessions?: SidebarConversation[];
   currentConversationId?: string;
   sessionSwitchingId?: string | null;
+  messageSearchProvider?: (conversationId: string, query: string) => string;
   onSwitchConversation?: (conversationId: string) => void;
   onDeleteConversation?: (conversationId: string) => void;
   onRenameConversation?: (conversationId: string, title: string) => void;
@@ -151,6 +153,7 @@ export function Sidebar({
             sessions={sessions}
             currentConversationId={currentConversationId}
             sessionSwitchingId={sessionSwitchingId}
+            messageSearchProvider={messageSearchProvider}
             onSwitchConversation={onSwitchConversation}
             onDeleteConversation={onDeleteConversation}
             onRenameConversation={onRenameConversation}

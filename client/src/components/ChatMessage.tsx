@@ -343,37 +343,86 @@ function toolCallDurationLabel(tc: ToolCallEntry): string {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
+function toolCallStatusLabel(status: ToolCallEntry["status"]): string {
+  return status === "running" ? "执行中" : status === "error" ? "失败" : "完成";
+}
+
+function toolCallSummaryLabel(calls: ToolCallEntry[]): string {
+  if (calls.length === 1) {
+    const call = calls[0];
+    const duration = toolCallDurationLabel(call);
+    return [
+      toolCallLabel(call),
+      toolCallStatusLabel(call.status),
+      duration,
+      call.outputFiles?.length ? `${call.outputFiles.length} 个文件` : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  const running = calls.filter((tc) => tc.status === "running").length;
+  const errors = calls.filter((tc) => tc.status === "error").length;
+  const done = calls.filter((tc) => tc.status === "done").length;
+  const files = calls.reduce((total, tc) => total + (tc.outputFiles?.length || 0), 0);
+  return [
+    `调用 ${calls.length} 个工具`,
+    running ? `${running} 执行中` : "",
+    done ? `${done} 完成` : "",
+    errors ? `${errors} 失败` : "",
+    files ? `${files} 个文件` : "",
+  ].filter(Boolean).join(" · ");
+}
+
 function ToolCallTimeline({ toolCalls }: { toolCalls: ToolCallEntry[] }) {
+  const [expanded, setExpanded] = useState(false);
   const visibleCalls = toolCalls.filter((tc) => tc?.id && tc?.name);
   if (visibleCalls.length === 0) return null;
   const detailCalls = visibleCalls.filter((tc) => !tc._gateway);
+  const hasError = visibleCalls.some((tc) => tc.status === "error");
+  const hasRunning = visibleCalls.some((tc) => tc.status === "running");
 
   return (
-    <div className="lingxia-tool-timeline-wrap">
-      <div className="lingxia-tool-timeline" aria-label="工具调用时间线">
-        {visibleCalls.map((tc, index) => {
-          const duration = toolCallDurationLabel(tc);
-          return (
-            <div key={tc.id} className={`lingxia-tool-step is-${tc.status}`}>
-              <span className="lingxia-tool-step__rail" aria-hidden="true">
-                <span className="lingxia-tool-step__dot" />
-                {index < visibleCalls.length - 1 ? <span className="lingxia-tool-step__line" /> : null}
-              </span>
-              <span className="lingxia-tool-step__body">
-                <span className="lingxia-tool-step__title">{toolCallLabel(tc)}</span>
-                <span className="lingxia-tool-step__meta">
-                  {tc.status === "running" ? "执行中" : tc.status === "error" ? "失败" : "完成"}
-                  {duration ? ` · ${duration}` : ""}
-                  {tc.outputFiles?.length ? ` · ${tc.outputFiles.length} 个文件` : ""}
-                </span>
-              </span>
+    <div className="lingxia-tool-timeline-wrap" data-expanded={expanded ? "true" : "false"}>
+      <button
+        type="button"
+        className={`lingxia-tool-summary ${hasError ? "is-error" : hasRunning ? "is-running" : "is-done"}`}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span className="lingxia-tool-summary__dot" aria-hidden="true" />
+        <span className="lingxia-tool-summary__text">{toolCallSummaryLabel(visibleCalls)}</span>
+        <span className="lingxia-tool-summary__action">{expanded ? "收起" : "详情"}</span>
+        <svg className="lingxia-tool-summary__chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      {expanded ? (
+        <div className="lingxia-tool-timeline-panel">
+          <div className="lingxia-tool-timeline" aria-label="工具调用时间线">
+            {visibleCalls.map((tc, index) => {
+              const duration = toolCallDurationLabel(tc);
+              return (
+                <div key={tc.id} className={`lingxia-tool-step is-${tc.status}`}>
+                  <span className="lingxia-tool-step__rail" aria-hidden="true">
+                    <span className="lingxia-tool-step__dot" />
+                    {index < visibleCalls.length - 1 ? <span className="lingxia-tool-step__line" /> : null}
+                  </span>
+                  <span className="lingxia-tool-step__body">
+                    <span className="lingxia-tool-step__title">{toolCallLabel(tc)}</span>
+                    <span className="lingxia-tool-step__meta">
+                      {toolCallStatusLabel(tc.status)}
+                      {duration ? ` · ${duration}` : ""}
+                      {tc.outputFiles?.length ? ` · ${tc.outputFiles.length} 个文件` : ""}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {detailCalls.length > 0 ? (
+            <div className="lingxia-tool-timeline-details">
+              {detailCalls.map((tc) => <ToolCallCard key={tc.id} tc={tc} />)}
             </div>
-          );
-        })}
-      </div>
-      {detailCalls.length > 0 ? (
-        <div className="lingxia-tool-timeline-details">
-          {detailCalls.map((tc) => <ToolCallCard key={tc.id} tc={tc} />)}
+          ) : null}
         </div>
       ) : null}
     </div>

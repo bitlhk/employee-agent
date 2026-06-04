@@ -981,6 +981,10 @@
   max-width: 720px;
 }
 
+.settings-overlay-section--wide {
+  max-width: 860px;
+}
+
 .settings-overlay-section__header {
   padding-bottom: 24px;
   border-bottom: 1px solid var(--oc-border-subtle);
@@ -1057,6 +1061,156 @@
 
 .settings-overlay-empty {
   color: var(--oc-text-secondary);
+}
+
+.settings-health-card {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-health-list {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-health-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--oc-border-subtle);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--oc-bg-surface) 76%, transparent);
+}
+
+.settings-health-row__icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--oc-text-tertiary);
+  background: color-mix(in oklab, var(--oc-card) 32%, transparent);
+}
+
+.settings-health-row[data-status="ok"] .settings-health-row__icon {
+  color: #22c55e;
+}
+
+.settings-health-row[data-status="warning"] .settings-health-row__icon {
+  color: var(--oc-warning, #f59e0b);
+}
+
+.settings-health-row[data-status="error"] .settings-health-row__icon {
+  color: var(--oc-danger, #ef4444);
+}
+
+.settings-health-row__copy {
+  min-width: 0;
+}
+
+.settings-health-row__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-health-row__label {
+  color: var(--oc-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-health-row__status {
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.settings-health-row__detail {
+  margin-top: 4px;
+  color: var(--oc-text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-health-issues {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.settings-health-issue {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--oc-warning, #f59e0b) 8%, transparent);
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+}
+
+.settings-health-issue span {
+  color: var(--oc-warning, #f59e0b);
+  font-weight: 600;
+}
+
+.settings-health-issue p {
+  margin: 0;
+  min-width: 0;
+}
+
+.settings-health-total {
+  margin-left: 8px;
+  color: var(--oc-text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.settings-health-metrics {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-health-metric {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 70px minmax(0, 1.4fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 34px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--oc-bg-surface) 72%, transparent);
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+}
+
+.settings-health-metric strong {
+  color: var(--oc-text-primary);
+  font-weight: 600;
+  text-align: right;
+}
+
+.settings-health-metric em {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oc-text-tertiary);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-health-metric[data-status="error"] strong {
+  color: var(--oc-danger, #ef4444);
+}
+
+.settings-health-metric[data-status="skip"] strong {
+  color: var(--oc-text-tertiary);
 }
 
 .settings-overlay__content .settings-page,
@@ -2052,6 +2206,19 @@ input.session-searchbar__input:focus-visible,
   --tw-ring-offset-color: transparent !important;
   -webkit-appearance: none;
   appearance: none;
+}
+
+.session-search-highlight {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--oc-accent) 18%, transparent);
+  color: var(--oc-text-primary);
+}
+
+.session-search-source {
+  margin-right: 3px;
+  color: var(--oc-text-tertiary);
+  font-size: 10px;
 }
 
 .session-rename-input {
@@ -3419,6 +3586,82 @@ input.session-searchbar__input:focus-visible,
 /* ── Tool Card Final ── */
 .lingxia-tool-timeline-wrap {
   width: min(560px, calc(100vw - 96px));
+}
+
+.lingxia-tool-summary {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 4px 8px 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.lingxia-tool-summary:hover {
+  color: var(--oc-text-primary);
+  border-color: var(--oc-border-subtle);
+  background: color-mix(in oklab, var(--oc-card) 28%, transparent);
+}
+
+.lingxia-tool-summary__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--oc-text-tertiary);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--oc-text-tertiary) 9%, transparent);
+  flex: 0 0 auto;
+}
+
+.lingxia-tool-summary.is-running .lingxia-tool-summary__dot {
+  background: var(--oc-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--oc-accent) 14%, transparent);
+  animation: lingxia-tool-pulse 1.2s ease-in-out infinite;
+}
+
+.lingxia-tool-summary.is-done .lingxia-tool-summary__dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34,197,94,0.11);
+}
+
+.lingxia-tool-summary.is-error .lingxia-tool-summary__dot {
+  background: var(--oc-danger, #ef4444);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--oc-danger, #ef4444) 13%, transparent);
+}
+
+.lingxia-tool-summary__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lingxia-tool-summary__action {
+  color: var(--oc-text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.lingxia-tool-summary__chevron {
+  color: var(--oc-text-tertiary);
+  opacity: .76;
+  transition: transform .16s ease;
+  flex: 0 0 auto;
+}
+
+.lingxia-tool-timeline-wrap[data-expanded="true"] .lingxia-tool-summary__chevron {
+  transform: rotate(180deg);
+}
+
+.lingxia-tool-timeline-panel {
+  margin-top: 6px;
 }
 
 .lingxia-tool-timeline {

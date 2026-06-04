@@ -23,13 +23,14 @@ import { SessionList } from "@/components/console/SessionList";
 import { PanelErrorBoundary } from "@/components/console/PanelErrorBoundary";
 import { TopBar } from "@/components/console/TopBar";
 import { MainPanel } from "@/components/console/MainPanel";
-import { SettingsOverlay } from "@/components/settings/SettingsOverlay";
+import { SettingsOverlay, type SettingsHealthDiagnostics } from "@/components/settings/SettingsOverlay";
 import { ChatPage } from "@/components/pages/ChatPage";
 import { LINGXIA_SIDEBAR_NAV } from "@/config/navigation";
 import { sidebarIconMap } from "@/config/icons";
 import { applySettings as applyUiSettings, getSettings, subscribeSettings } from "@/lib/settings";
 import { useLingxiaChat } from "@/hooks/useLingxiaChat";
 import { formatModelName } from "@/lib/modelDisplay";
+import { classifyDisplayError, displayErrorMessage } from "@/lib/errorDisplay";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Bot, History } from "lucide-react";
 
@@ -102,6 +103,7 @@ const legacyWebConversationStorageKey = (adoptId: string) => `lingxia_web_conver
 const webMessagesStorageKey = (userId: string, adoptId: string, conversationId: string) => `lgc_msgs_${userId}_${adoptId}_${conversationId}`;
 const legacyWebMessagesStorageKey = (adoptId: string, conversationId: string) => `lgc_msgs_${adoptId}_${conversationId}`;
 const webDraftStorageKey = (userId: string, adoptId: string, conversationId: string) => `lingxia_web_draft_${userId}_${adoptId}_${conversationId}`;
+const webInputHistoryStorageKey = (userId: string, adoptId: string) => `lingxia_web_input_history_${userId}_${adoptId}`;
 const webSessionIndexStorageKey = (userId: string, adoptId: string) => `lingxia_web_sessions_${userId}_${adoptId}`;
 const webHiddenSessionsStorageKey = (userId: string, adoptId: string) => `lingxia_web_sessions_hidden_${userId}_${adoptId}`;
 const clawStatusStorageKey = (userId: string, adoptId: string) => `lingxia_claw_status_${userId}_${adoptId}`;
@@ -768,7 +770,7 @@ export default function Home() {
   const switchModelMutation = trpc.claw.switchModel.useMutation({
     retry: false,
     onSuccess: () => toast.success("模型已切换"),
-    onError: (e) => toast.error(e.message || "切换模型失败"),
+    onError: (e) => toast.error(displayErrorMessage(e, "model")),
   });
   const updateClawSettingsMutation = trpc.claw.updateSettings.useMutation({
     retry: false,
@@ -791,6 +793,7 @@ export default function Home() {
   const MSGS_KEY = resolvedAdoptId && userStorageId && webConversationId ? webMessagesStorageKey(userStorageId, resolvedAdoptId, webConversationId) : null;
   const LEGACY_MSGS_KEY = resolvedAdoptId && webConversationId ? legacyWebMessagesStorageKey(resolvedAdoptId, webConversationId) : null;
   const DRAFT_KEY = resolvedAdoptId && userStorageId && webConversationId ? webDraftStorageKey(userStorageId, resolvedAdoptId, webConversationId) : null;
+  const INPUT_HISTORY_KEY = resolvedAdoptId && userStorageId ? webInputHistoryStorageKey(userStorageId, resolvedAdoptId) : "";
   const SESSION_INDEX_KEY = resolvedAdoptId && userStorageId ? webSessionIndexStorageKey(userStorageId, resolvedAdoptId) : null;
   const HIDDEN_SESSION_KEY = resolvedAdoptId && userStorageId ? webHiddenSessionsStorageKey(userStorageId, resolvedAdoptId) : null;
   const draftHydratingRef = useRef(false);
@@ -922,9 +925,9 @@ export default function Home() {
       setClawHealthError("");
       markClientLoadMetric("health", "ok", data?.readiness?.status || "ready", requestStartedAt);
     } catch (error: any) {
-      const message = String(error?.message || error || "健康检查失败");
-      setClawHealthError(message);
-      markClientLoadMetric("health", "error", message, requestStartedAt);
+      const classified = classifyDisplayError(error, "openclaw");
+      setClawHealthError(classified.detail || classified.title);
+      markClientLoadMetric("health", "error", classified.title, requestStartedAt);
     } finally {
       if (!silent) setClawHealthLoading(false);
     }
@@ -973,7 +976,7 @@ export default function Home() {
         credentials: "include",
       }, silent ? 8000 : 6000);
       if (!response.ok) {
-        markClientLoadMetric("sessions", "error", `HTTP ${response.status}`, requestStartedAt);
+        markClientLoadMetric("sessions", "error", classifyDisplayError(new Error(`HTTP ${response.status}`), "history").title, requestStartedAt);
         return webSessionsRef.current;
       }
       const data = await response.json().catch(() => null);
@@ -998,7 +1001,7 @@ export default function Home() {
       return mergedSessions;
     } catch (error) {
       console.warn("[history] backend sync failed; keeping local session cache", error);
-      markClientLoadMetric("sessions", "error", "request failed", requestStartedAt);
+      markClientLoadMetric("sessions", "error", classifyDisplayError(error, "history").title, requestStartedAt);
       return webSessionsRef.current;
     } finally {
       if (shouldShowLoading && isCurrentRequest()) setWebSessionsLoading(false);
@@ -1147,6 +1150,38 @@ export default function Home() {
     setLingxiaNearBottom(true);
   };
 
+  const readCachedWebConversationMessages = useCallback((conversationId: string): any[] => {
+    if (!resolvedAdoptId || !userStorageId || !conversationId) return [];
+    try {
+      const primaryKey = webMessagesStorageKey(userStorageId, resolvedAdoptId, conversationId);
+      const legacyKey = legacyWebMessagesStorageKey(resolvedAdoptId, conversationId);
+      const raw = localStorage.getItem(primaryKey) || localStorage.getItem(legacyKey) || "";
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [resolvedAdoptId, userStorageId]);
+
+  const findCachedConversationSnippet = useCallback((conversationId: string, query: string): string => {
+    const q = normalizeSessionText(query).toLowerCase();
+    if (!q) return "";
+    const messages = readCachedWebConversationMessages(conversationId);
+    for (const message of messages) {
+      const text = normalizeSessionText(String(message?.text || ""));
+      if (!text) continue;
+      const idx = text.toLowerCase().indexOf(q);
+      if (idx < 0) continue;
+      const start = Math.max(0, idx - 18);
+      const end = Math.min(text.length, idx + q.length + 32);
+      const prefix = start > 0 ? "..." : "";
+      const suffix = end < text.length ? "..." : "";
+      return `${prefix}${text.slice(start, end)}${suffix}`;
+    }
+    return "";
+  }, [readCachedWebConversationMessages]);
+
   const applyCanonicalConversationText = useCallback((args: {
     conversationId: string;
     assistantMessageId: string;
@@ -1293,40 +1328,55 @@ export default function Home() {
       toast.error("请先停止当前回复");
       return;
     }
-    setSessionSwitchingId(conversationId);
     const session = webSessions.find((item) => item.conversationId === conversationId);
+    const cachedMessages = readCachedWebConversationMessages(conversationId);
+    const hasCachedMessages = cachedMessages.length > 0;
+    const switchRequestSeq = restoreConversationRequestSeqRef.current + 1;
+    restoreConversationRequestSeqRef.current = switchRequestSeq;
+
     if (!session?.sessionKey || !resolvedAdoptId) {
-      activateWebConversation(conversationId);
+      activateWebConversation(conversationId, hasCachedMessages ? cachedMessages : undefined);
       setSessionMenuOpen(false);
       setSessionSwitchingId(null);
       return;
     }
+
+    if (hasCachedMessages) {
+      restoredSessionKeyRef.current = session.sessionKey;
+      activateWebConversation(conversationId, cachedMessages);
+      setSessionMenuOpen(false);
+      setSessionSwitchingId(null);
+    } else {
+      setSessionSwitchingId(conversationId);
+    }
+
     const apiBase = import.meta.env.VITE_API_URL || "";
-    const switchRequestSeq = restoreConversationRequestSeqRef.current + 1;
-    restoreConversationRequestSeqRef.current = switchRequestSeq;
     try {
-      const [messagesResp, activateResp] = await Promise.all([
-        fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(session.sessionKey)}`, {
-          credentials: "include",
-        }, 6000),
-        fetchWithTimeout(`${apiBase}/api/claw/chat-history/activate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ adoptId: resolvedAdoptId, sessionKey: session.sessionKey }),
-        }, 5000),
-      ]);
+      const messagesResp = await fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(session.sessionKey)}`, {
+        credentials: "include",
+      }, 6000);
       if (restoreConversationRequestSeqRef.current !== switchRequestSeq) return;
       if (!messagesResp.ok) throw new Error(`读取历史失败 (${messagesResp.status})`);
-      if (!activateResp.ok) throw new Error(`激活历史会话失败 (${activateResp.status})`);
       const payload = await messagesResp.json();
       restoredSessionKeyRef.current = session.sessionKey;
       activateWebConversation(conversationId, Array.isArray(payload?.messages) ? payload.messages : []);
       setSessionMenuOpen(false);
+      void fetchWithTimeout(`${apiBase}/api/claw/chat-history/activate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ adoptId: resolvedAdoptId, sessionKey: session.sessionKey }),
+      }, 5000).catch(() => {});
     } catch (error: any) {
-      toast.error(error?.message || "切换历史会话失败");
+      if (!hasCachedMessages) {
+        toast.error(displayErrorMessage(error, "history"));
+      } else {
+        console.warn("[history] background hydrate failed after cached switch", error?.message || error);
+      }
     } finally {
-      setSessionSwitchingId(null);
+      if (restoreConversationRequestSeqRef.current === switchRequestSeq) {
+        setSessionSwitchingId(null);
+      }
     }
   };
 
@@ -2511,6 +2561,116 @@ export default function Home() {
     showSlowReadinessHint,
   ]);
 
+  const settingsHealthDiagnostics = useMemo<SettingsHealthDiagnostics>(() => {
+    const readiness = clawHealthSummary?.readiness;
+    const selectedModel = String(clawHealthSummary?.model?.selected || effectiveLingxiaModelId || "").trim();
+    const modelCount = Array.isArray(availableModels) ? availableModels.length : 0;
+    const skillGroups = lingxiaSkills as any;
+    const skillList = [
+      ...(Array.isArray(skillGroups?.shared) ? skillGroups.shared : []),
+      ...(Array.isArray(skillGroups?.system) ? skillGroups.system : []),
+      ...(Array.isArray(skillGroups?.private) ? skillGroups.private : []),
+    ];
+    const mcpCount = skillList.filter((skill: any) => {
+      const raw = `${skill?.id || ""} ${skill?.name || ""} ${skill?.title || ""} ${skill?.type || ""} ${skill?.category || ""} ${skill?.origin || ""}`.toLowerCase();
+      return raw.includes("mcp") || raw.includes("wind") || raw.includes("qieman") || raw.includes("wealth_assistant");
+    }).length;
+    const sessionMetric = clientLoadMetrics.sessions;
+    const healthElapsed = Number(clawHealthSummary?.timings?.total || 0);
+
+    const connection = isDirectHttpRuntime
+      ? {
+          status: "ok" as const,
+          title: "HTTP SSE 运行时",
+          detail: isHermesRuntime ? "Hermes 工作台走 HTTP SSE，不依赖 OpenClaw WebSocket。" : "当前运行时不依赖 OpenClaw WebSocket。",
+        }
+      : wsConnected
+      ? { status: "ok" as const, title: "WS 已连接", detail: "浏览器与 OpenClaw Gateway 的实时通道可用。" }
+      : clawByAdoptLoading || clawHealthLoading
+      ? { status: "pending" as const, title: "正在连接", detail: "正在检查智能体实例和 OpenClaw Gateway。" }
+      : {
+          status: sidebarClawOnline ? "warning" as const : "error" as const,
+          title: sidebarClawOnline ? "实例在线，WS 未连接" : "连接不可用",
+          detail: sidebarClawOnline ? "实例状态正常，但实时通道暂未建立。刷新或稍后重试。" : "智能体实例或 OpenClaw Gateway 未处于可用状态。",
+        };
+
+    const model = availableModelsLoading
+      ? { status: "pending" as const, title: "正在同步模型", detail: "正在读取 OpenClaw 当前可用模型。" }
+      : availableModelsError
+      ? { status: "error" as const, title: "模型列表读取失败", detail: classifyDisplayError(availableModelsError, "model").detail }
+      : modelCount > 0
+      ? {
+          status: "ok" as const,
+          title: selectedModel || selectedLingxiaModelName || "模型已同步",
+          detail: `${modelCount} 个可用模型${clawHealthSummary?.model?.defaultModel ? ` · 默认 ${clawHealthSummary.model.defaultModel}` : ""}`,
+        }
+      : { status: "warning" as const, title: "暂无可用模型", detail: "前端没有读取到 OpenClaw 可用模型，请检查 provider 配置。" };
+
+    const openclaw = isDirectHttpRuntime
+      ? { status: "skip" as const, title: "当前运行时跳过", detail: "Hermes/JiuwenClaw 不走 OpenClaw Gateway 健康检查。" }
+      : clawHealthError
+      ? { status: "warning" as const, title: "健康检查暂时不可用", detail: clawHealthError, issues: readiness?.issues }
+      : clawHealthLoading && !readiness
+      ? { status: "pending" as const, title: "正在检查", detail: "正在读取模型、会话和 OpenClaw readiness。" }
+      : readiness?.status === "blocked" || readiness?.ok === false
+      ? { status: "error" as const, title: readiness.summary || "配置不可用", detail: healthElapsed ? `检查耗时 ${healthElapsed}ms` : "", issues: readiness.issues }
+      : readiness?.status === "degraded" || (readiness?.issues || []).length > 0
+      ? { status: "warning" as const, title: readiness?.summary || "部分配置需检查", detail: healthElapsed ? `检查耗时 ${healthElapsed}ms` : "", issues: readiness?.issues }
+      : readiness
+      ? { status: "ok" as const, title: readiness.summary || "配置正常", detail: healthElapsed ? `检查耗时 ${healthElapsed}ms` : "" }
+      : { status: "pending" as const, title: "等待健康检查", detail: "" };
+
+    const history = webSessionsLoading && webSessions.length === 0
+      ? { status: "pending" as const, title: "正在读取历史", detail: "正在同步后端历史会话。" }
+      : sessionMetric?.status === "error"
+      ? { status: "warning" as const, title: sessionMetric.detail || "历史接口异常", detail: `本地缓存 ${webSessions.length} 个会话，后端同步稍后会重试。` }
+      : { status: "ok" as const, title: "历史缓存可用", detail: `${webSessions.length} 个本地/后端会话索引。` };
+
+    const mcp = lingxiaSkillsLoading
+      ? { status: "pending" as const, title: "正在加载技能", detail: "正在读取技能市场和 MCP 工具展示数据。" }
+      : lingxiaSkillsError
+      ? { status: "error" as const, title: "技能列表读取失败", detail: classifyDisplayError(lingxiaSkillsError, "network").detail }
+      : {
+          status: "ok" as const,
+          title: "技能与 MCP 展示可用",
+          detail: `${skillList.length} 个技能条目${mcpCount ? ` · ${mcpCount} 个 MCP 相关条目` : ""}`,
+        };
+
+    return {
+      connection,
+      model,
+      openclaw,
+      history,
+      mcp,
+      load: {
+        totalMs: clientLoadMetricList.length ? clientLoadTotalMs : undefined,
+        metrics: clientLoadMetricList,
+      },
+    };
+  }, [
+    availableModels,
+    availableModelsError,
+    availableModelsLoading,
+    clawByAdoptLoading,
+    clawHealthError,
+    clawHealthLoading,
+    clawHealthSummary,
+    clientLoadMetricList,
+    clientLoadMetrics,
+    clientLoadTotalMs,
+    effectiveLingxiaModelId,
+    isDirectHttpRuntime,
+    isHermesRuntime,
+    lingxiaSkills,
+    lingxiaSkillsError,
+    lingxiaSkillsLoading,
+    selectedLingxiaModelName,
+    sidebarClawOnline,
+    webSessions.length,
+    webSessionsLoading,
+    wsConnected,
+  ]);
+
   const latestContextMessage = useMemo(() => {
     for (let i = activeLingxiaMsgs.length - 1; i >= 0; i -= 1) {
       const msg = activeLingxiaMsgs[i] as LxMsg;
@@ -2667,6 +2827,7 @@ export default function Home() {
                 sessions={webSessions}
               currentConversationId={webConversationId}
               sessionSwitchingId={sessionSwitchingId}
+              messageSearchProvider={findCachedConversationSnippet}
               onSwitchConversation={(conversationId) => void switchLingxiaConversation(conversationId)}
               onDeleteConversation={(conversationId) => void deleteLingxiaConversation(conversationId)}
               onRenameConversation={renameLingxiaConversation}
@@ -2687,6 +2848,7 @@ export default function Home() {
               onClose={() => setSettingsOpen(false)}
               adoptId={resolvedAdoptId || ""}
               skills={lingxiaSkills as any}
+              diagnostics={settingsHealthDiagnostics}
             />
 
             <div
@@ -2794,6 +2956,7 @@ export default function Home() {
                       sessions={webSessions}
                       currentConversationId={webConversationId}
                       sessionSwitchingId={sessionSwitchingId}
+                      messageSearchProvider={findCachedConversationSnippet}
                       onSwitchConversation={(conversationId) => void switchLingxiaConversation(conversationId)}
                       onDeleteConversation={(conversationId) => void deleteLingxiaConversation(conversationId)}
                       onRenameConversation={renameLingxiaConversation}
@@ -2964,6 +3127,7 @@ export default function Home() {
               placeholder={`Message ${lingxiaDisplayName || brand.name}…`}
               maxLength={4000}
               messages={activeLingxiaMsgs as any}
+              historyStorageKey={INPUT_HISTORY_KEY}
               onNewChat={startNewLingxiaConversation}
               onUserMention={(u) => {
                 setMentionedUsers((prev) => prev.some((x) => x.userId === u.userId) ? prev : [...prev, u]);

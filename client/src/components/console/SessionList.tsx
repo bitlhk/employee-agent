@@ -1,5 +1,5 @@
 import { Check, MessageSquareText, MoreVertical, Pencil, Pin, PinOff, Plus, Search, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 export type SessionListConversation = {
   conversationId: string;
@@ -20,6 +20,7 @@ type SessionListProps = {
   sessions?: SessionListConversation[];
   currentConversationId?: string;
   sessionSwitchingId?: string | null;
+  messageSearchProvider?: (conversationId: string, query: string) => string;
   onSwitchConversation?: (conversationId: string) => void;
   onDeleteConversation?: (conversationId: string) => void;
   onRenameConversation?: (conversationId: string, title: string) => void;
@@ -70,19 +71,53 @@ const GROUP_LABELS: Record<SessionGroup, string> = {
   earlier: "更早",
 };
 
-function filterSessions(sessions: SessionListConversation[], query: string) {
+function filterSessions(
+  sessions: SessionListConversation[],
+  query: string,
+  messageSearchProvider?: (conversationId: string, query: string) => string,
+) {
   const q = normalizeText(query).toLowerCase();
   if (!q) return sessions;
   return sessions.filter((session) => {
-    const haystack = `${session.title || ""} ${session.preview || ""}`.toLowerCase();
-    return haystack.includes(q);
+    const haystack = [
+      session.customTitle || "",
+      session.title || "",
+      session.preview || "",
+      formatUpdatedAt(session.updatedAt),
+    ].join(" ").toLowerCase();
+    if (haystack.includes(q)) return true;
+    return Boolean(messageSearchProvider?.(session.conversationId, query));
   });
+}
+
+function highlightText(value: string, query: string): ReactNode {
+  const text = String(value || "");
+  const q = normalizeText(query);
+  if (!q) return text;
+  const lowerText = text.toLowerCase();
+  const lowerQuery = q.toLowerCase();
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let index = lowerText.indexOf(lowerQuery);
+  while (index >= 0) {
+    if (index > cursor) parts.push(text.slice(cursor, index));
+    parts.push(
+      <mark key={`${index}-${parts.length}`} className="session-search-highlight">
+        {text.slice(index, index + q.length)}
+      </mark>,
+    );
+    cursor = index + q.length;
+    index = lowerText.indexOf(lowerQuery, cursor);
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts.length > 0 ? parts : text;
 }
 
 export function SessionList({
   sessions = [],
   currentConversationId,
   sessionSwitchingId,
+  messageSearchProvider,
   onSwitchConversation,
   onDeleteConversation,
   onRenameConversation,
@@ -107,9 +142,20 @@ export function SessionList({
   }, [query]);
 
   const filteredSessions = useMemo(
-    () => filterSessions(sessions, debouncedQuery),
-    [debouncedQuery, sessions],
+    () => filterSessions(sessions, debouncedQuery, messageSearchProvider),
+    [debouncedQuery, messageSearchProvider, sessions],
   );
+  const searchActive = normalizeText(debouncedQuery).length > 0;
+  const searchResultCount = searchActive ? filteredSessions.length : sessions.length;
+  const messageSearchSnippets = useMemo(() => {
+    if (!searchActive || !messageSearchProvider) return new Map<string, string>();
+    const snippets = new Map<string, string>();
+    for (const session of filteredSessions) {
+      const snippet = messageSearchProvider(session.conversationId, debouncedQuery);
+      if (snippet) snippets.set(session.conversationId, snippet);
+    }
+    return snippets;
+  }, [debouncedQuery, filteredSessions, messageSearchProvider, searchActive]);
 
   const groupedSessions = useMemo(() => {
     const groups = new Map<SessionGroup, SessionListConversation[]>();
@@ -197,6 +243,23 @@ export function SessionList({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.nativeEvent as any).isComposing) return;
+              if (event.key === "Escape") {
+                if (!query) return;
+                event.preventDefault();
+                setQuery("");
+                setDebouncedQuery("");
+                setMenuId(null);
+                return;
+              }
+              if (event.key === "Enter") {
+                const first = filterSessions(sessions, query)[0];
+                if (!first || sessionSwitchingId) return;
+                event.preventDefault();
+                onSwitchConversation?.(first.conversationId);
+              }
+            }}
             placeholder="搜索会话"
             className="session-searchbar__input min-w-0 flex-1 bg-transparent text-sm"
             style={{
@@ -219,6 +282,12 @@ export function SessionList({
               <X size={13} />
             </button>
           ) : null}
+        </div>
+      ) : null}
+
+      {searchable && searchActive ? (
+        <div className="session-search-meta px-2 pb-2 text-[11px]" style={{ color: "var(--oc-text-tertiary)" }}>
+          {searchResultCount > 0 ? `找到 ${searchResultCount} 个会话 · Enter 打开第一条` : "没有匹配的会话"}
         </div>
       ) : null}
 
@@ -259,6 +328,8 @@ export function SessionList({
                   const editing = editingId === session.conversationId;
                   const menuOpen = menuId === session.conversationId;
                   const pinned = Boolean(session.pinnedAt);
+                  const messageSnippet = messageSearchSnippets.get(session.conversationId) || "";
+                  const previewText = messageSnippet || session.preview || "";
                   return (
                     <div
                       key={session.conversationId}
@@ -322,12 +393,13 @@ export function SessionList({
                           </div>
                         ) : (
                           <div className="sidebar-item-label truncate" style={{ fontSize: 14, fontWeight: 400, color: isMobile ? "var(--oc-text-primary)" : undefined }}>
-                            {switching ? "正在切换..." : shortTitle(session)}
+                            {switching ? "正在切换..." : highlightText(shortTitle(session), debouncedQuery)}
                           </div>
                         )}
-                        {isMobile && session.preview ? (
+                        {(isMobile || searchActive) && previewText ? (
                           <div className="mt-0.5 truncate text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
-                            {session.preview}
+                            {messageSnippet ? <span className="session-search-source">正文 </span> : null}
+                            {highlightText(previewText, debouncedQuery)}
                           </div>
                         ) : null}
                         {isMobile ? (

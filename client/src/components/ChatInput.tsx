@@ -24,7 +24,22 @@ type ChatInputProps = {
   onUserMention?: (user: MentionUser) => void;
   rightControls?: ReactNode;
   statusExtras?: ReactNode;
+  historyStorageKey?: string;
 };
+
+const MAX_INPUT_HISTORY = 30;
+
+function normalizeInputHistory(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const next: string[] = [];
+  for (const item of raw) {
+    const text = String(item || "").trim();
+    if (!text || next.includes(text)) continue;
+    next.push(text.slice(0, 4000));
+    if (next.length >= MAX_INPUT_HISTORY) break;
+  }
+  return next;
+}
 
 export function ChatInput({
   value,
@@ -40,6 +55,7 @@ export function ChatInput({
   onUserMention,
   rightControls,
   statusExtras,
+  historyStorageKey,
 }: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -160,11 +176,16 @@ export function ChatInput({
     const clean = text.trim();
     if (!clean) return;
     const current = inputHistoryRef.current;
-    const next = [clean, ...current.filter((item) => item !== clean)].slice(0, 30);
+    const next = [clean, ...current.filter((item) => item !== clean)].slice(0, MAX_INPUT_HISTORY);
     inputHistoryRef.current = next;
+    if (historyStorageKey) {
+      try {
+        localStorage.setItem(historyStorageKey, JSON.stringify(next));
+      } catch {}
+    }
     historyCursorRef.current = null;
     draftBeforeHistoryRef.current = "";
-  }, []);
+  }, [historyStorageKey]);
 
   const applyHistoryText = useCallback((text: string) => {
     onChange(text);
@@ -377,6 +398,20 @@ export function ChatInput({
     }
     previousStreamingRef.current = streaming;
   }, [streaming]);
+
+  useEffect(() => {
+    historyCursorRef.current = null;
+    draftBeforeHistoryRef.current = "";
+    if (!historyStorageKey) {
+      inputHistoryRef.current = [];
+      return;
+    }
+    try {
+      inputHistoryRef.current = normalizeInputHistory(JSON.parse(localStorage.getItem(historyStorageKey) || "[]"));
+    } catch {
+      inputHistoryRef.current = [];
+    }
+  }, [historyStorageKey]);
 
   useEffect(() => {
     const el = textareaRef.current;
