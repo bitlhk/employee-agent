@@ -23,6 +23,7 @@ type ChatInputProps = {
   messages?: Array<{ role: string; text: string; timeLabel: string }>;
   onUserMention?: (user: MentionUser) => void;
   rightControls?: ReactNode;
+  statusExtras?: ReactNode;
 };
 
 export function ChatInput({
@@ -38,9 +39,14 @@ export function ChatInput({
   messages = [],
   onUserMention,
   rightControls,
+  statusExtras,
 }: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const inputHistoryRef = useRef<string[]>([]);
+  const historyCursorRef = useRef<number | null>(null);
+  const draftBeforeHistoryRef = useRef("");
+  const previousStreamingRef = useRef(streaming);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [submittingAttachments, setSubmittingAttachments] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
@@ -150,6 +156,28 @@ export function ChatInput({
     setTimeout(() => textareaRef.current?.focus(), 0);
   }, [value, mentionAtPos, onChange, onUserMention]);
 
+  const pushInputHistory = useCallback((text: string) => {
+    const clean = text.trim();
+    if (!clean) return;
+    const current = inputHistoryRef.current;
+    const next = [clean, ...current.filter((item) => item !== clean)].slice(0, 30);
+    inputHistoryRef.current = next;
+    historyCursorRef.current = null;
+    draftBeforeHistoryRef.current = "";
+  }, []);
+
+  const applyHistoryText = useCallback((text: string) => {
+    onChange(text);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.style.height = "auto";
+      el.style.height = Math.min(el.scrollHeight, 144) + "px";
+      el.setSelectionRange(text.length, text.length);
+    });
+  }, [onChange]);
+
   const submitMessage = useCallback(async () => {
     if (streaming) {
       onStop?.();
@@ -163,12 +191,13 @@ export function ChatInput({
     try {
       const result = await onSend(selectedAttachments);
       if (result !== false) {
+        pushInputHistory(value);
         setAttachments([]);
       }
     } finally {
       setSubmittingAttachments(false);
     }
-  }, [attachments, disabled, onSend, onStop, streaming, submittingAttachments, value]);
+  }, [attachments, disabled, onSend, onStop, pushInputHistory, streaming, submittingAttachments, value]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (mentionOpen && filteredUsers.length > 0) {
@@ -193,6 +222,37 @@ export function ChatInput({
         return;
       }
     }
+
+    if (!mentionOpen && !value.includes("\n") && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      const history = inputHistoryRef.current;
+      if (history.length > 0 || historyCursorRef.current !== null) {
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          if (historyCursorRef.current === null) {
+            draftBeforeHistoryRef.current = value;
+            historyCursorRef.current = 0;
+          } else {
+            historyCursorRef.current = Math.min(historyCursorRef.current + 1, history.length - 1);
+          }
+          applyHistoryText(history[historyCursorRef.current] || "");
+          return;
+        }
+        if (e.key === "ArrowDown" && historyCursorRef.current !== null) {
+          e.preventDefault();
+          const nextCursor = historyCursorRef.current - 1;
+          if (nextCursor < 0) {
+            historyCursorRef.current = null;
+            applyHistoryText(draftBeforeHistoryRef.current);
+            draftBeforeHistoryRef.current = "";
+          } else {
+            historyCursorRef.current = nextCursor;
+            applyHistoryText(history[nextCursor] || "");
+          }
+          return;
+        }
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void submitMessage();
@@ -310,6 +370,20 @@ export function ChatInput({
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [mentionOpen]);
+
+  useEffect(() => {
+    if (previousStreamingRef.current && !streaming) {
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+    previousStreamingRef.current = streaming;
+  }, [streaming]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el || recording || transcribing) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 144) + "px";
+  }, [recording, transcribing, value]);
 
   return (
     <div className="flex-none mb-4 mt-0" style={{ position: "relative", paddingLeft: 40, paddingRight: 40 }}>
@@ -555,11 +629,12 @@ export function ChatInput({
 
       <div className="mt-1.5 flex items-center justify-between px-1">
         <p className="text-[10px]" style={{ color: "var(--oc-text-secondary)", opacity: 0.7 }}>
-          Enter 发送 · Shift+Enter 换行 · @ 选择智能体
+          Enter 发送 · Shift+Enter 换行 · ↑↓ 找回输入
         </p>
-        <p className="text-[10px] font-mono" style={{ color: "var(--oc-text-secondary)", opacity: 0.5 }}>
-          {value.length} / {maxLength}
-        </p>
+        <div className="flex items-center gap-2 text-[10px] font-mono" style={{ color: "var(--oc-text-secondary)", opacity: 0.55 }}>
+          {statusExtras}
+          <span>{value.length} / {maxLength}</span>
+        </div>
       </div>
     </div>
   );

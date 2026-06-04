@@ -6028,10 +6028,275 @@ body[data-admin-light="true"] .admin-collaboration-tab .divide-y > :not([hidden]
   color: #ef4444;
 }
 
+.lingxia-composer-status-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 120px;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in oklab, var(--oc-text-tertiary) 14%, transparent);
+  border-radius: 999px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--oc-text-tertiary);
+  background: color-mix(in oklab, var(--oc-card) 72%, transparent);
+  font-family: inherit;
+}
+
+.lingxia-composer-status-chip[data-tone="ok"] {
+  border-color: rgba(34, 197, 94, 0.22);
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.lingxia-composer-status-chip[data-tone="warning"] {
+  border-color: rgba(245, 158, 11, 0.28);
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.client-load-diagnostics {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.client-load-diagnostics__trigger {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--oc-border-subtle);
+  background: color-mix(in oklab, var(--oc-bg-surface) 84%, transparent);
+  color: var(--oc-text-secondary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.client-load-diagnostics__trigger:hover {
+  border-color: var(--oc-border);
+  color: var(--oc-text-primary);
+  background: var(--oc-bg-hover);
+}
+
+.client-load-diagnostics__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--oc-text-tertiary);
+}
+
+.client-load-diagnostics__dot[data-status="ok"],
+.client-load-diagnostics__meta[data-status="ok"] {
+  color: #22c55e;
+}
+
+.client-load-diagnostics__dot[data-status="ok"] {
+  background: #22c55e;
+}
+
+.client-load-diagnostics__dot[data-status="error"],
+.client-load-diagnostics__meta[data-status="error"] {
+  color: #ef4444;
+}
+
+.client-load-diagnostics__dot[data-status="error"] {
+  background: #ef4444;
+}
+
+.client-load-diagnostics__dot[data-status="skip"],
+.client-load-diagnostics__meta[data-status="skip"] {
+  color: var(--oc-text-tertiary);
+}
+
+.client-load-diagnostics__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 80;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(440px, calc(100vh - 96px));
+  overflow: auto;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--oc-border);
+  background: var(--oc-bg-surface);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.24);
+}
+
+.client-load-diagnostics__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 8px;
+  color: var(--oc-text-primary);
+  font-size: 12px;
+  font-weight: var(--oc-weight-semibold);
+}
+
+.client-load-diagnostics__head span:last-child {
+  color: var(--oc-text-tertiary);
+  font-weight: var(--oc-weight-normal);
+}
+
+.client-load-diagnostics__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.client-load-diagnostics__row {
+  display: grid;
+  grid-template-columns: minmax(82px, 1fr) auto;
+  gap: 4px 10px;
+  padding: 8px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--oc-bg) 70%, transparent);
+  border: 1px solid var(--oc-border-subtle);
+}
+
+.client-load-diagnostics__name {
+  min-width: 0;
+  color: var(--oc-text-primary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-load-diagnostics__meta {
+  color: var(--oc-text-secondary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 11px;
+}
+
+.client-load-diagnostics__detail {
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: var(--oc-text-tertiary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-load-diagnostics__empty {
+  padding: 18px 8px;
+  color: var(--oc-text-tertiary);
+  font-size: 12px;
+  text-align: center;
+}
+
+.panel-error-boundary {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--oc-bg);
+}
+
+.panel-error-boundary__card {
+  width: min(560px, 100%);
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--oc-border);
+  border-radius: 10px;
+  background: var(--oc-card);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+
+.panel-error-boundary__icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #ef4444;
+  background: color-mix(in oklab, #ef4444 10%, transparent);
+}
+
+.panel-error-boundary__body {
+  min-width: 0;
+}
+
+.panel-error-boundary__body h2 {
+  margin: 0;
+  color: var(--oc-text-primary);
+  font-size: 15px;
+  font-weight: var(--oc-weight-semibold);
+  line-height: 1.4;
+}
+
+.panel-error-boundary__body p {
+  margin: 6px 0 0;
+  color: var(--oc-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.panel-error-boundary__details {
+  margin-top: 12px;
+  color: var(--oc-text-tertiary);
+  font-size: 12px;
+}
+
+.panel-error-boundary__details summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.panel-error-boundary__details pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--oc-border-subtle);
+  background: color-mix(in oklab, var(--oc-bg) 76%, transparent);
+  color: var(--oc-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.panel-error-boundary__action {
+  margin-top: 14px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--oc-border);
+  background: var(--oc-bg-surface);
+  color: var(--oc-text-primary);
+  font-size: 12px;
+}
+
+.panel-error-boundary__action:hover {
+  background: var(--oc-bg-hover);
+}
+
 @media (max-width: 640px) {
   .lingxia-readiness-banner {
     margin-left: 16px;
     margin-right: 16px;
+  }
+  .client-load-diagnostics__panel {
+    right: -8px;
+  }
+  .panel-error-boundary {
+    padding: 16px;
+  }
+  .panel-error-boundary__card {
+    grid-template-columns: 1fr;
   }
 }
 

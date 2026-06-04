@@ -7,6 +7,7 @@ import { SchedulePageV2 } from "@/components/pages/SchedulePageV2";
 import { SettingsPage } from "@/components/pages/SettingsPage";
 import { MeetingNotesPage } from "@/components/pages/MeetingNotesPage";
 import { CollabPage } from "@/components/pages/CollabPage";
+import { PanelErrorBoundary } from "@/components/console/PanelErrorBoundary";
 import type { PageKey } from "@/components/console/Sidebar";
 import type { ReactNode } from "react";
 
@@ -53,5 +54,15 @@ export function MainPanel({
   if (activePage === "meeting") content = <MeetingNotesPage adoptId={adoptId || ""} />;
   if (activePage === "collab") content = <CollabPage adoptId={adoptId || ""} />;
 
-  return <MainPanelShell>{content || <SettingsPage />}</MainPanelShell>;
+  return (
+    <MainPanelShell>
+      <PanelErrorBoundary
+        resetKey={`${activePage}:${adoptId || ""}`}
+        title="当前功能页暂时不可用"
+        description="该功能页渲染时出现异常，侧栏和其他功能仍可继续使用。"
+      >
+        {content || <SettingsPage />}
+      </PanelErrorBoundary>
+    </MainPanelShell>
+  );
 }

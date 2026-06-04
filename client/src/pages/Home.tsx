@@ -20,6 +20,7 @@ import { AgentTaskCard, type AgentTask } from "@/components/AgentTaskCard";
 import { BrandIcon } from "@/components/BrandIcon";
 import { Sidebar, type PageKey } from "@/components/console/Sidebar";
 import { SessionList } from "@/components/console/SessionList";
+import { PanelErrorBoundary } from "@/components/console/PanelErrorBoundary";
 import { TopBar } from "@/components/console/TopBar";
 import { MainPanel } from "@/components/console/MainPanel";
 import { SettingsOverlay } from "@/components/settings/SettingsOverlay";
@@ -75,6 +76,20 @@ function markThinkingDone(msgs: any[]): any[] {
   const next = [...msgs];
   next[lastIdx] = { ...last, toolCalls: newTcs };
   return next;
+}
+
+function toolCallsSignature(toolCalls?: ToolCallEntry[]) {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return "";
+  return toolCalls
+    .map((tool) => [
+      tool.id,
+      tool.name,
+      tool.status,
+      String(tool.arguments || "").slice(0, 80),
+      String(tool.result || "").length,
+      tool.outputFiles?.length || 0,
+    ].join(":"))
+    .join("|");
 }
 
 // 2026-04-28 批次 2 A1：lingxiaMsgs 加稳定 id，恢复时按 id 替换不按 findLastIndex
@@ -231,6 +246,16 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
   return btoa(binary);
 }
 
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 8000): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 function buildMessageWithUploadedAttachments(text: string, uploads: UploadedLingxiaAttachment[]) {
   if (uploads.length === 0) return text;
   const intro = text.trim() || "请查看我上传的附件。";
@@ -286,6 +311,27 @@ type ClawHealthSummary = {
     checkedAt?: string;
   };
   timings?: Record<string, number>;
+};
+
+type ClientLoadMetric = {
+  key: string;
+  label: string;
+  status: "pending" | "ok" | "error" | "skip";
+  elapsedMs: number;
+  requestMs?: number;
+  detail?: string;
+  at: number;
+};
+
+const CLIENT_LOAD_METRIC_LABELS: Record<string, string> = {
+  auth: "登录态",
+  agent: "智能体实例",
+  settings: "智能体设置",
+  models: "模型列表",
+  health: "健康检查",
+  sessions: "历史会话",
+  runtimeInfo: "运行时信息",
+  skills: "技能列表",
 };
 
 function ChatStartupSkeleton() {
@@ -453,6 +499,36 @@ export default function Home() {
   // 员工智能体子域名聊天态（MVP）
   const brand = useBrand();
   const { confirm, dialog } = useConfirmDialog();
+  const clientLoadStartedAtRef = useRef(typeof performance !== "undefined" ? performance.now() : Date.now());
+  const clientLoadReportedRef = useRef(false);
+  const [clientLoadMetrics, setClientLoadMetrics] = useState<Record<string, ClientLoadMetric>>({});
+  const [clientDiagnosticsOpen, setClientDiagnosticsOpen] = useState(false);
+  const markClientLoadMetric = useCallback((
+    key: string,
+    status: ClientLoadMetric["status"],
+    detail?: string,
+    requestStartedAt?: number,
+  ) => {
+    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const elapsedMs = Math.round(nowMs - clientLoadStartedAtRef.current);
+    const requestMs = requestStartedAt ? Math.round(nowMs - requestStartedAt) : undefined;
+    setClientLoadMetrics((previous) => {
+      const existing = previous[key];
+      if (existing?.status === status && existing?.detail === detail) return previous;
+      return {
+        ...previous,
+        [key]: {
+          key,
+          label: CLIENT_LOAD_METRIC_LABELS[key] || key,
+          status,
+          elapsedMs,
+          requestMs,
+          detail,
+          at: Date.now(),
+        },
+      };
+    });
+  }, []);
   const [lingxiaInput, setLingxiaInput] = useState("");
   const chatRuntimeMode = "fast" as const;
   const [lingxiaMsgs, setLingxiaMsgs] = useState<LxMsg[]>([]);
@@ -551,7 +627,7 @@ export default function Home() {
   const toggleLingxiaSection = (s: string) => setLingxiaOpenSections(prev => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
   const [lingxiaTopSettingsOpen, setLingxiaTopSettingsOpen] = useState(false);
 
-  const { user, loading: authLoading } = useAuth({ redirectOnUnauthenticated: false });
+  const { user, loading: authLoading, error: authError } = useAuth({ redirectOnUnauthenticated: false });
 
   // ── adoptId 提取：子域名模式 OR 路径模式 ──
   const currentHost = window.location.hostname.toLowerCase();
@@ -570,6 +646,10 @@ export default function Home() {
     const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     window.location.href = `/login?redirect=${encodeURIComponent(redirect)}`;
   }, [resolvedAdoptId, authLoading, user]);
+  useEffect(() => {
+    if (authLoading) return;
+    markClientLoadMetric("auth", authError ? "error" : "ok", authError ? String((authError as any)?.message || authError) : user ? "authenticated" : "anonymous");
+  }, [authError, authLoading, markClientLoadMetric, user]);
   const userStorageId = user?.id != null ? String(user.id) : "";
   const [webConversationId, setWebConversationId] = useState("");
   useEffect(() => {
@@ -602,14 +682,26 @@ export default function Home() {
     { adoptId: resolvedAdoptId || "" },
     { enabled: !!resolvedAdoptId && !!user, retry: false }
   );
-  const { data: clawSettings, refetch: refetchClawSettings } = trpc.claw.getSettings.useQuery(
+  const { data: clawSettings, isLoading: clawSettingsLoading, error: clawSettingsError, refetch: refetchClawSettings } = trpc.claw.getSettings.useQuery(
     { adoptId: resolvedAdoptId || "" },
     { enabled: !!resolvedAdoptId && !!user, retry: false }
   );
-  const { data: availableModels } = trpc.claw.getAvailableModels.useQuery(
+  const { data: availableModels, isLoading: availableModelsLoading, error: availableModelsError } = trpc.claw.getAvailableModels.useQuery(
     resolvedAdoptId ? { adoptId: resolvedAdoptId } : undefined,
     { enabled: !!resolvedAdoptId && !!user, retry: false, refetchInterval: 30000, refetchOnWindowFocus: true, refetchOnMount: true }
   );
+  useEffect(() => {
+    if (!resolvedAdoptId || !user || clawByAdoptLoading) return;
+    markClientLoadMetric("agent", clawByAdoptError ? "error" : "ok", clawByAdoptError ? String((clawByAdoptError as any)?.message || clawByAdoptError) : clawByAdoptId ? String((clawByAdoptId as any)?.status || "loaded") : "missing");
+  }, [clawByAdoptError, clawByAdoptId, clawByAdoptLoading, markClientLoadMetric, resolvedAdoptId, user]);
+  useEffect(() => {
+    if (!resolvedAdoptId || !user || clawSettingsLoading) return;
+    markClientLoadMetric("settings", clawSettingsError ? "error" : "ok", clawSettingsError ? String((clawSettingsError as any)?.message || clawSettingsError) : "loaded");
+  }, [clawSettingsError, clawSettingsLoading, markClientLoadMetric, resolvedAdoptId, user]);
+  useEffect(() => {
+    if (!resolvedAdoptId || !user || availableModelsLoading) return;
+    markClientLoadMetric("models", availableModelsError ? "error" : "ok", availableModelsError ? String((availableModelsError as any)?.message || availableModelsError) : `${Array.isArray(availableModels) ? availableModels.length : 0} models`);
+  }, [availableModels, availableModelsError, availableModelsLoading, markClientLoadMetric, resolvedAdoptId, user]);
   const MODEL_SELECTION_KEY = resolvedAdoptId && userStorageId ? clawModelStorageKey(userStorageId, resolvedAdoptId) : null;
   const MODEL_SELECTION_FALLBACK_KEY = resolvedAdoptId ? clawModelFallbackStorageKey(resolvedAdoptId) : null;
   const [cachedLingxiaModelId, setCachedLingxiaModelId] = useState(() => {
@@ -766,6 +858,9 @@ export default function Home() {
   useEffect(() => { webConversationIdRef.current = webConversationId; }, [webConversationId]);
   const [webSessions, setWebSessions] = useState<WebChatSessionRecord[]>([]);
   const [webSessionsLoading, setWebSessionsLoading] = useState(false);
+  const webSessionsRef = useRef<WebChatSessionRecord[]>([]);
+  const backendSessionsRequestSeqRef = useRef(0);
+  const restoreConversationRequestSeqRef = useRef(0);
   const lastBackendHistoryRefreshRef = useRef("");
   const [cachedClawStatus, setCachedClawStatus] = useState<string | null>(null);
   const [clawHealthSummary, setClawHealthSummary] = useState<ClawHealthSummary | null>(null);
@@ -773,6 +868,10 @@ export default function Home() {
   const [clawHealthError, setClawHealthError] = useState("");
   const [showSlowReadinessHint, setShowSlowReadinessHint] = useState(false);
   const CLAW_STATUS_KEY = resolvedAdoptId && userStorageId ? clawStatusStorageKey(userStorageId, resolvedAdoptId) : null;
+
+  useEffect(() => {
+    webSessionsRef.current = webSessions;
+  }, [webSessions]);
 
   useEffect(() => {
     if (!SESSION_INDEX_KEY) {
@@ -810,22 +909,26 @@ export default function Home() {
       return;
     }
     const apiBase = import.meta.env.VITE_API_URL || "";
+    const requestStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (!silent) setClawHealthLoading(true);
     try {
-      const response = await fetch(`${apiBase}/api/claw/health-summary?adoptId=${encodeURIComponent(resolvedAdoptId)}`, {
+      const response = await fetchWithTimeout(`${apiBase}/api/claw/health-summary?adoptId=${encodeURIComponent(resolvedAdoptId)}`, {
         credentials: "include",
         cache: "no-store",
-      });
+      }, 5000);
       if (!response.ok) throw new Error(`健康检查失败 (${response.status})`);
       const data = await response.json().catch(() => null);
       setClawHealthSummary(data || null);
       setClawHealthError("");
+      markClientLoadMetric("health", "ok", data?.readiness?.status || "ready", requestStartedAt);
     } catch (error: any) {
-      setClawHealthError(String(error?.message || error || "健康检查失败"));
+      const message = String(error?.message || error || "健康检查失败");
+      setClawHealthError(message);
+      markClientLoadMetric("health", "error", message, requestStartedAt);
     } finally {
       if (!silent) setClawHealthLoading(false);
     }
-  }, [isDirectHttpRuntime, resolvedAdoptId, user]);
+  }, [isDirectHttpRuntime, markClientLoadMetric, resolvedAdoptId, user]);
 
   useEffect(() => {
     if (!resolvedAdoptId || !user || isDirectHttpRuntime) return;
@@ -858,14 +961,27 @@ export default function Home() {
   const refreshBackendWebSessions = useCallback(async (silent = false) => {
     if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return [];
     const apiBase = import.meta.env.VITE_API_URL || "";
-    if (!silent) setWebSessionsLoading(true);
+    const requestStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const historyLimit = silent ? 60 : 20;
+    const requestSeq = backendSessionsRequestSeqRef.current + 1;
+    backendSessionsRequestSeqRef.current = requestSeq;
+    const shouldShowLoading = !silent && webSessionsRef.current.length === 0;
+    if (shouldShowLoading) setWebSessionsLoading(true);
+    const isCurrentRequest = () => backendSessionsRequestSeqRef.current === requestSeq;
     try {
-      const response = await fetch(`${apiBase}/api/claw/chat-history/sessions?adoptId=${encodeURIComponent(resolvedAdoptId)}&limit=60`, {
+      const response = await fetchWithTimeout(`${apiBase}/api/claw/chat-history/sessions?adoptId=${encodeURIComponent(resolvedAdoptId)}&limit=${historyLimit}`, {
         credentials: "include",
-      });
-      if (!response.ok) return [];
+      }, silent ? 8000 : 6000);
+      if (!response.ok) {
+        markClientLoadMetric("sessions", "error", `HTTP ${response.status}`, requestStartedAt);
+        return webSessionsRef.current;
+      }
       const data = await response.json().catch(() => null);
-      if (!data?.sessions) return [];
+      if (!data?.sessions) {
+        markClientLoadMetric("sessions", "error", "empty response", requestStartedAt);
+        return webSessionsRef.current;
+      }
+      if (!isCurrentRequest()) return webSessionsRef.current;
       const hidden = HIDDEN_SESSION_KEY ? readHiddenWebSessions(HIDDEN_SESSION_KEY) : new Set<string>();
       const remote = (Array.isArray(data.sessions) ? data.sessions : []) as WebChatSessionRecord[];
       const backendSessions = remote
@@ -878,21 +994,47 @@ export default function Home() {
         writeWebSessionIndex(SESSION_INDEX_KEY, mergedSessions);
         return mergedSessions;
       });
+      markClientLoadMetric("sessions", "ok", `${backendSessions.length} backend sessions`, requestStartedAt);
       return mergedSessions;
     } catch (error) {
       console.warn("[history] backend sync failed; keeping local session cache", error);
-      return [];
+      markClientLoadMetric("sessions", "error", "request failed", requestStartedAt);
+      return webSessionsRef.current;
     } finally {
-      if (!silent) setWebSessionsLoading(false);
+      if (shouldShowLoading && isCurrentRequest()) setWebSessionsLoading(false);
     }
-  }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime]);
+  }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime, markClientLoadMetric]);
 
   useEffect(() => {
     if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return;
     let cancelled = false;
-    refreshBackendWebSessions().catch(() => {});
-    return () => { cancelled = true; void cancelled; };
+    let timer: number | undefined;
+    refreshBackendWebSessions(false)
+      .then(() => {
+        if (cancelled) return;
+        timer = window.setTimeout(() => {
+          void refreshBackendWebSessions(true).catch(() => {});
+        }, 2500);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
   }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime, refreshBackendWebSessions]);
+
+  useEffect(() => {
+    if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return;
+    const onFocus = () => void refreshBackendWebSessions(true).catch(() => {});
+    const timer = window.setInterval(() => {
+      void refreshBackendWebSessions(true).catch(() => {});
+    }, 30000);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [isDirectHttpRuntime, refreshBackendWebSessions, resolvedAdoptId, SESSION_INDEX_KEY]);
 
   useEffect(() => {
     if (!SESSION_INDEX_KEY) return;
@@ -1022,14 +1164,23 @@ export default function Home() {
       if (idx < 0 || idx !== current.length - 1) return current;
       const currentMessage = current[idx];
       const canonicalText = String(canonicalLastAssistant.text || "");
-      if (!canonicalText || canonicalText === currentMessage.text) return current;
-      if (normalizeSessionText(canonicalText).length < normalizeSessionText(currentMessage.text || "").length) {
-        return current;
-      }
+      const currentText = String(currentMessage.text || "");
+      const shouldMergeText =
+        Boolean(canonicalText) &&
+        canonicalText !== currentText &&
+        normalizeSessionText(canonicalText).length >= normalizeSessionText(currentText).length;
+      const canonicalToolCalls = canonicalLastAssistant.toolCalls || [];
+      const currentToolCalls = currentMessage.toolCalls || [];
+      const shouldMergeToolCalls =
+        canonicalToolCalls.length > 0 &&
+        canonicalToolCalls.length >= currentToolCalls.length &&
+        toolCallsSignature(canonicalToolCalls) !== toolCallsSignature(currentToolCalls);
+      if (!shouldMergeText && !shouldMergeToolCalls) return current;
       const next = [...current];
       next[idx] = {
         ...currentMessage,
-        text: canonicalText,
+        text: shouldMergeText ? canonicalText : currentText,
+        toolCalls: shouldMergeToolCalls ? canonicalToolCalls : currentMessage.toolCalls,
         status: undefined,
         recovering: false,
         recovered: false,
@@ -1073,13 +1224,10 @@ export default function Home() {
       } catch {}
       if (!sessionKey) continue;
 
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 1800);
       try {
-        const response = await fetch(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(sessionKey)}`, {
+        const response = await fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(sessionKey)}`, {
           credentials: "include",
-          signal: controller.signal,
-        });
+        }, 1800);
         if (!response.ok) continue;
         const payload = await response.json().catch(() => null);
         if (!Array.isArray(payload?.messages)) continue;
@@ -1097,8 +1245,6 @@ export default function Home() {
         return;
       } catch {
         // 对账是后台补偿，失败不影响主聊天。
-      } finally {
-        window.clearTimeout(timeout);
       }
     }
   }, [applyCanonicalConversationText, isDirectHttpRuntime, refreshBackendWebSessions, resolvedAdoptId]);
@@ -1117,12 +1263,14 @@ export default function Home() {
     restoredSessionKeyRef.current = session.sessionKey;
     const apiBase = import.meta.env.VITE_API_URL || "";
     let cancelled = false;
-    fetch(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(session.sessionKey)}`, {
+    const requestSeq = restoreConversationRequestSeqRef.current + 1;
+    restoreConversationRequestSeqRef.current = requestSeq;
+    fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(session.sessionKey)}`, {
       credentials: "include",
-    })
+    }, 4000)
       .then((r) => r.ok ? r.json() : null)
       .then((payload) => {
-        if (cancelled || !Array.isArray(payload?.messages)) return;
+        if (cancelled || restoreConversationRequestSeqRef.current !== requestSeq || !Array.isArray(payload?.messages)) return;
         activateWebConversation(webConversationId, payload.messages);
       })
       .catch(() => {});
@@ -1154,18 +1302,21 @@ export default function Home() {
       return;
     }
     const apiBase = import.meta.env.VITE_API_URL || "";
+    const switchRequestSeq = restoreConversationRequestSeqRef.current + 1;
+    restoreConversationRequestSeqRef.current = switchRequestSeq;
     try {
       const [messagesResp, activateResp] = await Promise.all([
-        fetch(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(session.sessionKey)}`, {
+        fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(session.sessionKey)}`, {
           credentials: "include",
-        }),
-        fetch(`${apiBase}/api/claw/chat-history/activate`, {
+        }, 6000),
+        fetchWithTimeout(`${apiBase}/api/claw/chat-history/activate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify({ adoptId: resolvedAdoptId, sessionKey: session.sessionKey }),
-        }),
+        }, 5000),
       ]);
+      if (restoreConversationRequestSeqRef.current !== switchRequestSeq) return;
       if (!messagesResp.ok) throw new Error(`读取历史失败 (${messagesResp.status})`);
       if (!activateResp.ok) throw new Error(`激活历史会话失败 (${activateResp.status})`);
       const payload = await messagesResp.json();
@@ -1213,9 +1364,9 @@ export default function Home() {
       if (nextSession?.sessionKey && !isDirectHttpRuntime) {
         const apiBase = import.meta.env.VITE_API_URL || "";
         try {
-          const response = await fetch(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(nextSession.sessionKey)}`, {
+          const response = await fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(nextSession.sessionKey)}`, {
             credentials: "include",
-          });
+          }, 5000);
           const payload = response.ok ? await response.json().catch(() => null) : null;
           restoredSessionKeyRef.current = nextSession.sessionKey;
           activateWebConversation(nextSession.conversationId, Array.isArray(payload?.messages) ? payload.messages : []);
@@ -1287,10 +1438,22 @@ export default function Home() {
   const lastEventAtRef = useRef<number>(Date.now()); // 追踪最后收到的任意 SSE 事件时间
 
   // 技能列表
-  const { data: lingxiaSkills, refetch: refetchSkills } = trpc.claw.listSkills.useQuery(
+  const { data: lingxiaSkills, isLoading: lingxiaSkillsLoading, error: lingxiaSkillsError, refetch: refetchSkills } = trpc.claw.listSkills.useQuery(
     { adoptId: resolvedAdoptId || "" },
     { enabled: !!resolvedAdoptId, retry: false }
   );
+  useEffect(() => {
+    if (!resolvedAdoptId || lingxiaSkillsLoading) return;
+    const count = Number((lingxiaSkills as any)?.shared?.length || 0)
+      + Number((lingxiaSkills as any)?.system?.length || 0)
+      + Number((lingxiaSkills as any)?.private?.length || 0);
+    markClientLoadMetric("skills", lingxiaSkillsError ? "error" : "ok", lingxiaSkillsError ? String((lingxiaSkillsError as any)?.message || lingxiaSkillsError) : `${count} skills`);
+  }, [lingxiaSkills, lingxiaSkillsError, lingxiaSkillsLoading, markClientLoadMetric, resolvedAdoptId]);
+  useEffect(() => {
+    if (!resolvedAdoptId || !isDirectHttpRuntime) return;
+    markClientLoadMetric("health", "skip", "direct runtime");
+    markClientLoadMetric("sessions", "skip", "direct runtime local cache");
+  }, [isDirectHttpRuntime, markClientLoadMetric, resolvedAdoptId]);
   const toggleSkillMutation = trpc.claw.toggleSkill.useMutation({
     onSuccess: () => { refetchSkills(); toast.success("技能已更新"); },
     onError: (e) => toast.error(e.message),
@@ -2190,7 +2353,7 @@ export default function Home() {
 
     let cancelled = false;
 
-    fetch("/api/meta/openclaw-version")
+    fetchWithTimeout("/api/meta/openclaw-version", {}, 3000)
       .then(r => r.json())
       .then(d => {
         if (cancelled) return;
@@ -2200,20 +2363,23 @@ export default function Home() {
       .catch(() => {});
 
     if (resolvedAdoptId && user) {
-      fetch(`/api/claw/runtime-info?adoptId=${encodeURIComponent(resolvedAdoptId)}`)
+      const requestStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      fetchWithTimeout(`/api/claw/runtime-info?adoptId=${encodeURIComponent(resolvedAdoptId)}`, {}, 4000)
         .then(r => r.json())
         .then(d => {
           if (!cancelled) setRuntimeAgentId(String(d?.runtimeAgentId || ""));
+          if (!cancelled) markClientLoadMetric("runtimeInfo", "ok", String(d?.runtimeAgentId || "loaded"), requestStartedAt);
         })
         .catch(() => {
           if (!cancelled) setRuntimeAgentId("");
+          if (!cancelled) markClientLoadMetric("runtimeInfo", "error", "request failed", requestStartedAt);
         });
     }
 
     return () => {
       cancelled = true;
     };
-  }, [isLingxiaSubdomain, resolvedAdoptId, user]);
+  }, [isLingxiaSubdomain, markClientLoadMetric, resolvedAdoptId, user]);
 
   // 员工智能体聊天消息区：仅在接近底部时自动跟随
   const lingxiaMsgsEndRef = useRef<HTMLDivElement>(null);
@@ -2255,6 +2421,50 @@ export default function Home() {
   const lingxiaExpiryInfo = useMemo(() => ({ text: "长期持有", color: "var(--oc-success)" }), []);
   const sidebarClawStatus = String((clawByAdoptId as any)?.status || cachedClawStatus || "");
   const sidebarClawOnline = sidebarClawStatus === "active";
+  const clientLoadMetricList = useMemo(() => (
+    Object.values(clientLoadMetrics).sort((a, b) => a.elapsedMs - b.elapsedMs)
+  ), [clientLoadMetrics]);
+  const clientLoadTotalMs = useMemo(() => {
+    const current = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const elapsed = Math.round(current - clientLoadStartedAtRef.current);
+    const maxMetric = clientLoadMetricList.reduce((max, metric) => Math.max(max, metric.elapsedMs), 0);
+    return Math.max(elapsed, maxMetric);
+  }, [clientLoadMetricList]);
+  const slowestClientMetric = useMemo(() => (
+    clientLoadMetricList.slice().sort((a, b) => b.elapsedMs - a.elapsedMs)[0]
+  ), [clientLoadMetricList]);
+  const reportClientLoadMetrics = useCallback(async (reason: string) => {
+    if (!resolvedAdoptId || !user || clientLoadReportedRef.current || clientLoadMetricList.length === 0) return;
+    clientLoadReportedRef.current = true;
+    const payload = {
+      adoptId: resolvedAdoptId,
+      reason,
+      path: `${window.location.pathname}${window.location.search}`,
+      totalMs: clientLoadTotalMs,
+      metrics: clientLoadMetricList,
+    };
+    console.info("[client-load]", payload);
+    try {
+      await fetchWithTimeout("/api/claw/client-load-metrics", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }, 2500);
+    } catch {}
+  }, [clientLoadMetricList, clientLoadTotalMs, resolvedAdoptId, user]);
+  useEffect(() => {
+    if (!resolvedAdoptId || !user || clientLoadReportedRef.current) return;
+    const coreKeys = ["auth", "agent", "models", "health", "sessions", "skills"];
+    if (coreKeys.every((key) => clientLoadMetrics[key])) {
+      void reportClientLoadMetrics("core-ready");
+    }
+  }, [clientLoadMetrics, reportClientLoadMetrics, resolvedAdoptId, user]);
+  useEffect(() => {
+    if (!resolvedAdoptId || !user || clientLoadReportedRef.current) return;
+    const timer = window.setTimeout(() => void reportClientLoadMetrics("timeout"), 8500);
+    return () => window.clearTimeout(timer);
+  }, [reportClientLoadMetrics, resolvedAdoptId, user]);
   const chatReadinessBanner = useMemo(() => {
     if (!resolvedAdoptId || isDirectHttpRuntime) return null;
     if (showSlowReadinessHint && clawByAdoptLoading && !clawByAdoptId) {
@@ -2299,6 +2509,55 @@ export default function Home() {
     isDirectHttpRuntime,
     resolvedAdoptId,
     showSlowReadinessHint,
+  ]);
+
+  const latestContextMessage = useMemo(() => {
+    for (let i = activeLingxiaMsgs.length - 1; i >= 0; i -= 1) {
+      const msg = activeLingxiaMsgs[i] as LxMsg;
+      if (msg?.contextPercent || msg?.usage?.input || msg?.contextWindow) return msg;
+    }
+    return null;
+  }, [activeLingxiaMsgs]);
+
+  const activeToolCount = useMemo(() => {
+    const lastAssistant = [...(activeLingxiaMsgs as LxMsg[])].reverse().find((msg) => msg.role === "assistant");
+    return (lastAssistant?.toolCalls || []).filter((tool) => tool.status === "running").length;
+  }, [activeLingxiaMsgs]);
+
+  const chatComposerStatus = useMemo(() => {
+    const items: Array<{ key: string; label: string; tone?: "ok" | "warning" | "muted" }> = [];
+    if (!isDirectHttpRuntime) {
+      const readiness = clawHealthSummary?.readiness;
+      if (readiness?.status === "ready" || readiness?.ok) {
+        items.push({ key: "ready", label: wsConnected ? "WS 已连接" : "配置正常", tone: "ok" });
+      } else if (clawHealthError || readiness?.status === "degraded") {
+        items.push({ key: "health", label: "配置需检查", tone: "warning" });
+      } else if (clawHealthLoading || clawByAdoptLoading) {
+        items.push({ key: "loading", label: "连接检查中", tone: "muted" });
+      }
+    }
+    if (latestContextMessage?.contextPercent) {
+      items.push({
+        key: "context",
+        label: `上下文 ${Math.round(latestContextMessage.contextPercent)}%`,
+        tone: latestContextMessage.contextPercent >= 80 ? "warning" : "muted",
+      });
+    } else if (latestContextMessage?.usage?.input) {
+      items.push({ key: "tokens", label: `输入 ${latestContextMessage.usage.input}`, tone: "muted" });
+    }
+    if (activeToolCount > 0) {
+      items.push({ key: "tools", label: `工具 ${activeToolCount} 个运行中`, tone: "ok" });
+    }
+    return items.slice(0, 3);
+  }, [
+    activeToolCount,
+    clawByAdoptLoading,
+    clawHealthError,
+    clawHealthLoading,
+    clawHealthSummary,
+    isDirectHttpRuntime,
+    latestContextMessage,
+    wsConnected,
   ]);
 
   const navLabel = (key: string) => LINGXIA_SIDEBAR_NAV.find((i) => i.key === key)?.label || key;
@@ -2457,11 +2716,52 @@ export default function Home() {
           {/* ── 右侧主面板 ── */}
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {/* 全局顶部栏 */}
-          <TopBar activePage={activePage} />
+          <TopBar
+            activePage={activePage}
+            right={isLingxiaSubdomain ? (
+              <div className="client-load-diagnostics">
+                <button
+                  type="button"
+                  className="client-load-diagnostics__trigger"
+                  onClick={() => setClientDiagnosticsOpen((value) => !value)}
+                  title="查看首屏请求耗时"
+                >
+                  <span className="client-load-diagnostics__dot" data-status={slowestClientMetric?.status || "pending"} />
+                  <span>{clientLoadMetricList.length > 0 ? `${clientLoadTotalMs}ms` : "诊断"}</span>
+                </button>
+                {clientDiagnosticsOpen ? (
+                  <div className="client-load-diagnostics__panel">
+                    <div className="client-load-diagnostics__head">
+                      <span>首屏诊断</span>
+                      <span>{clientLoadMetricList.length} 项</span>
+                    </div>
+                    <div className="client-load-diagnostics__rows">
+                      {clientLoadMetricList.length === 0 ? (
+                        <div className="client-load-diagnostics__empty">正在收集首屏请求耗时</div>
+                      ) : clientLoadMetricList.map((metric) => (
+                        <div key={metric.key} className="client-load-diagnostics__row">
+                          <span className="client-load-diagnostics__name">{metric.label}</span>
+                          <span className="client-load-diagnostics__meta" data-status={metric.status}>
+                            {metric.requestMs != null ? `${metric.requestMs}ms` : `${metric.elapsedMs}ms`}
+                          </span>
+                          <span className="client-load-diagnostics__detail">{metric.detail || metric.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : undefined}
+          />
 
 
           {activePage === "chat" ? (
           <ChatPage>
+          <PanelErrorBoundary
+            resetKey={`chat:${resolvedAdoptId || ""}:${webConversationId}`}
+            title="主对话暂时不可用"
+            description="聊天区域渲染时出现异常，历史会话和其他功能仍可继续使用。"
+          >
           <main className="relative flex-1 min-w-0 flex flex-col overflow-hidden">
             <div className="md:hidden relative flex-none px-3 py-2" style={{ borderBottom: "1px solid var(--oc-border-subtle)", background: "var(--oc-bg)" }}>
               <div ref={sessionMenuRef} className="relative flex items-center gap-2">
@@ -2668,6 +2968,11 @@ export default function Home() {
               onUserMention={(u) => {
                 setMentionedUsers((prev) => prev.some((x) => x.userId === u.userId) ? prev : [...prev, u]);
               }}
+              statusExtras={chatComposerStatus.map((item) => (
+                <span key={item.key} className="lingxia-composer-status-chip" data-tone={item.tone || "muted"}>
+                  {item.label}
+                </span>
+              ))}
               rightControls={(
                 <Select value={effectiveLingxiaModelId} onValueChange={(v) => {
                   setLingxiaModelId(v);
@@ -2738,6 +3043,7 @@ export default function Home() {
             />
 
           </main>
+          </PanelErrorBoundary>
           </ChatPage>
           ) : (
             <MainPanel

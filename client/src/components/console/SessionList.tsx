@@ -94,14 +94,21 @@ export function SessionList({
   loading = false,
 }: SessionListProps) {
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [menuId, setMenuId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const rootRef = useRef<HTMLDivElement | null>(null);
   const isMobile = variant === "mobile";
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 180);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
   const filteredSessions = useMemo(
-    () => filterSessions(sessions, query),
-    [query, sessions],
+    () => filterSessions(sessions, debouncedQuery),
+    [debouncedQuery, sessions],
   );
 
   const groupedSessions = useMemo(() => {

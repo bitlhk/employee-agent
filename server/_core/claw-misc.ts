@@ -22,7 +22,24 @@ import { skillInstaller } from "./skills/skill-installer";
 import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer } from "./skills/skill-source";
 
 type UsageBucket = { total: number; days: Record<string, number>; lastTs: string; userId: number };
-type ChatHistoryMessage = { id: string; role: "user" | "assistant"; text: string; timeLabel: string; timestamp: number };
+type ChatHistoryToolCall = {
+  id: string;
+  name: string;
+  arguments: string;
+  result?: string;
+  status: "running" | "done" | "error";
+  ts: number;
+  executor?: "gateway";
+  _gateway?: boolean;
+};
+type ChatHistoryMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  timeLabel: string;
+  timestamp: number;
+  toolCalls?: ChatHistoryToolCall[];
+};
 type HistoryRunMessages = { source: string; runAt: number; messages: ChatHistoryMessage[] };
 type ChatHistorySessionSummary = {
   title: string;
@@ -81,6 +98,94 @@ function textFromOpenClawContent(content: unknown, role: string): string {
   return parts.join("\n\n").trim();
 }
 
+function compactHistoryJson(value: unknown, max = 6000): string {
+  let text = "";
+  if (typeof value === "string") {
+    text = value;
+  } else {
+    try {
+      text = JSON.stringify(value ?? {}, null, 2);
+    } catch {
+      text = String(value || "");
+    }
+  }
+  return text.length > max ? `${text.slice(0, max)}\n...` : text;
+}
+
+function textFromToolResultContent(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (typeof item?.text === "string") return item.text;
+        if (typeof item?.content === "string") return item.content;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  return compactHistoryJson(value);
+}
+
+function toolCallsFromOpenClawContent(content: unknown, timestamp: number): ChatHistoryToolCall[] {
+  if (!Array.isArray(content)) return [];
+  const calls: ChatHistoryToolCall[] = [];
+  const byId = new Map<string, ChatHistoryToolCall>();
+  for (const item of content as any[]) {
+    if (!item || typeof item !== "object") continue;
+    const type = String(item.type || "");
+    if (type === "thinking") {
+      const text = String(item.text || item.content || "").trim();
+      if (!text) continue;
+      calls.push({
+        id: `thinking-${calls.length}`,
+        name: "thinking",
+        arguments: "{}",
+        result: text.length > 6000 ? `${text.slice(0, 6000)}\n...` : text,
+        status: "done",
+        ts: timestamp || Date.now(),
+        executor: "gateway",
+        _gateway: true,
+      });
+      continue;
+    }
+    if (type === "tool_use") {
+      const id = String(item.id || item.tool_use_id || `tool-${calls.length}`);
+      const name = String(item.name || item.tool_name || "tool");
+      const call: ChatHistoryToolCall = {
+        id,
+        name,
+        arguments: compactHistoryJson(item.input ?? item.arguments ?? {}),
+        status: "running",
+        ts: timestamp || Date.now(),
+      };
+      byId.set(id, call);
+      calls.push(call);
+      continue;
+    }
+    if (type === "tool_result") {
+      const id = String(item.tool_use_id || item.tool_call_id || item.id || "");
+      const result = textFromToolResultContent(item.content ?? item.result ?? item.text).trim();
+      const existing = id ? byId.get(id) : undefined;
+      if (existing) {
+        existing.result = result.length > 6000 ? `${result.slice(0, 6000)}\n...` : result;
+        existing.status = item.is_error || item.error ? "error" : "done";
+      } else {
+        calls.push({
+          id: id || `tool-result-${calls.length}`,
+          name: String(item.name || item.tool_name || "tool_result"),
+          arguments: "{}",
+          result: result.length > 6000 ? `${result.slice(0, 6000)}\n...` : result,
+          status: item.is_error || item.error ? "error" : "done",
+          ts: timestamp || Date.now(),
+        });
+      }
+    }
+  }
+  return calls.map((call) => call.status === "running" ? { ...call, status: "done" as const } : call);
+}
+
 function extractOpenClawChatMessages(sessionFile: string, maxMessages = 200): ChatHistoryMessage[] {
   if (!sessionFile || !existsSync(sessionFile)) return [];
   const messages: ChatHistoryMessage[] = [];
@@ -95,14 +200,16 @@ function extractOpenClawChatMessages(sessionFile: string, maxMessages = 200): Ch
     let text = textFromOpenClawContent(event?.message?.content, role);
     if (role === "user") text = stripPlatformLanguagePolicy(text);
     text = text.trim();
-    if (!text) continue;
     const timestamp = Number(event?.message?.timestamp || event?.timestamp || 0) || 0;
+    const toolCalls = role === "assistant" ? toolCallsFromOpenClawContent(event?.message?.content, timestamp) : [];
+    if (!text && toolCalls.length === 0) continue;
     messages.push({
       id: `hist-${String(event?.id || messages.length)}`,
       role,
       text,
       timeLabel: formatHistoryTimeLabel(timestamp),
       timestamp,
+      ...(toolCalls.length > 0 ? { toolCalls } : {}),
     });
   }
   return messages.slice(-maxMessages);
@@ -114,14 +221,16 @@ function chatHistoryMessageFromOpenClawMessage(raw: any, fallbackTimestamp: numb
   let text = textFromOpenClawContent(raw?.content, role);
   if (role === "user") text = stripPlatformLanguagePolicy(text);
   text = text.trim();
-  if (!text) return null;
   const timestamp = Number(raw?.timestamp || fallbackTimestamp || 0) || 0;
+  const toolCalls = role === "assistant" ? toolCallsFromOpenClawContent(raw?.content, timestamp) : [];
+  if (!text && toolCalls.length === 0) return null;
   return {
     id: `hist-${idPrefix}-${index}`,
     role,
     text,
     timeLabel: formatHistoryTimeLabel(timestamp),
     timestamp,
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
   };
 }
 
@@ -279,6 +388,7 @@ function listRecoveredWebSessions(args: {
     return out;
   }
   const sessionsRoot = path.resolve(args.sessionsDir);
+  const candidates: Array<{ sessionId: string; sessionFile: string; mtimeMs: number; birthtimeMs: number }> = [];
   for (const entry of entries as any[]) {
     if (!entry.isFile() || !entry.name.endsWith(".jsonl") || entry.name.includes(".trajectory")) continue;
     if (entry.name.includes(".codex-app-server")) continue;
@@ -286,19 +396,31 @@ function listRecoveredWebSessions(args: {
     if (!sessionId || args.indexedSessionIds.has(sessionId)) continue;
     const sessionFile = path.resolve(path.join(args.sessionsDir, entry.name));
     if (!sessionFile.startsWith(sessionsRoot + path.sep)) continue;
-    const messages = extractOpenClawChatMessages(sessionFile, 80);
+    try {
+      const st = statSync(sessionFile);
+      candidates.push({
+        sessionId,
+        sessionFile,
+        mtimeMs: Number(st.mtimeMs || 0),
+        birthtimeMs: Number(st.birthtimeMs || 0),
+      });
+    } catch {}
+  }
+
+  const maxCandidates = Math.max(args.limit * 3, 30);
+  for (const candidate of candidates.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, maxCandidates)) {
+    const messages = extractOpenClawChatMessages(candidate.sessionFile, 80);
     if (!isRecoverableHistoryMessages(messages)) continue;
     const firstTs = messages.find((message) => message.timestamp > 0)?.timestamp || 0;
     const lastTs = [...messages].reverse().find((message) => message.timestamp > 0)?.timestamp || 0;
-    const st = statSync(sessionFile);
-    const updatedAt = lastTs || st.mtimeMs || 0;
-    const createdAt = firstTs || st.birthtimeMs || updatedAt;
-    const conversationId = recoveredConversationId(sessionId);
+    const updatedAt = lastTs || candidate.mtimeMs || 0;
+    const createdAt = firstTs || candidate.birthtimeMs || updatedAt;
+    const conversationId = recoveredConversationId(candidate.sessionId);
     out.push({
       conversationId,
       sessionKey: `agent:${args.runtimeAgentId}:web:${conversationId}`,
-      sessionId,
-      sessionFile,
+      sessionId: candidate.sessionId,
+      sessionFile: candidate.sessionFile,
       updatedAt,
       createdAt,
       messageCount: messages.length,
@@ -306,6 +428,7 @@ function listRecoveredWebSessions(args: {
       preview: "",
       recovered: true,
     });
+    if (out.length >= args.limit) break;
   }
   return out
     .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -501,6 +624,57 @@ export function registerMiscRoutes(app: express.Express) {
       res.json({ adoptId, dbAgentId, runtimeAgentId, skillsDir, trialAgentDirExists: existsSync(trialAgentDir) });
     } catch (e) {
       res.status(500).json({ error: "runtime info failed" });
+    }
+  });
+
+  app.post("/api/claw/client-load-metrics", async (req, res) => {
+    try {
+      const adoptId = String(req.body?.adoptId || "").trim();
+      if (!adoptId) {
+        res.status(400).json({ error: "adoptId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+
+      const rawMetrics = Array.isArray(req.body?.metrics) ? req.body.metrics.slice(0, 24) : [];
+      type SanitizedClientLoadMetric = {
+        key: string;
+        label: string;
+        status: string;
+        elapsedMs: number;
+        requestMs?: number;
+        detail: string;
+      };
+      const metrics: SanitizedClientLoadMetric[] = rawMetrics.map((metric: any) => ({
+        key: String(metric?.key || "").slice(0, 48),
+        label: String(metric?.label || "").slice(0, 48),
+        status: String(metric?.status || "").slice(0, 16),
+        elapsedMs: Math.max(0, Math.min(Number(metric?.elapsedMs || 0) || 0, 10 * 60 * 1000)),
+        requestMs: metric?.requestMs == null ? undefined : Math.max(0, Math.min(Number(metric.requestMs || 0) || 0, 10 * 60 * 1000)),
+        detail: String(metric?.detail || "").replace(/\s+/g, " ").slice(0, 160),
+      }));
+      const totalMs = Math.max(0, Math.min(Number(req.body?.totalMs || 0) || 0, 10 * 60 * 1000));
+      const slowest = metrics
+        .slice()
+        .sort((a: SanitizedClientLoadMetric, b: SanitizedClientLoadMetric) => Number(b.elapsedMs || 0) - Number(a.elapsedMs || 0))
+        .slice(0, 3)
+        .map((metric: SanitizedClientLoadMetric) => `${metric.key}:${metric.elapsedMs}ms:${metric.status}`)
+        .join(",");
+
+      console.log("[CLIENT-LOAD]", {
+        adoptId,
+        userId: Number((claw as any).userId || 0),
+        path: String(req.body?.path || "").slice(0, 160),
+        totalMs,
+        metricCount: metrics.length,
+        slowest,
+        metrics,
+      });
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.warn("[CLIENT-LOAD] failed", error?.message || error);
+      res.status(500).json({ error: "client_load_metrics_failed" });
     }
   });
 
