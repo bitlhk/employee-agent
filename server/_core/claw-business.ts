@@ -1771,7 +1771,13 @@ export function registerBusinessRoutes(app: express.Express) {
     const gatewayPort = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
     const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
 
-    const ALLOWED_MODELS = new Set(["glm5/glm-5.1", "deepseek/deepseek-chat", "hermes/hermes-agent", "maas/deepseek-v4-flash"]);
+    const ALLOWED_MODELS = new Set([
+      "glm5/glm-5.1",
+      "modelarts-maas/glm-5.1",
+      "deepseek/deepseek-chat",
+      "hermes/hermes-agent",
+      "maas/deepseek-v4-flash",
+    ]);
     const backendModel = (typeof model === "string" && ALLOWED_MODELS.has(model.trim())) ? model.trim() : "";
 
     const body = JSON.stringify({
