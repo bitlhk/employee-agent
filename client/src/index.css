@@ -1977,6 +1977,15 @@
   box-shadow: 0 1px 1px color-mix(in oklab, #000 8%, transparent);
 }
 
+.lingxia-main-panel {
+  margin: 10px 10px 10px 8px;
+  height: calc(100% - 20px);
+  border-radius: 16px;
+  border: 1px solid var(--oc-border-subtle);
+  background: var(--oc-chat-bg);
+  box-shadow: 0 1px 1px color-mix(in oklab, #000 6%, transparent);
+}
+
 .sidebar-item {
   border-radius: 10px;
   min-height: 44px;
@@ -4906,8 +4915,8 @@ html:has(:root[data-theme-mode="light"]) body {
   align-items: center;
   height: 52px;
   padding: 0 24px;
-  background: color-mix(in oklab, var(--oc-bg) 86%, var(--oc-panel));
-  border-bottom: 1px solid var(--oc-border);
+  background: transparent;
+  border-bottom: 0;
 }
 .lingxia-topbar__left {
   display: flex;
@@ -4947,14 +4956,14 @@ html:has(:root[data-theme-mode="light"]) body {
 
 /* 浅色主题 */
 :root[data-theme-mode="light"] .lingxia-topbar {
-  background: #F3F4F6 !important;
-  border-bottom-color: #E5E7EB !important;
+  background: transparent !important;
+  border-bottom-color: transparent !important;
 }
 :root[data-theme-mode="light"] .lingxia-topbar__brand {
   color: #111827 !important;
 }
 :root[data-theme-mode="light"] .lingxia-topbar__page {
-  color: #dc2626 !important;
+  color: var(--oc-text-primary) !important;
 }
 
 /* 消息操作按钮（复制/朗读） */

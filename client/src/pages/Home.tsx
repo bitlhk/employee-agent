@@ -2911,7 +2911,7 @@ export default function Home() {
 
 
           {/* ── 右侧主面板 ── */}
-          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          <div className="lingxia-main-panel flex-1 min-w-0 flex flex-col overflow-hidden">
           {/* 全局顶部栏 */}
           <TopBar
             activePage={activePage}
