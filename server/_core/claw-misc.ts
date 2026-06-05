@@ -44,6 +44,7 @@ type HistoryRunMessages = { source: string; runAt: number; messages: ChatHistory
 type ChatHistorySessionSummary = {
   title: string;
   preview: string;
+  searchText?: string;
   messageCount: number;
 };
 type ChatHistorySummaryCache = {
@@ -318,10 +319,7 @@ function collectOpenClawChatHistoryMessages(args: {
   for (const run of runs) merged.push(...run.messages);
 
   const currentSessionFile = args.currentSessionFile ? path.resolve(args.currentSessionFile) : "";
-  const hasCurrentRun = currentSessionFile
-    ? runs.some((run) => currentSessionFile.endsWith(`${run.source}.jsonl`))
-    : false;
-  if (currentSessionFile && !hasCurrentRun) {
+  if (currentSessionFile) {
     merged.push(...extractOpenClawChatMessages(currentSessionFile, maxMessages));
   }
 
@@ -575,7 +573,7 @@ function summarizeChatHistorySession(args: {
   const cacheKey = String(args.entry?.sessionKey || args.entry?.conversationId || "");
   const fingerprint = buildSessionSummaryFingerprint(args.entry, args.trajectoryFingerprint);
   const cached = cacheKey ? args.cache.entries[cacheKey] : null;
-  if (cached?.fingerprint === fingerprint) {
+  if (cached?.fingerprint === fingerprint && typeof cached.summary?.searchText === "string") {
     args.stats.hits += 1;
     return cached.summary;
   }
@@ -592,6 +590,7 @@ function summarizeChatHistorySession(args: {
   const summary = {
     title: truncateHistoryText(firstUser?.text || "", 24) || "新对话",
     preview: truncateHistoryText(last?.text || "", 42),
+    searchText: normalizeHistoryText(messages.map((message) => message.text || "").join(" ")).slice(0, 12000),
     messageCount: messages.length,
   };
   if (cacheKey) {
@@ -925,6 +924,7 @@ export function registerMiscRoutes(app: express.Express) {
             sessionId: entry.sessionId,
             title: summary.title,
             preview: summary.preview,
+            searchText: summary.searchText || "",
             messageCount: summary.messageCount,
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,

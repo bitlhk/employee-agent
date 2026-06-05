@@ -8,6 +8,7 @@ export type SessionListConversation = {
   title: string;
   customTitle?: string;
   preview: string;
+  searchText?: string;
   messageCount: number;
   createdAt: number;
   updatedAt: number;
@@ -34,6 +35,14 @@ type SessionListProps = {
 
 function normalizeText(value: string) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeSearchText(value: string) {
+  return normalizeText(value).toLowerCase();
+}
+
+function compactSearchText(value: string) {
+  return normalizeSearchText(value).replace(/\s+/g, "");
 }
 
 function shortTitle(session: SessionListConversation) {
@@ -76,16 +85,21 @@ function filterSessions(
   query: string,
   messageSearchProvider?: (conversationId: string, query: string) => string,
 ) {
-  const q = normalizeText(query).toLowerCase();
+  const q = normalizeSearchText(query);
+  const compactQ = compactSearchText(query);
   if (!q) return sessions;
   return sessions.filter((session) => {
     const haystack = [
       session.customTitle || "",
       session.title || "",
       session.preview || "",
+      session.searchText || "",
       formatUpdatedAt(session.updatedAt),
-    ].join(" ").toLowerCase();
-    if (haystack.includes(q)) return true;
+    ].join(" ");
+    const normalizedHaystack = normalizeSearchText(haystack);
+    const compactHaystack = compactSearchText(haystack);
+    if (normalizedHaystack.includes(q)) return true;
+    if (compactQ && compactHaystack.includes(compactQ)) return true;
     return Boolean(messageSearchProvider?.(session.conversationId, query));
   });
 }
@@ -111,6 +125,22 @@ function highlightText(value: string, query: string): ReactNode {
   }
   if (cursor < text.length) parts.push(text.slice(cursor));
   return parts.length > 0 ? parts : text;
+}
+
+function searchSnippet(value: string, query: string): string {
+  const text = normalizeText(value);
+  const q = normalizeSearchText(query);
+  if (!text || !q) return "";
+  const lower = text.toLowerCase();
+  let idx = lower.indexOf(q);
+  if (idx < 0) {
+    const compactQ = compactSearchText(query);
+    if (!compactQ || !compactSearchText(text).includes(compactQ)) return "";
+    idx = 0;
+  }
+  const start = Math.max(0, idx - 18);
+  const end = Math.min(text.length, idx + q.length + 42);
+  return `${start > 0 ? "..." : ""}${text.slice(start, end)}${end < text.length ? "..." : ""}`;
 }
 
 export function SessionList({
@@ -151,7 +181,8 @@ export function SessionList({
     if (!searchActive || !messageSearchProvider) return new Map<string, string>();
     const snippets = new Map<string, string>();
     for (const session of filteredSessions) {
-      const snippet = messageSearchProvider(session.conversationId, debouncedQuery);
+      const snippet = messageSearchProvider(session.conversationId, debouncedQuery)
+        || searchSnippet(session.searchText || "", debouncedQuery);
       if (snippet) snippets.set(session.conversationId, snippet);
     }
     return snippets;
@@ -392,7 +423,7 @@ export function SessionList({
                             </button>
                           </div>
                         ) : (
-                          <div className="sidebar-item-label truncate" style={{ fontSize: 14, fontWeight: 400, color: isMobile ? "var(--oc-text-primary)" : undefined }}>
+                          <div className="sidebar-item-label truncate" style={{ fontSize: 14, fontWeight: active ? 600 : 500, color: isMobile ? "var(--oc-text-primary)" : undefined }}>
                             {switching ? "正在切换..." : highlightText(shortTitle(session), debouncedQuery)}
                           </div>
                         )}

@@ -1968,6 +1968,15 @@
 }
 .compose-shell:hover { border-color: var(--border-strong); }
 
+.lingxia-sidebar-panel {
+  margin: 10px 0 10px 10px;
+  height: calc(100% - 20px);
+  border-radius: 16px;
+  border: 1px solid var(--oc-border-subtle);
+  background: var(--oc-sidebar-bg);
+  box-shadow: 0 1px 1px color-mix(in oklab, #000 8%, transparent);
+}
+
 .sidebar-item {
   border-radius: 10px;
   min-height: 44px;
@@ -1977,12 +1986,15 @@
   border: 1px solid transparent;
   background: transparent;
   font-size: 14px;
-  font-weight: 400;
+  font-weight: 500;
   color: var(--oc-sidebar-muted);
   transition: background-color .16s ease, border-color .16s ease;
 }
-.sidebar-item .sidebar-item-label { font-weight: 400; letter-spacing: 0; font-size: 14px; color: var(--oc-sidebar-text); }
-.sidebar-item .sidebar-item-icon { color: var(--oc-sidebar-muted); }
+.sidebar-item .sidebar-item-label { font-weight: 500; letter-spacing: 0; font-size: 14px; color: var(--oc-sidebar-text); }
+.sidebar-item .sidebar-item-icon {
+  color: var(--oc-sidebar-text);
+  transition: color .16s ease;
+}
 .sidebar-item.active {
   background: var(--oc-sidebar-item-active);
   border-color: transparent;
@@ -1990,14 +2002,17 @@
 }
 .sidebar-item.active .sidebar-item-label {
   color: var(--oc-sidebar-text) !important;
-  font-weight: 400;
+  font-weight: 600;
 }
 .sidebar-item.active .sidebar-item-icon {
-  color: var(--oc-sidebar-muted) !important;
+  color: var(--oc-sidebar-text) !important;
 }
 .sidebar-item:hover {
   background: var(--oc-sidebar-item-hover) !important;
   border-color: transparent;
+}
+.sidebar-item:hover .sidebar-item-icon {
+  color: var(--oc-sidebar-text);
 }
 .sidebar-item-indicator {
   display: none;
@@ -3668,17 +3683,42 @@ input.session-searchbar__input:focus-visible,
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border-radius: 10px;
   border: 1px solid var(--oc-border-subtle);
-  background: color-mix(in oklab, var(--oc-card) 62%, transparent);
+  background: color-mix(in oklab, var(--oc-card) 48%, transparent);
 }
 
-.lingxia-tool-step {
+.lingxia-tool-step,
+.lingxia-tool-step-summary {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   gap: 8px;
   min-height: 34px;
+}
+
+.lingxia-tool-step-detail {
+  border-radius: 8px;
+}
+
+.lingxia-tool-step-summary {
+  align-items: start;
+  padding: 0;
+  list-style: none;
+  cursor: pointer;
+}
+
+.lingxia-tool-step-summary::-webkit-details-marker { display: none; }
+.lingxia-tool-step-summary::marker { display: none; content: ""; }
+
+.lingxia-tool-step-detail[open] {
+  margin: 2px 0 4px;
+  border: 1px solid var(--oc-border-subtle);
+  background: color-mix(in oklab, var(--oc-card) 34%, transparent);
+}
+
+.lingxia-tool-step-detail[open] > .lingxia-tool-step-summary {
+  padding: 6px 8px 4px;
 }
 
 .lingxia-tool-step__rail {
@@ -3704,18 +3744,21 @@ input.session-searchbar__input:focus-visible,
   background: var(--oc-border-subtle);
 }
 
-.lingxia-tool-step.is-running .lingxia-tool-step__dot {
+.lingxia-tool-step.is-running .lingxia-tool-step__dot,
+.lingxia-tool-step-detail.is-running .lingxia-tool-step__dot {
   background: var(--oc-accent);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--oc-accent) 16%, transparent);
   animation: lingxia-tool-pulse 1.2s ease-in-out infinite;
 }
 
-.lingxia-tool-step.is-done .lingxia-tool-step__dot {
+.lingxia-tool-step.is-done .lingxia-tool-step__dot,
+.lingxia-tool-step-detail.is-done .lingxia-tool-step__dot {
   background: #22c55e;
   box-shadow: 0 0 0 3px rgba(34,197,94,0.13);
 }
 
-.lingxia-tool-step.is-error .lingxia-tool-step__dot {
+.lingxia-tool-step.is-error .lingxia-tool-step__dot,
+.lingxia-tool-step-detail.is-error .lingxia-tool-step__dot {
   background: var(--oc-danger, #ef4444);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--oc-danger, #ef4444) 14%, transparent);
 }
@@ -3727,7 +3770,8 @@ input.session-searchbar__input:focus-visible,
   padding-bottom: 8px;
 }
 
-.lingxia-tool-step:last-child .lingxia-tool-step__body {
+.lingxia-tool-step:last-child .lingxia-tool-step__body,
+.lingxia-tool-step-detail:last-child .lingxia-tool-step__body {
   padding-bottom: 0;
 }
 
@@ -3746,10 +3790,36 @@ input.session-searchbar__input:focus-visible,
   color: var(--oc-text-tertiary);
   font-size: 11px;
   line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.lingxia-tool-timeline-details {
-  margin-top: 6px;
+.lingxia-tool-step__chevron {
+  color: var(--oc-text-tertiary);
+  margin-top: 5px;
+  opacity: .62;
+  transition: transform .16s ease, opacity .16s ease;
+}
+
+.lingxia-tool-step-detail:hover .lingxia-tool-step__chevron {
+  opacity: .9;
+}
+
+.lingxia-tool-step-detail[open] .lingxia-tool-step__chevron {
+  transform: rotate(180deg);
+}
+
+.lingxia-tool-step-detail__body {
+  padding: 0 8px 8px 26px;
+}
+
+.lingxia-tool-step-detail__body .lingxia-toolcard__body {
+  padding: 0;
+}
+
+.lingxia-tool-step-detail__body .lingxia-toolcard__pre {
+  max-height: 220px;
 }
 
 @keyframes lingxia-tool-pulse {
@@ -3763,7 +3833,7 @@ input.session-searchbar__input:focus-visible,
   border: none;
   background: transparent;
   overflow: hidden;
-  max-width: 320px;
+  max-width: 420px;
 }
 .lingxia-toolcard[open] {
   border: 1px solid rgba(255,255,255,0.08);
@@ -4075,10 +4145,10 @@ input.session-searchbar__input:focus-visible,
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-label {
   color: var(--oc-sidebar-text) !important;
-  font-weight: 400 !important;
+  font-weight: 600 !important;
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-icon {
-  color: var(--oc-sidebar-muted) !important;
+  color: var(--oc-sidebar-text) !important;
 }
 :root[data-theme-mode="light"] .sidebar-item-indicator {
   display: none !important;
@@ -4229,10 +4299,10 @@ input.session-searchbar__input:focus-visible,
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-label {
   color: var(--oc-sidebar-text) !important;
-  font-weight: 400 !important;
+  font-weight: 600 !important;
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-icon {
-  color: var(--oc-sidebar-muted) !important;
+  color: var(--oc-sidebar-text) !important;
 }
 :root[data-theme-mode="light"] .sidebar-item-indicator {
   display: none !important;
@@ -4347,12 +4417,20 @@ input.session-searchbar__input:focus-visible,
 
 /* 浅色：工具卡片 */
 :root[data-theme-mode="light"] .lingxia-toolcard {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+:root[data-theme-mode="light"] .lingxia-toolcard[open],
+:root[data-theme-mode="light"] .lingxia-tool-step-detail[open] {
   background: #F9FAFB !important;
   border-color: #E5E7EB !important;
 }
 :root[data-theme-mode="light"] .lingxia-toolcard__header {
-  background: #F3F4F6 !important;
+  background: transparent !important;
   border-bottom-color: #E5E7EB !important;
+}
+:root[data-theme-mode="light"] .lingxia-toolcard[open] > .lingxia-toolcard__header {
+  background: #F3F4F6 !important;
 }
 :root[data-theme-mode="light"] .lingxia-toolcard__pre {
   background: #F3F4F6 !important;

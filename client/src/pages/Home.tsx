@@ -117,6 +117,7 @@ type WebChatSessionRecord = {
   title: string;
   customTitle?: string;
   preview: string;
+  searchText?: string;
   messageCount: number;
   createdAt: number;
   updatedAt: number;
@@ -125,6 +126,14 @@ type WebChatSessionRecord = {
 
 function normalizeSessionText(text: string) {
   return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeSessionSearchText(text: string) {
+  return normalizeSessionText(text).toLowerCase();
+}
+
+function compactSessionSearchText(text: string) {
+  return normalizeSessionSearchText(text).replace(/\s+/g, "");
 }
 
 function stripSessionMessagePrefix(text: string) {
@@ -210,12 +219,12 @@ function mergeWebSessionRecords(local: WebChatSessionRecord[], remote: WebChatSe
     if (!previous || itemUpdatedAt >= previousUpdatedAt) {
       byConversation.set(item.conversationId, { ...previous, ...item, ...localMeta });
     } else if (item.sessionKey && !previous.sessionKey) {
-      byConversation.set(item.conversationId, { ...previous, ...localMeta, sessionKey: item.sessionKey, sessionId: item.sessionId });
+      byConversation.set(item.conversationId, { ...previous, ...localMeta, sessionKey: item.sessionKey, sessionId: item.sessionId, searchText: item.searchText || previous.searchText });
     } else if (itemHasBackendSession && !previousHasBackendSession) {
-      byConversation.set(item.conversationId, { ...item, ...previous, ...localMeta, sessionKey: item.sessionKey, sessionId: item.sessionId });
+      byConversation.set(item.conversationId, { ...item, ...previous, ...localMeta, sessionKey: item.sessionKey, sessionId: item.sessionId, searchText: item.searchText || previous.searchText });
     }
   }
-  return sortWebSessionRecords(Array.from(byConversation.values())).slice(0, 30);
+  return sortWebSessionRecords(Array.from(byConversation.values())).slice(0, 100);
 }
 
 function compactModelDisplayName(name: string) {
@@ -798,6 +807,8 @@ export default function Home() {
   const HIDDEN_SESSION_KEY = resolvedAdoptId && userStorageId ? webHiddenSessionsStorageKey(userStorageId, resolvedAdoptId) : null;
   const draftHydratingRef = useRef(false);
   const currentDraftKeyRef = useRef("");
+  const messagesHydratingRef = useRef(false);
+  const currentMessagesKeyRef = useRef("");
   useEffect(() => {
     if (!MSGS_KEY || !LEGACY_MSGS_KEY) return;
     try {
@@ -911,6 +922,7 @@ export default function Home() {
       setClawHealthError("");
       return;
     }
+    const suppressTransientError = silent && activeLingxiaStreaming;
     const apiBase = import.meta.env.VITE_API_URL || "";
     const requestStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (!silent) setClawHealthLoading(true);
@@ -926,12 +938,16 @@ export default function Home() {
       markClientLoadMetric("health", "ok", data?.readiness?.status || "ready", requestStartedAt);
     } catch (error: any) {
       const classified = classifyDisplayError(error, "openclaw");
+      if (suppressTransientError) {
+        markClientLoadMetric("health", "skip", "聊天处理中，暂不展示临时健康检查超时", requestStartedAt);
+        return;
+      }
       setClawHealthError(classified.detail || classified.title);
       markClientLoadMetric("health", "error", classified.title, requestStartedAt);
     } finally {
       if (!silent) setClawHealthLoading(false);
     }
-  }, [isDirectHttpRuntime, markClientLoadMetric, resolvedAdoptId, user]);
+  }, [activeLingxiaStreaming, isDirectHttpRuntime, markClientLoadMetric, resolvedAdoptId, user]);
 
   useEffect(() => {
     if (!resolvedAdoptId || !user || isDirectHttpRuntime) return;
@@ -965,7 +981,7 @@ export default function Home() {
     if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return [];
     const apiBase = import.meta.env.VITE_API_URL || "";
     const requestStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const historyLimit = silent ? 60 : 20;
+    const historyLimit = silent ? 100 : 60;
     const requestSeq = backendSessionsRequestSeqRef.current + 1;
     backendSessionsRequestSeqRef.current = requestSeq;
     const shouldShowLoading = !silent && webSessionsRef.current.length === 0;
@@ -1089,7 +1105,7 @@ export default function Home() {
       nextRecord,
       ...existing.filter((item) => item.conversationId !== webConversationId),
     ];
-    const sorted = sortWebSessionRecords(next).slice(0, 30);
+    const sorted = sortWebSessionRecords(next).slice(0, 100);
     writeWebSessionIndex(SESSION_INDEX_KEY, sorted);
     setWebSessions(sorted);
   }, [SESSION_INDEX_KEY, webConversationId, activeLingxiaMsgs, isDirectHttpRuntime]);
@@ -1165,14 +1181,17 @@ export default function Home() {
   }, [resolvedAdoptId, userStorageId]);
 
   const findCachedConversationSnippet = useCallback((conversationId: string, query: string): string => {
-    const q = normalizeSessionText(query).toLowerCase();
+    const q = normalizeSessionSearchText(query);
+    const compactQ = compactSessionSearchText(query);
     if (!q) return "";
     const messages = readCachedWebConversationMessages(conversationId);
     for (const message of messages) {
       const text = normalizeSessionText(String(message?.text || ""));
       if (!text) continue;
-      const idx = text.toLowerCase().indexOf(q);
-      if (idx < 0) continue;
+      const normalizedText = normalizeSessionSearchText(text);
+      const idx = normalizedText.indexOf(q);
+      if (idx < 0 && (!compactQ || !compactSessionSearchText(text).includes(compactQ))) continue;
+      if (idx < 0) return text.length > 72 ? `${text.slice(0, 72)}...` : text;
       const start = Math.max(0, idx - 18);
       const end = Math.min(text.length, idx + q.length + 32);
       const prefix = start > 0 ? "..." : "";
@@ -1247,7 +1266,7 @@ export default function Home() {
     streamSeq: number;
   }) => {
     if (!resolvedAdoptId || isDirectHttpRuntime) return;
-    const delays = [450, 1200, 2400];
+    const delays = [600, 1800, 4000, 8000];
     const apiBase = import.meta.env.VITE_API_URL || "";
     for (const delayMs of delays) {
       await new Promise((resolve) => window.setTimeout(resolve, delayMs));
@@ -1262,7 +1281,7 @@ export default function Home() {
       try {
         const response = await fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(sessionKey)}`, {
           credentials: "include",
-        }, 1800);
+        }, 4000);
         if (!response.ok) continue;
         const payload = await response.json().catch(() => null);
         if (!Array.isArray(payload?.messages)) continue;
@@ -1295,17 +1314,18 @@ export default function Home() {
     if (!resolvedAdoptId || !webConversationId || activeLingxiaStreaming) return;
     const session = webSessions.find((item) => item.conversationId === webConversationId);
     if (!session?.sessionKey || restoredSessionKeyRef.current === session.sessionKey) return;
-    restoredSessionKeyRef.current = session.sessionKey;
+    const sessionKey = session.sessionKey;
     const apiBase = import.meta.env.VITE_API_URL || "";
     let cancelled = false;
     const requestSeq = restoreConversationRequestSeqRef.current + 1;
     restoreConversationRequestSeqRef.current = requestSeq;
-    fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(session.sessionKey)}`, {
+    fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(sessionKey)}`, {
       credentials: "include",
     }, 4000)
       .then((r) => r.ok ? r.json() : null)
       .then((payload) => {
         if (cancelled || restoreConversationRequestSeqRef.current !== requestSeq || !Array.isArray(payload?.messages)) return;
+        restoredSessionKeyRef.current = sessionKey;
         activateWebConversation(webConversationId, payload.messages);
       })
       .catch(() => {});
@@ -1520,7 +1540,12 @@ export default function Home() {
 
   // localStorage 会话持久化
   useEffect(() => {
-    if (!MSGS_KEY) return;
+    messagesHydratingRef.current = true;
+    currentMessagesKeyRef.current = MSGS_KEY || "";
+    if (!MSGS_KEY) {
+      setLingxiaMsgs([]);
+      return;
+    }
     try {
       let saved = localStorage.getItem(MSGS_KEY);
       if (!saved && LEGACY_MSGS_KEY) {
@@ -1538,7 +1563,11 @@ export default function Home() {
     } catch {}
   }, [MSGS_KEY, LEGACY_MSGS_KEY]);
   useEffect(() => {
-    if (!MSGS_KEY) return;
+    if (!MSGS_KEY || currentMessagesKeyRef.current !== MSGS_KEY) return;
+    if (messagesHydratingRef.current) {
+      messagesHydratingRef.current = false;
+      return;
+    }
     try {
       if (lingxiaMsgs.length === 0) {
         localStorage.removeItem(MSGS_KEY);
@@ -1683,6 +1712,7 @@ export default function Home() {
     clearLingxiaDraft();
     setLingxiaInput("");
     setLingxiaStreaming(true);
+    setClawHealthError("");
     setLingxiaNearBottom(true);
     setLingxiaToolCalls([]);
 
@@ -2517,6 +2547,7 @@ export default function Home() {
   }, [reportClientLoadMetrics, resolvedAdoptId, user]);
   const chatReadinessBanner = useMemo(() => {
     if (!resolvedAdoptId || isDirectHttpRuntime) return null;
+    if (activeLingxiaStreaming && clawHealthError) return null;
     if (showSlowReadinessHint && clawByAdoptLoading && !clawByAdoptId) {
       return { severity: "info" as const, text: "正在连接 OpenClaw…", detail: "" };
     }
@@ -2552,6 +2583,7 @@ export default function Home() {
   }, [
     clawByAdoptId,
     clawByAdoptLoading,
+    activeLingxiaStreaming,
     clawHealthError,
     clawHealthLoading,
     clawHealthSummary,
@@ -2772,8 +2804,11 @@ export default function Home() {
           }
         >
 
-          {/* ── 左侧：折叠面板，对齐 OpenClaw sidebar ── */}
-          <aside className="relative flex-none flex flex-col overflow-hidden shrink-0 hide-all-scrollbars" style={{ width: sidebarCollapsed ? 72 : sidebarWidth, background: "var(--oc-sidebar-bg)", borderRight: "1px solid var(--oc-border-subtle)", transition: "width 0.2s ease" }}>
+          {/* ── 左侧：折叠面板 ── */}
+          <aside
+            className="lingxia-sidebar-panel relative flex-none flex flex-col overflow-hidden shrink-0 hide-all-scrollbars"
+            style={{ width: sidebarCollapsed ? 72 : sidebarWidth, transition: "width 0.2s ease" }}
+          >
             <button
               type="button"
               title={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}

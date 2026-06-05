@@ -167,16 +167,159 @@ function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; fileP
   );
 }
 
+function formatToolArguments(rawArguments: string) {
+  let argsDisplay = rawArguments;
+  try {
+    const parsed = JSON.parse(rawArguments);
+    argsDisplay = JSON.stringify(parsed, null, 2);
+  } catch {}
+  return argsDisplay;
+}
+
+function toolResultSnippet(tc: ToolCallEntry): string {
+  if (!tc.result || tc.status === "running") return "";
+  const text = String(tc.result)
+    .replace(/\s+/g, " ")
+    .replace(/[{}"]/g, "")
+    .trim();
+  if (!text) return "";
+  return text.length > 78 ? `${text.slice(0, 78)}...` : text;
+}
+
+function ToolCallDetailBody({ tc }: { tc: ToolCallEntry }) {
+  const isRunning = tc.status === "running";
+  const isError = tc.status === "error";
+  const argsDisplay = formatToolArguments(tc.arguments);
+
+  return (
+    <div className="lingxia-toolcard__body">
+      {argsDisplay && (
+        <div className="lingxia-toolcard__section">
+          <div className="lingxia-toolcard__label">参数</div>
+          <pre className="lingxia-toolcard__pre">{argsDisplay}</pre>
+        </div>
+      )}
+
+      {!isRunning && (
+        <div className="lingxia-toolcard__section">
+          <div className="lingxia-toolcard__label">{isError ? "错误" : "结果"}</div>
+          <pre className="lingxia-toolcard__pre">{tc.result || "(无输出)"}</pre>
+        </div>
+      )}
+
+      {tc.outputFiles && tc.outputFiles.length > 0 && (
+        <div className="lingxia-toolcard__section">
+          <div className="lingxia-toolcard__label">产出文件</div>
+          <div className="lingxia-toolcard__files">
+            {tc.outputFiles.map((f) => {
+              const sizeStr =
+                f.size > 1024 * 1024
+                  ? `${(f.size / 1024 / 1024).toFixed(1)} MB`
+                  : f.size > 1024
+                  ? `${(f.size / 1024).toFixed(1)} KB`
+                  : `${f.size} B`;
+
+              const wsPath = (f as any).wsPath as string | undefined;
+              const adoptId = tc.adoptId || "";
+
+              const handleDownload = async (e: React.MouseEvent) => {
+                e.preventDefault();
+                try {
+                  const path = wsPath ? wsPath : `sandbox-files/${f.name}`;
+                  const resp = await fetch("/api/claw/files/token", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify({ adoptId, path }),
+                  });
+                  if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    alert(`下载失败：${err.error || resp.status}`);
+                    return;
+                  }
+                  const { url } = await resp.json();
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = f.name;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                } catch (err) {
+                  alert(`下载异常：${String(err)}`);
+                }
+              };
+
+              const isHtmlFile = /\.html?$/i.test(f.name);
+              const isRunnable = /\.(py|js|ts|sh|bash)$/i.test(f.name);
+
+              const handlePreview = async (e: React.MouseEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                try {
+                  const path = wsPath ? wsPath : `sandbox-files/${f.name}`;
+                  const resp = await fetch("/api/claw/files/token", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify({ adoptId, path }),
+                  });
+                  if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    alert(`预览失败：${err.error || resp.status}`);
+                    return;
+                  }
+                  const { url } = await resp.json();
+                  window.open(url + "&preview=1", "_blank", "noopener");
+                } catch (err) {
+                  alert(`预览异常：${String(err)}`);
+                }
+              };
+
+              return (
+                <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <a href="#" onClick={handleDownload} className="lingxia-toolcard__file" style={{ flex: 1 }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span>{f.name}</span>
+                    <span style={{ opacity: 0.6 }}>({sizeStr})</span>
+                  </a>
+                  {isHtmlFile && (
+                    <button
+                      onClick={handlePreview}
+                      type="button"
+                      title="在新标签页预览"
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 3,
+                        padding: "2px 8px", borderRadius: "var(--oc-radius-sm)", fontSize: "var(--oc-text-xs)", fontWeight: "var(--oc-weight-medium)",
+                        color: "#a78bfa", background: "rgba(124,58,237,0.10)",
+                        border: "1px solid rgba(124,58,237,0.25)", cursor: "pointer",
+                        whiteSpace: "nowrap", flexShrink: 0,
+                      }}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      预览
+                    </button>
+                  )}
+                  {isRunnable && (
+                    <RunFileButton adoptId={adoptId} filePath={wsPath || `sandbox-files/${f.name}`} fileName={f.name} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolCallCard({ tc }: { tc: ToolCallEntry }) {
   const isRunning = tc.status === "running";
   const isDone    = tc.status === "done";
   const isError   = tc.status === "error";
-
-  let argsDisplay = tc.arguments;
-  try {
-    const parsed = JSON.parse(tc.arguments);
-    argsDisplay = JSON.stringify(parsed, null, 2);
-  } catch {}
 
   const duration = tc.durationMs != null ? `${tc.durationMs}ms` : null;
 
@@ -207,127 +350,7 @@ function ToolCallCard({ tc }: { tc: ToolCallEntry }) {
         </div>
       </summary>
 
-      <div className="lingxia-toolcard__body">
-        {argsDisplay && (
-          <div className="lingxia-toolcard__section">
-            <div className="lingxia-toolcard__label">参数</div>
-            <pre className="lingxia-toolcard__pre">{argsDisplay}</pre>
-          </div>
-        )}
-
-        {!isRunning && (
-          <div className="lingxia-toolcard__section">
-            <div className="lingxia-toolcard__label">{isError ? "错误" : "结果"}</div>
-            <pre className="lingxia-toolcard__pre">{tc.result || "(无输出)"}</pre>
-          </div>
-        )}
-
-        {tc.outputFiles && tc.outputFiles.length > 0 && (
-          <div className="lingxia-toolcard__section">
-            <div className="lingxia-toolcard__label">产出文件</div>
-            <div className="lingxia-toolcard__files">
-              {tc.outputFiles.map((f) => {
-                const sizeStr =
-                  f.size > 1024 * 1024
-                    ? `${(f.size / 1024 / 1024).toFixed(1)} MB`
-                    : f.size > 1024
-                    ? `${(f.size / 1024).toFixed(1)} KB`
-                    : `${f.size} B`;
-
-                const wsPath = (f as any).wsPath as string | undefined;
-                const adoptId = tc.adoptId || "";
-
-                const handleDownload = async (e: React.MouseEvent) => {
-                  e.preventDefault();
-                  try {
-                    const path = wsPath ? wsPath : `sandbox-files/${f.name}`;
-                    const resp = await fetch("/api/claw/files/token", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      credentials: "include",
-                      body: JSON.stringify({ adoptId, path }),
-                    });
-                    if (!resp.ok) {
-                      const err = await resp.json().catch(() => ({}));
-                      alert(`下载失败：${err.error || resp.status}`);
-                      return;
-                    }
-                    const { url } = await resp.json();
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = f.name;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                  } catch (err) {
-                    alert(`下载异常：${String(err)}`);
-                  }
-                };
-
-                const isHtmlFile = /\.html?$/i.test(f.name);
-                const isRunnable = /\.(py|js|ts|sh|bash)$/i.test(f.name);
-
-                const handlePreview = async (e: React.MouseEvent) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  try {
-                    const path = wsPath ? wsPath : `sandbox-files/${f.name}`;
-                    const resp = await fetch("/api/claw/files/token", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      credentials: "include",
-                      body: JSON.stringify({ adoptId, path }),
-                    });
-                    if (!resp.ok) {
-                      const err = await resp.json().catch(() => ({}));
-                      alert(`预览失败：${err.error || resp.status}`);
-                      return;
-                    }
-                    const { url } = await resp.json();
-                    window.open(url + "&preview=1", "_blank", "noopener");
-                  } catch (err) {
-                    alert(`预览异常：${String(err)}`);
-                  }
-                };
-
-                return (
-                  <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <a href="#" onClick={handleDownload} className="lingxia-toolcard__file" style={{ flex: 1 }}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                      </svg>
-                      <span>{f.name}</span>
-                      <span style={{ opacity: 0.6 }}>({sizeStr})</span>
-                    </a>
-                    {isHtmlFile && (
-                      <button
-                        onClick={handlePreview}
-                        type="button"
-                        title="在新标签页预览"
-                        style={{
-                          display: "inline-flex", alignItems: "center", gap: 3,
-                          padding: "2px 8px", borderRadius: "var(--oc-radius-sm)", fontSize: "var(--oc-text-xs)", fontWeight: "var(--oc-weight-medium)",
-                          color: "#a78bfa", background: "rgba(124,58,237,0.10)",
-                          border: "1px solid rgba(124,58,237,0.25)", cursor: "pointer",
-                          whiteSpace: "nowrap", flexShrink: 0,
-                        }}
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        预览
-                      </button>
-                    )}
-                    {isRunnable && (
-                      <RunFileButton adoptId={adoptId} filePath={wsPath || `sandbox-files/${f.name}`} fileName={f.name} />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
+      <ToolCallDetailBody tc={tc} />
     </details>
   );
 }
@@ -376,7 +399,6 @@ function ToolCallTimeline({ toolCalls }: { toolCalls: ToolCallEntry[] }) {
   const [expanded, setExpanded] = useState(false);
   const visibleCalls = toolCalls.filter((tc) => tc?.id && tc?.name);
   if (visibleCalls.length === 0) return null;
-  const detailCalls = visibleCalls.filter((tc) => !tc._gateway);
   const hasError = visibleCalls.some((tc) => tc.status === "error");
   const hasRunning = visibleCalls.some((tc) => tc.status === "running");
 
@@ -397,32 +419,52 @@ function ToolCallTimeline({ toolCalls }: { toolCalls: ToolCallEntry[] }) {
       </button>
       {expanded ? (
         <div className="lingxia-tool-timeline-panel">
-          <div className="lingxia-tool-timeline" aria-label="工具调用时间线">
+          <div className="lingxia-tool-timeline" aria-label="工具调用记录">
             {visibleCalls.map((tc, index) => {
               const duration = toolCallDurationLabel(tc);
-              return (
-                <div key={tc.id} className={`lingxia-tool-step is-${tc.status}`}>
+              const snippet = toolResultSnippet(tc);
+              const meta = [
+                toolCallStatusLabel(tc.status),
+                duration,
+                tc.outputFiles?.length ? `${tc.outputFiles.length} 个文件` : "",
+                snippet,
+              ].filter(Boolean).join(" · ");
+              const body = (
+                <>
                   <span className="lingxia-tool-step__rail" aria-hidden="true">
                     <span className="lingxia-tool-step__dot" />
                     {index < visibleCalls.length - 1 ? <span className="lingxia-tool-step__line" /> : null}
                   </span>
                   <span className="lingxia-tool-step__body">
                     <span className="lingxia-tool-step__title">{toolCallLabel(tc)}</span>
-                    <span className="lingxia-tool-step__meta">
-                      {toolCallStatusLabel(tc.status)}
-                      {duration ? ` · ${duration}` : ""}
-                      {tc.outputFiles?.length ? ` · ${tc.outputFiles.length} 个文件` : ""}
-                    </span>
+                    <span className="lingxia-tool-step__meta">{meta}</span>
                   </span>
-                </div>
+                </>
+              );
+
+              if (tc._gateway) {
+                return (
+                  <div key={tc.id} className={`lingxia-tool-step is-${tc.status}`}>
+                    {body}
+                  </div>
+                );
+              }
+
+              return (
+                <details key={tc.id} className={`lingxia-tool-step-detail is-${tc.status}`}>
+                  <summary className="lingxia-tool-step-summary">
+                    {body}
+                    <svg className="lingxia-tool-step__chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                  </summary>
+                  <div className="lingxia-tool-step-detail__body">
+                    <ToolCallDetailBody tc={tc} />
+                  </div>
+                </details>
               );
             })}
           </div>
-          {detailCalls.length > 0 ? (
-            <div className="lingxia-tool-timeline-details">
-              {detailCalls.map((tc) => <ToolCallCard key={tc.id} tc={tc} />)}
-            </div>
-          ) : null}
         </div>
       ) : null}
     </div>
