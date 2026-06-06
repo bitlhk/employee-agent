@@ -1219,7 +1219,7 @@ export default function ClawAdmin() {
               <div className="mb-5 flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-base font-semibold text-gray-900">系统健康</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">只读监测平台服务、OpenClaw、频道、模型白名单和数据库关键表。</p>
+                  <p className="mt-1 text-xs text-muted-foreground">只读监测平台服务、OpenClaw、频道、模型配置和数据库关键表。</p>
                 </div>
                 <Button size="sm" variant="outline" className="admin-secondary-action" onClick={() => refetchSystemHealth()}>
                   <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
@@ -1278,21 +1278,21 @@ export default function ClawAdmin() {
                   <div className="grid gap-4 xl:grid-cols-2">
                     <Card className="p-5">
                       <div className="mb-3 flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-gray-900">模型白名单</h3>
+                        <h3 className="text-sm font-semibold text-gray-900">OpenClaw 模型配置</h3>
                         <GitBranch className="h-4 w-4 text-muted-foreground" />
                       </div>
                       <div className="text-xs text-muted-foreground">默认模型</div>
                       <div className="mt-1 rounded-lg bg-gray-50 px-3 py-2 font-mono text-xs text-gray-800">{(systemHealth as any).models?.primary || "-"}</div>
-                      <div className="mt-3 text-xs text-muted-foreground">允许模型</div>
+                      <div className="mt-3 text-xs text-muted-foreground">当前可用模型</div>
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {((systemHealth as any).models?.allowlist || []).map((model: string) => (
                           <span key={model} className="rounded-full bg-blue-50 px-2 py-1 font-mono text-[11px] text-blue-700">{model}</span>
                         ))}
-                        {((systemHealth as any).models?.allowlist || []).length === 0 ? <span className="text-xs text-muted-foreground">未配置白名单</span> : null}
+                        {((systemHealth as any).models?.allowlist || []).length === 0 ? <span className="text-xs text-muted-foreground">未读取到可用模型</span> : null}
                       </div>
                       {((systemHealth as any).models?.agentModelDrift || []).length > 0 ? (
                         <div className="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
-                          有 {((systemHealth as any).models?.agentModelDrift || []).length} 个智能体模型不在白名单内。
+                          有 {((systemHealth as any).models?.agentModelDrift || []).length} 个智能体保存的模型不在 OpenClaw 当前可用模型内。
                         </div>
                       ) : null}
                     </Card>

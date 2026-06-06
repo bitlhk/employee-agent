@@ -242,7 +242,7 @@ export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
         <div className="text-xl font-semibold text-foreground mb-2">未开通组织协作</div>
         <div className="text-sm text-muted-foreground mb-6">{wlQ.data?.message || "请联系管理员在组织协作后台启用权限并分配协作空间"}</div>
         {onCancel ? (
-          <Button variant="outline" onClick={onCancel}><ArrowLeft className="w-4 h-4 mr-1" /> 返回</Button>
+          <Button variant="outline" className="lingxia-soft-action coop-back-button" onClick={onCancel}><ArrowLeft className="w-4 h-4 mr-1" /> 返回</Button>
         ) : null}
       </div>
     );
@@ -409,12 +409,12 @@ export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
       {/* 4. 提交 */}
       <div className="flex justify-end gap-2 pb-4">
         {onCancel ? (
-          <Button variant="ghost" onClick={onCancel}>取消</Button>
+          <Button variant="ghost" className="lingxia-soft-action" onClick={onCancel}>取消</Button>
         ) : null}
         <Button
           onClick={handleSubmit}
           disabled={!canSubmit || createMut.isPending}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
+          className="coop-submit-button"
         >
           {createMut.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
           <Sparkles className="w-3 h-3 mr-1" /> 发起协作
@@ -435,7 +435,7 @@ export default function CoopNew() {
     <div className="min-h-screen">
       <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border/50">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="sm" className="text-foreground" onClick={goBack}>
+          <Button variant="ghost" size="sm" className="lingxia-soft-action coop-back-button" onClick={goBack}>
             <ArrowLeft className="w-4 h-4 mr-1" /> 返回
           </Button>
           <div className="flex-1 flex items-center gap-2">

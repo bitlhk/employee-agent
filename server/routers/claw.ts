@@ -610,14 +610,15 @@ export const clawRouter = router({
 
       const openclawJson = openclawStatus.ok ? safeJson<any>(openclawStatus.output, null) : null;
       const config = existsSync(OPENCLAW_JSON_PATH) ? safeJson<any>(String(readFileSync(OPENCLAW_JSON_PATH, "utf8") || "{}"), {}) : {};
-      const allowlist = Object.keys(config?.agents?.defaults?.models || {});
+      const availableModels = getAvailableClawModelsFromConfig();
+      const availableModelIds = new Set(availableModels.map((model) => model.id));
       const primary = String(config?.agents?.defaults?.model?.primary || "");
       const agentModelDrift = (Array.isArray(config?.agents?.list) ? config.agents.list : [])
         .map((agent: any) => {
           const model = typeof agent?.model === "string" ? agent.model : String(agent?.model?.primary || "");
           return { id: String(agent?.id || ""), model };
         })
-        .filter((agent: any) => agent.model && allowlist.length > 0 && !allowlist.includes(agent.model));
+        .filter((agent: any) => agent.model && availableModelIds.size > 0 && !availableModelIds.has(agent.model));
 
       const dbTables = ["users", "business_agent_audit", "business_agent_tenant_map", "skill_marketplace"];
       const dbHealth: any = { ok: false, tables: [] as any[], skillMarketApproved: null, claws: null, error: "" };
@@ -685,7 +686,8 @@ export const clawRouter = router({
         },
         models: {
           primary,
-          allowlist,
+          available: availableModels,
+          allowlist: availableModels.map((model) => model.id),
           agentModelDrift,
         },
         database: dbHealth,

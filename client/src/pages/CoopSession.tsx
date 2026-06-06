@@ -152,7 +152,7 @@ export default function CoopSession() {
       {/* 顶部 Header */}
       <div className="coop-session-header">
         <div className="coop-session-header__inner">
-          <Button variant="ghost" size="sm" className="coop-session-back" onClick={() => {
+          <Button variant="ghost" size="sm" className="lingxia-soft-action coop-back-button coop-session-back" onClick={() => {
             // 显式回「我的协作」tab：写 sessionStorage 让 Home 初始化时落地 collab 页
             // 跳 /claw/{adoptId}（Home），不是 / （那是 ClawHome 创建首页）
             try { sessionStorage.setItem("home_initial_page", "collab"); } catch {}

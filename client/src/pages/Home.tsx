@@ -128,6 +128,34 @@ function normalizeSessionText(text: string) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
 
+function mergeAssistantStreamText(currentText: string, incomingText: string) {
+  const current = String(currentText || "");
+  const incoming = String(incomingText || "");
+  if (!incoming) return current;
+  if (!current) return incoming;
+
+  // Some gateway/provider paths occasionally send the cumulative assistant
+  // snapshot in delta.content. Treat that as replacement instead of append.
+  if (incoming === current) return current;
+  if (incoming.startsWith(current)) return incoming;
+
+  const joined = current + incoming;
+  if (joined.length % 2 === 0) {
+    const half = joined.length / 2;
+    if (joined.slice(0, half) === joined.slice(half)) return joined.slice(0, half);
+  }
+
+  const maxOverlap = Math.min(current.length, incoming.length);
+  for (let len = maxOverlap; len >= 16; len -= 1) {
+    if (current.endsWith(incoming.slice(0, len))) {
+      return current + incoming.slice(len);
+    }
+  }
+
+  if (incoming.length >= 16 && current.endsWith(incoming)) return current;
+  return joined;
+}
+
 function normalizeSessionSearchText(text: string) {
   return normalizeSessionText(text).toLowerCase();
 }
@@ -922,7 +950,10 @@ export default function Home() {
       setClawHealthError("");
       return;
     }
-    const suppressTransientError = silent && activeLingxiaStreaming;
+    if (silent && activeLingxiaStreaming) {
+      markClientLoadMetric("health", "skip", "聊天处理中，暂停后台健康检查");
+      return;
+    }
     const apiBase = import.meta.env.VITE_API_URL || "";
     const requestStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (!silent) setClawHealthLoading(true);
@@ -938,10 +969,6 @@ export default function Home() {
       markClientLoadMetric("health", "ok", data?.readiness?.status || "ready", requestStartedAt);
     } catch (error: any) {
       const classified = classifyDisplayError(error, "openclaw");
-      if (suppressTransientError) {
-        markClientLoadMetric("health", "skip", "聊天处理中，暂不展示临时健康检查超时", requestStartedAt);
-        return;
-      }
       setClawHealthError(classified.detail || classified.title);
       markClientLoadMetric("health", "error", classified.title, requestStartedAt);
     } finally {
@@ -979,6 +1006,10 @@ export default function Home() {
 
   const refreshBackendWebSessions = useCallback(async (silent = false) => {
     if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return [];
+    if (silent && activeLingxiaStreaming) {
+      markClientLoadMetric("sessions", "skip", "聊天处理中，暂停后台历史同步");
+      return webSessionsRef.current;
+    }
     const apiBase = import.meta.env.VITE_API_URL || "";
     const requestStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     const historyLimit = silent ? 100 : 60;
@@ -1022,7 +1053,7 @@ export default function Home() {
     } finally {
       if (shouldShowLoading && isCurrentRequest()) setWebSessionsLoading(false);
     }
-  }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime, markClientLoadMetric]);
+  }, [activeLingxiaStreaming, resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime, markClientLoadMetric]);
 
   useEffect(() => {
     if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return;
@@ -1930,7 +1961,7 @@ export default function Home() {
               if (delta) {
                 // 收到 content delta → reasoning 阶段结束，mark thinking done
                 setLingxiaMsgs((prev) => markThinkingDone(prev));
-                setLingxiaMsgs((prev) => { const n = [...prev]; const last = n[n.length-1]; if (last?.role === "assistant") n[n.length-1] = { ...last, text: last.text + delta, status: undefined }; return n; });
+                setLingxiaMsgs((prev) => { const n = [...prev]; const last = n[n.length-1]; if (last?.role === "assistant") n[n.length-1] = { ...last, text: mergeAssistantStreamText(last.text, delta), status: undefined }; return n; });
               }
               // 完成
               if (chunk?.choices?.[0]?.finish_reason === "stop") {
@@ -2011,7 +2042,7 @@ export default function Home() {
           if (next.length === 0 || next[next.length - 1].role !== "assistant") return prev;
           next[next.length - 1] = {
             ...next[next.length - 1],
-            text: next[next.length - 1].text + delta,
+            text: mergeAssistantStreamText(next[next.length - 1].text, delta),
           };
           return next;
         });

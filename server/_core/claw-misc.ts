@@ -267,17 +267,38 @@ function extractTrajectoryRunMessages(trajectoryFile: string, expectedSessionKey
   return { source, runAt: runAt || fallbackTimestamp || 0, messages };
 }
 
-function listTrajectoryRunsForSessionKey(sessionsDir: string, sessionKey: string): HistoryRunMessages[] {
+function trajectoryFileForSessionFile(sessionFile: string): string {
+  const value = String(sessionFile || "");
+  return value.endsWith(".jsonl") ? value.replace(/\.jsonl$/, ".trajectory.jsonl") : "";
+}
+
+function listTrajectoryRunsForSessionKey(args: {
+  sessionsDir: string;
+  sessionKey: string;
+  currentSessionFile?: string;
+  scanFallback?: boolean;
+}): HistoryRunMessages[] {
   const runs: HistoryRunMessages[] = [];
+  const preferredTrajectoryFile = trajectoryFileForSessionFile(args.currentSessionFile || "");
+  if (preferredTrajectoryFile && existsSync(preferredTrajectoryFile)) {
+    const run = extractTrajectoryRunMessages(preferredTrajectoryFile, args.sessionKey);
+    if (run) runs.push(run);
+  }
+  if (runs.length > 0 || !args.scanFallback) {
+    return runs.sort((a, b) => a.runAt - b.runAt);
+  }
+
   let entries: ReturnType<typeof readdirSync> = [];
   try {
-    entries = readdirSync(sessionsDir, { withFileTypes: true }) as any;
+    entries = readdirSync(args.sessionsDir, { withFileTypes: true }) as any;
   } catch {
     return runs;
   }
   for (const entry of entries as any[]) {
     if (!entry.isFile() || !entry.name.endsWith(".trajectory.jsonl")) continue;
-    const run = extractTrajectoryRunMessages(path.join(sessionsDir, entry.name), sessionKey);
+    const trajectoryFile = path.join(args.sessionsDir, entry.name);
+    if (preferredTrajectoryFile && path.resolve(trajectoryFile) === path.resolve(preferredTrajectoryFile)) continue;
+    const run = extractTrajectoryRunMessages(trajectoryFile, args.sessionKey);
     if (run) runs.push(run);
   }
   return runs.sort((a, b) => a.runAt - b.runAt);
@@ -312,9 +333,15 @@ function collectOpenClawChatHistoryMessages(args: {
   sessionKey: string;
   currentSessionFile?: string;
   maxMessages?: number;
+  scanTrajectoryFallback?: boolean;
 }): ChatHistoryMessage[] {
   const maxMessages = args.maxMessages || 200;
-  const runs = listTrajectoryRunsForSessionKey(args.sessionsDir, args.sessionKey);
+  const runs = listTrajectoryRunsForSessionKey({
+    sessionsDir: args.sessionsDir,
+    sessionKey: args.sessionKey,
+    currentSessionFile: args.currentSessionFile,
+    scanFallback: args.scanTrajectoryFallback === true,
+  });
   const merged: ChatHistoryMessage[] = [];
   for (const run of runs) merged.push(...run.messages);
 
@@ -526,23 +553,6 @@ function writeSessionSummaryCache(sessionsDir: string, cache: ChatHistorySummary
   }
 }
 
-function trajectoryDirectoryFingerprint(sessionsDir: string): string {
-  let count = 0;
-  let latestMtime = 0;
-  let totalSize = 0;
-  try {
-    const entries = readdirSync(sessionsDir, { withFileTypes: true }) as any;
-    for (const entry of entries as any[]) {
-      if (!entry.isFile() || !entry.name.endsWith(".trajectory.jsonl")) continue;
-      const st = statSync(path.join(sessionsDir, entry.name));
-      count += 1;
-      latestMtime = Math.max(latestMtime, Math.round(st.mtimeMs || 0));
-      totalSize += Number(st.size || 0);
-    }
-  } catch {}
-  return `${count}:${latestMtime}:${totalSize}`;
-}
-
 function sessionFileFingerprint(sessionFile: string): string {
   try {
     if (!sessionFile || !existsSync(sessionFile)) return "missing";
@@ -553,13 +563,17 @@ function sessionFileFingerprint(sessionFile: string): string {
   }
 }
 
-function buildSessionSummaryFingerprint(entry: any, trajectoryFingerprint: string): string {
+function sessionTrajectoryFingerprint(sessionFile: string): string {
+  return sessionFileFingerprint(trajectoryFileForSessionFile(sessionFile));
+}
+
+function buildSessionSummaryFingerprint(entry: any): string {
   return [
     String(entry?.sessionId || ""),
     String(entry?.sessionKey || ""),
     Math.round(Number(entry?.updatedAt || 0) || 0),
     sessionFileFingerprint(String(entry?.sessionFile || "")),
-    trajectoryFingerprint,
+    sessionTrajectoryFingerprint(String(entry?.sessionFile || "")),
   ].join("|");
 }
 
@@ -567,11 +581,10 @@ function summarizeChatHistorySession(args: {
   sessionsDir: string;
   entry: any;
   cache: ChatHistorySummaryCache;
-  trajectoryFingerprint: string;
   stats: { hits: number; misses: number };
 }): ChatHistorySessionSummary {
   const cacheKey = String(args.entry?.sessionKey || args.entry?.conversationId || "");
-  const fingerprint = buildSessionSummaryFingerprint(args.entry, args.trajectoryFingerprint);
+  const fingerprint = buildSessionSummaryFingerprint(args.entry);
   const cached = cacheKey ? args.cache.entries[cacheKey] : null;
   if (cached?.fingerprint === fingerprint && typeof cached.summary?.searchText === "string") {
     args.stats.hits += 1;
@@ -584,6 +597,7 @@ function summarizeChatHistorySession(args: {
     sessionKey: args.entry.sessionKey,
     currentSessionFile: args.entry.sessionFile,
     maxMessages: 80,
+    scanTrajectoryFallback: false,
   });
   const firstUser = messages.find((m) => m.role === "user");
   const last = [...messages].reverse().find((m) => normalizeHistoryText(m.text));
@@ -746,8 +760,10 @@ export function registerMiscRoutes(app: express.Express) {
         modelOverride = String(overrides?.[adoptId] || "");
       } catch {}
       const defaultModel = models.find((model) => model.isDefault)?.id || models[0]?.id || "";
-      const selectedModel = modelOverride || profileModel || defaultModel;
+      const storedModel = modelOverride || profileModel || "";
       const modelIds = new Set(models.map((model) => model.id));
+      const storedModelAvailable = storedModel ? modelIds.has(storedModel) : true;
+      const effectiveModel = storedModel && storedModelAvailable ? storedModel : defaultModel;
       const readinessIssues: Array<{ code: string; severity: "warning" | "error"; message: string }> = [];
       if (!existsSync(OPENCLAW_JSON_PATH)) {
         readinessIssues.push({ code: "openclaw_config_missing", severity: "error", message: "OpenClaw 配置文件不存在" });
@@ -763,9 +779,6 @@ export function registerMiscRoutes(app: express.Express) {
       }
       if (modelSourceError) {
         readinessIssues.push({ code: "model_source_error", severity: "warning", message: `模型配置读取异常：${modelSourceError}` });
-      }
-      if (selectedModel && models.length > 0 && !modelIds.has(selectedModel)) {
-        readinessIssues.push({ code: "selected_model_unavailable", severity: "warning", message: `当前模型 ${selectedModel} 不在前端可用模型列表中` });
       }
       const readinessOk = !readinessIssues.some((issue) => issue.severity === "error");
       mark("model");
@@ -787,7 +800,10 @@ export function registerMiscRoutes(app: express.Express) {
           configExists: existsSync(OPENCLAW_JSON_PATH),
         },
         model: {
-          selected: selectedModel,
+          selected: effectiveModel,
+          effectiveModel,
+          storedModel,
+          storedModelAvailable,
           defaultModel,
           profileModel,
           overrideModel: modelOverride,
@@ -906,7 +922,6 @@ export function registerMiscRoutes(app: express.Express) {
       const summaryStartedAt = Date.now();
       const summaryCache = readSessionSummaryCache(sessionsDir);
       const summaryCacheStats = { hits: 0, misses: 0 };
-      const trajectoryFingerprint = trajectoryDirectoryFingerprint(sessionsDir);
       const sessions = Array.from(byConversation.values())
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, limit)
@@ -915,7 +930,6 @@ export function registerMiscRoutes(app: express.Express) {
             sessionsDir,
             entry,
             cache: summaryCache,
-            trajectoryFingerprint,
             stats: summaryCacheStats,
           });
           return {

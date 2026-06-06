@@ -17,6 +17,7 @@ const Login = lazy(() => import("./pages/Login"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const TaskWorkbenchLab = lazy(() => import("./pages/TaskWorkbenchLab"));
+const OfficeLab = lazy(() => import("./pages/OfficeLab"));
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -68,6 +69,11 @@ function Router() {
         <Route path={"/task-workbench-lab"}>
           <AdminRoute>
             <TaskWorkbenchLab />
+          </AdminRoute>
+        </Route>
+        <Route path={"/office-lab"}>
+          <AdminRoute>
+            <OfficeLab />
           </AdminRoute>
         </Route>
 

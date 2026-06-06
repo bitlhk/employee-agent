@@ -533,7 +533,7 @@ function SkillRow({
   );
 }
 
-function SkillDetailDrawer({
+function SkillDetailModal({
   skill,
   onClose,
   onReconcile,
@@ -558,6 +558,14 @@ function SkillDetailDrawer({
   const [intro, setIntro] = useState<SkillIntroductionResponse | null>(null);
   const [introLoading, setIntroLoading] = useState(false);
   useEffect(() => setAdvancedOpen(false), [skill?.id]);
+  useEffect(() => {
+    if (!skill) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose, skill]);
   useEffect(() => {
     setIntro(null);
     if (!skill) return;
@@ -585,11 +593,11 @@ function SkillDetailDrawer({
   const tone = stateTone(skill.state);
 
   return (
-    <div className="skills-drawer-mask" onClick={onClose}>
-      <div className="skills-drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="skills-drawer-head">
+    <div className="skills-detail-modal" role="dialog" aria-modal="true" aria-label={`${displayNameOf(skill)} 详情`} onClick={onClose}>
+      <div className="skills-detail-modal__panel" onClick={(e) => e.stopPropagation()}>
+        <div className="skills-detail-modal__head">
           <div>
-            <div className="skills-drawer-title text-sm">
+            <div className="skills-detail-modal__title">
               {displayNameOf(skill)}
             </div>
             <div className="skills-muted-text text-xs">
@@ -598,7 +606,7 @@ function SkillDetailDrawer({
           </div>
           <button className="skills-btn" onClick={onClose}>关闭</button>
         </div>
-        <div className="skills-drawer-body">
+        <div className="skills-detail-modal__body">
           <div className="settings-card space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
               <SkillPill>{sourceIcon(skill.source.kind)} {SOURCE_LABEL[skill.source.kind]}</SkillPill>
@@ -960,7 +968,7 @@ export function SkillsPage({ adoptId }: {
               ))}
             </div>
 
-            <SkillDetailDrawer
+            <SkillDetailModal
               skill={detail}
               busy={!!busyId}
               onClose={() => setDetail(null)}
