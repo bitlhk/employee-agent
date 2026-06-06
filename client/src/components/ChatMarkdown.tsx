@@ -27,6 +27,33 @@ function extractLang(className?: string): string {
   return m ? m[1] : "";
 }
 
+function normalizeSafeHref(href?: string): string | undefined {
+  if (!href) return undefined;
+  if (href.startsWith("#")) return href;
+  try {
+    const parsed = new URL(href, window.location.origin);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "mailto:") {
+      return href;
+    }
+  } catch {}
+  return undefined;
+}
+
+function normalizeSafeImageSrc(src?: string): string | undefined {
+  if (!src) return undefined;
+  try {
+    const parsed = new URL(src, window.location.origin);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return undefined;
+    }
+    if (!/\.(png|jpe?g|gif|webp|bmp|ico|avif)(?:$|[?#])/i.test(parsed.pathname)) {
+      return undefined;
+    }
+    return src;
+  } catch {}
+  return undefined;
+}
+
 function FencedCodeBlock({ code, className }: { code: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -138,9 +165,40 @@ function ChatMarkdownInner({ content }: Props) {
           ),
           th: ({ children }) => <th className="lingxia-md-th">{children}</th>,
           td: ({ children }) => <td className="lingxia-md-td">{children}</td>,
-          a:  ({ href, children }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer" className="lingxia-md-link">{children}</a>
-          ),
+          a:  ({ href, children }) => {
+            const safeHref = normalizeSafeHref(href);
+            if (!safeHref) {
+              return <span className="lingxia-md-link" title="链接协议不受支持">{children}</span>;
+            }
+            const isHash = safeHref.startsWith("#");
+            return (
+              <a
+                href={safeHref}
+                target={isHash ? undefined : "_blank"}
+                rel={isHash ? undefined : "noopener noreferrer"}
+                className="lingxia-md-link"
+              >
+                {children}
+              </a>
+            );
+          },
+          img: ({ src, alt, title }) => {
+            const safeSrc = normalizeSafeImageSrc(src);
+            const fallbackText = alt || src || "图片";
+            if (!safeSrc) {
+              return <span className="lingxia-md-link" title="图片地址不受支持">{fallbackText}</span>;
+            }
+            return (
+              <img
+                src={safeSrc}
+                alt={alt || ""}
+                title={title}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                className="lingxia-md-image"
+              />
+            );
+          },
           hr:     () => <hr className="lingxia-md-hr" />,
           strong: ({ children }) => <strong className="lingxia-md-strong">{children}</strong>,
           em:     ({ children }) => <em className="lingxia-md-em">{children}</em>,

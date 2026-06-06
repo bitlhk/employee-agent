@@ -1,4 +1,5 @@
-import { useRef, useState, useCallback, useEffect, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, useCallback, useEffect, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
+import { prepareChatAttachments } from "@/lib/image-compress";
 
 type MentionUser = {
   userId: number;
@@ -28,6 +29,14 @@ type ChatInputProps = {
 };
 
 const MAX_INPUT_HISTORY = 30;
+
+function resizeTextareaNextFrame(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  requestAnimationFrame(() => {
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 144) + "px";
+  });
+}
 
 function normalizeInputHistory(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -193,8 +202,7 @@ export function ChatInput({
       const el = textareaRef.current;
       if (!el) return;
       el.focus();
-      el.style.height = "auto";
-      el.style.height = Math.min(el.scrollHeight, 144) + "px";
+      resizeTextareaNextFrame(el);
       el.setSelectionRange(text.length, text.length);
     });
   }, [onChange]);
@@ -221,6 +229,8 @@ export function ChatInput({
   }, [attachments, disabled, onSend, onStop, pushInputHistory, streaming, submittingAttachments, value]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+
     if (mentionOpen && filteredUsers.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -280,10 +290,30 @@ export function ChatInput({
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (files.length) setAttachments(prev => [...prev, ...files]);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    if (!files.length) return;
+    setSubmittingAttachments(true);
+    try {
+      const prepared = await prepareChatAttachments(files);
+      setAttachments(prev => [...prev, ...prepared]);
+    } finally {
+      setSubmittingAttachments(false);
+    }
+  };
+
+  const handlePaste = async (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData?.files || []);
+    if (!files.length) return;
+    e.preventDefault();
+    setSubmittingAttachments(true);
+    try {
+      const prepared = await prepareChatAttachments(files);
+      setAttachments(prev => [...prev, ...prepared]);
+    } finally {
+      setSubmittingAttachments(false);
+    }
   };
 
   const removeAttachment = (index: number) => {
@@ -416,8 +446,7 @@ export function ChatInput({
   useEffect(() => {
     const el = textareaRef.current;
     if (!el || recording || transcribing) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 144) + "px";
+    resizeTextareaNextFrame(el);
   }, [recording, transcribing, value]);
 
   return (
@@ -549,8 +578,7 @@ export function ChatInput({
               onChange={(e) => {
                 const v = e.target.value;
                 onChange(v);
-                e.target.style.height = "auto";
-                e.target.style.height = Math.min(e.target.scrollHeight, 144) + "px";
+                resizeTextareaNextFrame(e.target);
                 // 检测 @
                 const cursor = e.target.selectionStart ?? v.length;
                 detectMention(v, cursor);
@@ -567,6 +595,7 @@ export function ChatInput({
               }}
               onFocus={() => setInputFocused(true)}
               onKeyDown={onKeyDown}
+              onPaste={(e) => { void handlePaste(e); }}
               placeholder={placeholder}
               rows={1}
               className="main-chat-input w-full bg-transparent text-sm resize-none outline-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"

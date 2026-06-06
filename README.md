@@ -1,37 +1,60 @@
 # 员工智能体
 
-> 一个面向企业探索场景的 Agent Client / Agent Platform：统一创建智能体实例、接入 OpenClaw / Hermes 等运行时、管理技能与任务、承载组织协作、安全隔离和审计。
+面向企业办公场景的 Agent Client / Agent Platform。它把每个员工自己的智能体、OpenClaw 运行时、技能和工具、协作任务、文件工作区、渠道通知、审计治理放到一个统一入口里。
 
 <p align="center">
   <img src="client/public/images/lingxia.svg" width="120" alt="员工智能体 Logo" />
 </p>
 
-## 它是什么
+## 适合做什么
 
-本项目是灵感平台下的 **员工智能体**模块。它不是单一聊天机器人，而是企业侧使用和管理智能体的入口层：
-
-- **员工智能体**：每个用户可申请一个隔离的智能体实例。
-- **智能体工作台**：对话、技能、记忆、文件、频道、定时任务、协作统一入口。
-- **运行时接入**：默认对接本机 OpenClaw，也可接入 Hermes、Claude Code、Codex 或自定义 HTTP Agent。
-- **组织能力**：组织协作、渠道通知、任务工作台、技能广场、审计和权限治理。
+- 给每位员工申请一个隔离的智能体实例，用于日常对话、资料处理、文件生成和任务执行。
+- 统一接入 OpenClaw 或自定义 HTTP Agent，前端和管理后台不需要随运行时重写。
+- 把企业内部工具、MCP 服务、专业技能、岗位权限和审计记录接入一个可管理的平台。
+- 做企业岗位助手、金融投研工具、客户经理助手、办公自动化和团队协作类原型。
 
 推荐默认部署形态：
 
 ```text
-员工智能体 (Node.js / React)
+浏览器 / iOS 壳
+  -> 员工智能体 Web 服务 (React + Node.js)
   -> 本机 OpenClaw Gateway
-  -> 本机工作空间 / 沙箱 / 文件
+  -> 本机 workspace / sandbox / tools
   -> MySQL
 ```
 
-也就是说，新机器上只要先准备或安装本机 OpenClaw，再用本仓库的一键脚本拉代码、初始化数据库和启动服务，就能跑一套干净环境。
+## 核心亮点
 
-## 页面结构
+**一个员工一个智能体**
+
+每个用户可以申请自己的员工智能体实例。实例有独立身份、工作区、技能配置、工具权限和会话历史，适合企业内按人、岗位或团队逐步放开。
+
+**OpenClaw 优先的运行时接入**
+
+默认对接本机 OpenClaw Gateway，同时保留自定义 HTTP runtime 接入能力。平台侧负责用户、权限、技能市场、审计和协作；运行时侧负责模型推理、工具调用和文件执行。
+
+**更顺滑的主对话体验**
+
+主对话已做流式稳定性和前端渲染优化：流式 watchdog、断线兜底、流结束历史对账、稳定 React key、passive scroll、tab 保活、输入法防误发、图片粘贴压缩、Markdown 链接和图片安全过滤。
+
+**工具和技能可治理**
+
+支持技能市场、私有技能、平台工具和 MCP 工具展示。工具能力可以逐步按岗位、用户或智能体授权，适合企业从“先跑通能力”过渡到“可审计、可管控”。
+
+**协作和办公工作区**
+
+内置协作任务、办公空间、文件上传、历史会话、定时任务和渠道通知。前端不只是聊天框，也能承载任务工作台和团队协作工作流。
+
+**管理和审计**
+
+提供 `/admin` 管理入口，用于用户、智能体、技能、工具、系统状态和审计类能力的管理。适合在企业环境中做权限分配、问题排查和使用情况追踪。
+
+## 页面入口
 
 ```text
-/              -> 员工智能体首页：登录、申请员工智能体、进入工作台
-/claw/:adoptId -> 智能体工作台：聊天、技能、频道、记忆、协作、工作空间、定时任务
-/admin         -> 智能体管理：实例、组织协作、技能广场、系统设置、使用统计
+/              -> 首页：登录、申请员工智能体、进入工作台
+/claw/:adoptId -> 员工智能体工作台：对话、技能、频道、记忆、协作、工作区、定时任务
+/admin         -> 管理后台：智能体、组织协作、技能市场、系统设置、审计和统计
 /login         -> 登录 / 注册
 ```
 
@@ -42,57 +65,49 @@
 | 前端 | React 19, Vite, TailwindCSS 4, Radix UI, tRPC |
 | 后端 | Node.js 22, Express, tRPC, tsx |
 | 数据库 | MySQL 8.0, Drizzle ORM |
-| 运行时 | OpenClaw Gateway, Hermes / HTTP Adapter 可选 |
+| 运行时 | OpenClaw Gateway；HTTP Adapter 可选 |
 | 进程管理 | PM2 |
+| 移动端 | `apps/ios` 提供 Capacitor iOS 壳，可连接线上 Web 服务 |
 
-## 环境要求
+## 快速部署
 
 推荐系统：Ubuntu 22.04+ / 24.04。
 
-一键脚本会自动准备：
-
-- git / curl / ca-certificates / openssl / python3 / build-essential
-- Node.js 22
-- pnpm 10.4.1
-- pm2
-- MySQL Server（默认 `mysql-auto` 模式）
-- `.env`
-- PM2 配置
-
-OpenClaw 运行时建议提前在同一台机器装好并启动；脚本完成后可用 `scripts/check-local-openclaw-node.sh` 检查。
-
----
-
-## 命名过渡说明
-
-项目英文仓库名已调整为 `employee-agent`。为了平滑迁移，一键安装脚本的新默认安装目录和 PM2 进程名使用 `employee-agent`；如果检测到旧的 `~/linggan-claw` 安装目录或旧 PM2 进程，会继续兼容升级，避免现有环境被重复安装。
-
-仓库正式重命名前，仍可临时使用旧 raw URL 拉取 bootstrap；脚本会优先尝试新仓库，失败后 fallback 到旧仓库。
-
-## 一键部署
-
-### 最简方式
-
-在全新 Ubuntu 服务器上，以当前登录用户执行：
+先在同一台机器准备并启动 OpenClaw Gateway，然后执行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash
 ```
 
-脚本默认行为：
+脚本会自动完成：
 
-- 从 GitHub 拉取 `bitlhk/employee-agent`
-- 安装到当前用户目录：`~/employee-agent`
-- 自动探测公网 IP，生成 `FRONTEND_URL`
-- 准备 MySQL 和数据库配置
+- 安装 Node.js 22、pnpm、PM2、MySQL 依赖
+- 拉取 `bitlhk/employee-agent`
+- 生成 `.env`
+- 初始化数据库配置
 - 执行 `setup.sh --auto --yes`
-- 执行 `pnpm check`
-- 执行 `pnpm build`
+- 执行 `pnpm check` 和 `pnpm build`
 - 用 PM2 启动 `employee-agent`
 
-安装完成后，脚本会输出访问地址和管理员初始化命令。
+安装完成后，初始化管理员：
 
-### 可审计方式
+```bash
+cd ~/employee-agent
+corepack pnpm tsx scripts/init-admin.ts \
+  --email=admin@example.com \
+  --password='换成强密码' \
+  --name='Admin'
+```
+
+然后打开：
+
+```text
+http://服务器IP:5180
+```
+
+## 可审计安装
+
+如果希望先下载脚本再检查：
 
 ```bash
 curl -fsSL -o /tmp/bootstrap-install.sh \
@@ -101,18 +116,16 @@ curl -fsSL -o /tmp/bootstrap-install.sh \
 bash /tmp/bootstrap-install.sh --host 你的服务器IP
 ```
 
-### 常用参数
+常用参数：
 
 ```bash
 bash /tmp/bootstrap-install.sh \
   --repo https://github.com/bitlhk/employee-agent.git \
   --branch main \
   --dir "$HOME/employee-agent" \
-  --host 111.119.236.165 \
+  --host your-server-ip \
   --port 5180
 ```
-
-参数说明：
 
 | 参数 | 说明 |
 |---|---|
@@ -127,53 +140,7 @@ bash /tmp/bootstrap-install.sh \
 | `--overwrite-env` | 已存在 `.env` 时强制重建 |
 | `--dry-run` | 只打印将执行的动作 |
 
-### 初始化管理员
-
-脚本不会替你写死管理员密码。首次部署后执行：
-
-```bash
-cd ~/employee-agent
-corepack pnpm tsx scripts/init-admin.ts \
-  --email=admin@example.com \
-  --password='换成强密码' \
-  --name='Admin'
-```
-
-然后浏览器打开：
-
-```text
-http://服务器IP:5180
-```
-
-## 后续升级
-
-同一个目录下可以重复执行一键脚本。脚本发现 `$HOME/employee-agent` 已经是 Git 仓库时，会执行：
-
-```text
-git fetch
-git checkout main
-git pull --ff-only
-setup.sh --auto --yes
-pnpm check
-pnpm build
-pm2 start/restart
-```
-
-推荐升级命令：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash
-```
-
-如果需要保留现有 `.env`，不要传 `--overwrite-env`。如果需要重新生成 `.env`：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash -s -- --overwrite-env
-```
-
 ## 手动部署
-
-如果不使用一键脚本：
 
 ```bash
 git clone https://github.com/bitlhk/employee-agent.git ~/employee-agent
@@ -197,12 +164,26 @@ cd ~/employee-agent
 bash scripts/check-local-openclaw-node.sh
 ```
 
-常见需要确认的项：
+重点确认：
 
-- OpenClaw Gateway 是否启动
-- `.env` 中 `CLAW_GATEWAY_URL` 是否指向本机
-- `.env` 中 `CLAW_GATEWAY_TOKEN` 是否与 OpenClaw 配置一致
-- CORS / FRONTEND_URL 是否匹配
+- OpenClaw Gateway 已启动
+- `.env` 中 `CLAW_GATEWAY_URL` 指向本机 Gateway
+- `.env` 中 `CLAW_GATEWAY_TOKEN` 与 OpenClaw 配置一致
+- `FRONTEND_URL`、CORS、反代域名配置一致
+
+## 升级
+
+同一目录下可以重复执行一键脚本。脚本发现 `$HOME/employee-agent` 已经是 Git 仓库时，会拉取最新代码、重新执行检查和构建，并重启 PM2。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash
+```
+
+如需保留现有 `.env`，不要传 `--overwrite-env`。如需重新生成 `.env`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash -s -- --overwrite-env
+```
 
 ## PM2 运维
 
@@ -212,8 +193,6 @@ pm2 logs employee-agent
 pm2 restart employee-agent
 pm2 save
 ```
-
-PM2 配置文件 `ecosystem.config.cjs` 由 `setup.sh` 按当前机器生成，不进入 Git，避免把 `/root`、`/home/ubuntu`、Node 绝对路径等环境差异写死。
 
 ## Nginx 反代
 
@@ -237,6 +216,7 @@ server {
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 300s;
+        client_max_body_size 50m;
     }
 }
 ```
@@ -249,6 +229,8 @@ employee-agent/
 ├── server/                  # Express / tRPC 后端
 ├── shared/                  # 前后端共享类型与配置
 ├── drizzle/                 # 数据库 schema
+├── apps/ios/                # Capacitor iOS 壳
+├── docs/                    # 架构、部署、审计、OpenClaw patch 等文档
 ├── scripts/
 │   ├── bootstrap-install.sh         # 一键安装 / 升级脚本
 │   ├── check-local-openclaw-node.sh # 本机 OpenClaw 检查
@@ -266,10 +248,19 @@ employee-agent/
 |---|---|
 | 首页打不开 | `pm2 status employee-agent` / `pm2 logs employee-agent` |
 | 登录后无法申请智能体 | 检查 `.env`、数据库、OpenClaw token、`scripts/check-local-openclaw-node.sh` |
-| 对话无响应 | 检查 OpenClaw Gateway 是否启动、token 是否一致 |
+| 对话无响应 | 检查 OpenClaw Gateway、模型 provider、Gateway token |
+| 上传 413 | 检查 Nginx `client_max_body_size` 和应用上传限制 |
 | 端口冲突 | 重新运行脚本并传 `--port <新端口>` |
 | 数据库连接失败 | 检查 `DATABASE_URL`、MySQL 服务、用户权限 |
-| 前端仍显示旧文案 | 强刷浏览器缓存，确认服务已重新 `pnpm build` 并 PM2 重启 |
+| 前端仍显示旧内容 | 强刷浏览器缓存，确认服务已重新 `pnpm build` 并 PM2 重启 |
+
+## 相关文档
+
+- [部署说明](docs/DEPLOY.md)
+- [系统架构](docs/ARCHITECTURE-SYSTEM.md)
+- [智能体架构](docs/ARCHITECTURE-AGENTS.md)
+- [企业审计设计](docs/enterprise-audit-ledger.md)
+- [OpenClaw Patch 记录](docs/OPENCLAW_PATCHES.md)
 
 ## 许可证
 

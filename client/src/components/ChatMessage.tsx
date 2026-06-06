@@ -1,6 +1,7 @@
 import { BrandIcon } from "@/components/BrandIcon";
-import { memo, useState, useRef } from "react";
+import { memo, useMemo, useState, useRef } from "react";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { cleanLeakedToolTags } from "@/lib/clean-leaked-tags";
 import { formatModelName } from "@/lib/modelDisplay";
 
 export type ToolCallEntry = {
@@ -537,10 +538,10 @@ function ChatMessageInner({
               <ToolCallTimeline toolCalls={toolCalls} />
             </div>
           )}
-          <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-2 lingxia-bubble-ai" style={{ color: "var(--oc-text-tertiary)" }}>
-            <span className="animate-pulse">●</span>
-            <span className="animate-pulse" style={{ animationDelay: "0.2s" }}>●</span>
-            <span className="animate-pulse" style={{ animationDelay: "0.4s" }}>●</span>
+          <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-1.5 lingxia-bubble-ai lingxia-typing-dots" style={{ color: "var(--oc-text-tertiary)" }}>
+            <span />
+            <span />
+            <span />
           </div>
         </div>
       </div>
@@ -550,9 +551,10 @@ function ChatMessageInner({
   const [copied, setCopied] = useState(false);
   const [ttsPlaying, setTtsPlaying] = useState(false);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const displayText = useMemo(() => cleanLeakedToolTags(text), [text]);
   const onCopyMarkdown = async () => {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(displayText);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {}
@@ -589,7 +591,7 @@ function ChatMessageInner({
                 </button>
               </div>
             )}
-            <ChatMarkdown content={text} />
+            <ChatMarkdown content={displayText} />
             {isLast && streaming && <span className="animate-pulse ml-0.5" style={{ color: "var(--oc-text-tertiary)" }}>▌</span>}
           </div>
         </div>

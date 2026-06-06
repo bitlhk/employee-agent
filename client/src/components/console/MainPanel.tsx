@@ -10,6 +10,21 @@ import { CollabPage } from "@/components/pages/CollabPage";
 import { PanelErrorBoundary } from "@/components/console/PanelErrorBoundary";
 import type { PageKey } from "@/components/console/Sidebar";
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+
+type PanelPageKey = Exclude<PageKey, "chat">;
+
+const PANEL_PAGE_ORDER: PanelPageKey[] = [
+  "skills",
+  "weixin",
+  "agent",
+  "workspace",
+  "office",
+  "schedule",
+  "collab",
+  "meeting",
+  "settings",
+];
 
 function MainPanelShell({ children }: { children: ReactNode }) {
   return (
@@ -24,7 +39,7 @@ export function MainPanel({
   skills,
   adoptId,
 }: {
-  activePage: Exclude<PageKey, "chat">;
+  activePage: PanelPageKey;
   adoptId?: string;
   skills?: {
     data?: { shared: any[]; system: any[]; private: any[] } | null;
@@ -40,29 +55,57 @@ export function MainPanel({
     onToggle: skills?.onToggle ?? (() => {}),
     adoptId: adoptId || "",
   };
+  const [visitedPages, setVisitedPages] = useState<Set<PanelPageKey>>(() => new Set([activePage]));
 
-  let content: ReactNode;
+  useEffect(() => {
+    setVisitedPages(new Set([activePage]));
+  }, [adoptId]);
 
-  if (activePage === "weixin") content = <ChannelsPage adoptId={adoptId || ""} />;
-  if (activePage === "skills") {
-    content = <SkillsPage skills={safeSkills.data} canEdit={safeSkills.canEdit} pending={safeSkills.pending} onToggle={safeSkills.onToggle} adoptId={safeSkills.adoptId} />;
-  }
-  if (activePage === "agent") content = <AgentPage adoptId={adoptId || ""} skills={safeSkills.data as any} />;
-  if (activePage === "workspace") content = <WorkspacePage adoptId={adoptId || ""} />;
-  if (activePage === "office") content = <OfficeSpacePage adoptId={adoptId || ""} />;
-  if (activePage === "schedule") content = <SchedulePageV2 adoptId={adoptId || ""} />;
-  if (activePage === "meeting") content = <MeetingNotesPage adoptId={adoptId || ""} />;
-  if (activePage === "collab") content = <CollabPage adoptId={adoptId || ""} />;
+  useEffect(() => {
+    setVisitedPages((previous) => {
+      if (previous.has(activePage)) return previous;
+      const next = new Set(previous);
+      next.add(activePage);
+      return next;
+    });
+  }, [activePage]);
+
+  const renderPage = (page: PanelPageKey): ReactNode => {
+    if (page === "weixin") return <ChannelsPage adoptId={adoptId || ""} />;
+    if (page === "skills") {
+      return <SkillsPage skills={safeSkills.data} canEdit={safeSkills.canEdit} pending={safeSkills.pending} onToggle={safeSkills.onToggle} adoptId={safeSkills.adoptId} />;
+    }
+    if (page === "agent") return <AgentPage adoptId={adoptId || ""} skills={safeSkills.data as any} />;
+    if (page === "workspace") return <WorkspacePage adoptId={adoptId || ""} />;
+    if (page === "office") return <OfficeSpacePage adoptId={adoptId || ""} />;
+    if (page === "schedule") return <SchedulePageV2 adoptId={adoptId || ""} />;
+    if (page === "meeting") return <MeetingNotesPage adoptId={adoptId || ""} />;
+    if (page === "collab") return <CollabPage adoptId={adoptId || ""} />;
+    return <SettingsPage />;
+  };
 
   return (
     <MainPanelShell>
-      <PanelErrorBoundary
-        resetKey={`${activePage}:${adoptId || ""}`}
-        title="当前功能页暂时不可用"
-        description="该功能页渲染时出现异常，侧栏和其他功能仍可继续使用。"
-      >
-        {content || <SettingsPage />}
-      </PanelErrorBoundary>
+      {PANEL_PAGE_ORDER.map((page) => {
+        if (!visitedPages.has(page)) return null;
+        const active = activePage === page;
+        return (
+          <div
+            key={`${page}:${adoptId || ""}`}
+            className="min-h-0 h-full flex-1 flex-col overflow-hidden"
+            style={{ display: active ? "flex" : "none" }}
+            aria-hidden={active ? undefined : true}
+          >
+            <PanelErrorBoundary
+              resetKey={`${page}:${adoptId || ""}`}
+              title="当前功能页暂时不可用"
+              description="该功能页渲染时出现异常，侧栏和其他功能仍可继续使用。"
+            >
+              {renderPage(page)}
+            </PanelErrorBoundary>
+          </div>
+        );
+      })}
     </MainPanelShell>
   );
 }

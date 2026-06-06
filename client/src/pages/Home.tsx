@@ -823,6 +823,12 @@ export default function Home() {
   // 2026-04-19 SSE race fix: 每次 send 自增 seq，handler 用闭包抓 myStreamSeq，
   // 只有 streamSeqRef.current === myStreamSeq 时才写 state；否则视为 stale 事件早退。
   const streamSeqRef = useRef(0);
+  const chatV2ReconcileTargetRef = useRef<{
+    conversationId: string;
+    assistantMessageId?: string;
+    streamSeq: number;
+    triggered?: boolean;
+  } | null>(null);
   const wsClientRef = useRef<OpenClawWSClient | null>(null);
   const restoredSessionKeyRef = useRef<string>("");
   const pendingConversationRestoreRef = useRef<{ conversationId: string; messages: any[] } | null>(null);
@@ -1194,7 +1200,7 @@ export default function Home() {
     setWebConversationId(conversationId);
     setLingxiaInput("");
     setMentionedUsers([]);
-    setLingxiaNearBottom(true);
+    updateLingxiaNearBottom(true);
   };
 
   const readCachedWebConversationMessages = useCallback((conversationId: string): any[] => {
@@ -1241,7 +1247,10 @@ export default function Home() {
     if (streamSeqRef.current !== args.streamSeq) return false;
     if (webConversationIdRef.current !== args.conversationId) return false;
     const canonical = backfillLxMsgIds(args.messages || []);
-    const canonicalLastAssistant = [...canonical].reverse().find((msg) => msg.role === "assistant" && normalizeSessionText(msg.text || ""));
+    const canonicalLastAssistant = [...canonical].reverse().find((msg) => (
+      msg.role === "assistant" &&
+      (normalizeSessionText(msg.text || "") || (msg.toolCalls || []).length > 0)
+    ));
     if (!canonicalLastAssistant) return false;
 
     const merge = (current: LxMsg[]) => {
@@ -1333,6 +1342,38 @@ export default function Home() {
       }
     }
   }, [applyCanonicalConversationText, isDirectHttpRuntime, refreshBackendWebSessions, resolvedAdoptId]);
+
+  useEffect(() => {
+    if (!chatV2Enabled) return;
+    const target = chatV2ReconcileTargetRef.current;
+    if (!target) return;
+    if (target.conversationId !== webConversationId) {
+      if (!activeLingxiaStreaming) chatV2ReconcileTargetRef.current = null;
+      return;
+    }
+
+    const lastAssistant = [...(activeLingxiaMsgs as LxMsg[])].reverse().find((msg) => msg.role === "assistant");
+    if (activeLingxiaStreaming) {
+      if (!target.assistantMessageId && lastAssistant?.id) {
+        target.assistantMessageId = lastAssistant.id;
+      }
+      return;
+    }
+
+    if (target.triggered) return;
+    const assistantMessageId = target.assistantMessageId || lastAssistant?.id;
+    if (!assistantMessageId) return;
+    target.triggered = true;
+    void reconcileStreamedConversation({
+      conversationId: target.conversationId,
+      assistantMessageId,
+      streamSeq: target.streamSeq,
+    }).finally(() => {
+      if (chatV2ReconcileTargetRef.current === target) {
+        chatV2ReconcileTargetRef.current = null;
+      }
+    });
+  }, [activeLingxiaMsgs, activeLingxiaStreaming, chatV2Enabled, reconcileStreamedConversation, webConversationId]);
 
   useEffect(() => {
     const pending = pendingConversationRestoreRef.current;
@@ -1528,10 +1569,14 @@ export default function Home() {
   }, [resolvedAdoptId, webConversationId, isDirectHttpRuntime, chatV2Enabled]);
   const lingxiaMsgViewportRef = useRef<HTMLDivElement | null>(null);
   const [lingxiaNearBottom, setLingxiaNearBottom] = useState(true);
+  const lingxiaNearBottomRef = useRef(true);
+  const updateLingxiaNearBottom = useCallback((next: boolean) => {
+    lingxiaNearBottomRef.current = next;
+    setLingxiaNearBottom((prev) => (prev === next ? prev : next));
+  }, []);
   // 工具执行显性化状态
   const [activeToolName, setActiveToolName] = useState<string | null>(null);
   const [activeToolStartMs, setActiveToolStartMs] = useState<number | null>(null);
-  const [activeToolElapsed, setActiveToolElapsed] = useState(0); // 秒数
   const [activeToolStep, setActiveToolStep] = useState<number | null>(null);    // 第二阶段：当前步骤
   const [activeToolTotal, setActiveToolTotal] = useState<number | null>(null);  // 第二阶段：总步骤
   const [activeToolLabel, setActiveToolLabel] = useState<string | null>(null);  // 第二阶段：当前阶段文案
@@ -1663,24 +1708,25 @@ export default function Home() {
     setConnStatus("connected");
     setActiveToolName(null);
     setActiveToolStartMs(null);
-    setActiveToolElapsed(0);
   };
-
-  // 工具执行计时器：activeToolStartMs 有值时每秒更新 elapsed
-  useEffect(() => {
-    if (activeToolStartMs === null) return;
-    const tick = () => setActiveToolElapsed(Math.floor((Date.now() - activeToolStartMs) / 1000));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [activeToolStartMs]);
 
   // 断连检测：任意 SSE 事件超过 25 秒未到达 → 进入"重连中"
   useEffect(() => {
     if (!lingxiaStreaming) return;
     const id = setInterval(() => {
       if (Date.now() - lastEventAtRef.current > 90_000) {
+        streamSeqRef.current += 1;
+        if (lingxiaStreamAbortRef.current) {
+          lingxiaStreamAbortRef.current.abort();
+          lingxiaStreamAbortRef.current = null;
+        }
         setConnStatus("reconnecting");
+        setLingxiaStreaming(false);
+        setActiveToolName(null);
+        setActiveToolStartMs(null);
+        setActiveToolStep(null);
+        setActiveToolTotal(null);
+        setActiveToolLabel(null);
       }
     }, 5000);
     return () => clearInterval(id);
@@ -1744,7 +1790,7 @@ export default function Home() {
     setLingxiaInput("");
     setLingxiaStreaming(true);
     setClawHealthError("");
-    setLingxiaNearBottom(true);
+    updateLingxiaNearBottom(true);
     setLingxiaToolCalls([]);
 
     let wsOk = false;
@@ -1868,7 +1914,6 @@ export default function Home() {
                 if (!isGateway) {
                   setActiveToolName(toolName);
                   setActiveToolStartMs(toolTs);
-                  setActiveToolElapsed(0);
                   setActiveToolStep(null); setActiveToolTotal(null); setActiveToolLabel(null);
                 }
                 return;
@@ -1920,13 +1965,13 @@ export default function Home() {
               if (chunk._event === "agent_status") {
                 if (chunk.kind === "heartbeat") {
                   if (chunk.tool) setActiveToolName(String(chunk.tool));
-                  if (chunk.elapsedMs) { setActiveToolStartMs(Date.now() - Number(chunk.elapsedMs)); setActiveToolElapsed(Math.floor(Number(chunk.elapsedMs) / 1000)); }
+                  if (chunk.elapsedMs) setActiveToolStartMs(Date.now() - Number(chunk.elapsedMs));
                 } else if (chunk.kind === "progress") {
                   if (chunk.tool) setActiveToolName(String(chunk.tool));
                   if (chunk.step != null) setActiveToolStep(Number(chunk.step));
                   if (chunk.total != null) setActiveToolTotal(Number(chunk.total));
                   if (chunk.label) setActiveToolLabel(String(chunk.label));
-                  if (chunk.elapsedMs) { setActiveToolStartMs(Date.now() - Number(chunk.elapsedMs)); setActiveToolElapsed(Math.floor(Number(chunk.elapsedMs) / 1000)); }
+                  if (chunk.elapsedMs) setActiveToolStartMs(Date.now() - Number(chunk.elapsedMs));
                 }
                 return;
               }
@@ -2098,7 +2143,6 @@ export default function Home() {
                 if (chunk.tool) setActiveToolName(String(chunk.tool));
                 if (chunk.elapsedMs) {
                   setActiveToolStartMs(Date.now() - Number(chunk.elapsedMs));
-                  setActiveToolElapsed(Math.floor(Number(chunk.elapsedMs) / 1000));
                 }
               } else if (chunk.kind === "progress") {
                 // 第二阶段：进度信号 → 更新 step/total/label
@@ -2108,7 +2152,6 @@ export default function Home() {
                 if (chunk.label) setActiveToolLabel(String(chunk.label));
                 if (chunk.elapsedMs) {
                   setActiveToolStartMs(Date.now() - Number(chunk.elapsedMs));
-                  setActiveToolElapsed(Math.floor(Number(chunk.elapsedMs) / 1000));
                 }
               }
               currentEvent = "";
@@ -2165,7 +2208,6 @@ export default function Home() {
                 // exec 等服务端工具：设横幅 + 插卡片
                 setActiveToolName(toolName);
                 setActiveToolStartMs(toolTs);
-                setActiveToolElapsed(0);
                 setActiveToolStep(null);
                 setActiveToolTotal(null);
                 setActiveToolLabel(null);
@@ -2494,22 +2536,35 @@ export default function Home() {
 
   // 员工智能体聊天消息区：仅在接近底部时自动跟随
   const lingxiaMsgsEndRef = useRef<HTMLDivElement>(null);
-  const isLingxiaNearBottom = () => {
+  const isLingxiaNearBottom = useCallback(() => {
     const el = lingxiaMsgViewportRef.current;
     if (!el) return true;
     const threshold = 100;
     return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
-  };
-  const scrollLingxiaToBottom = (behavior: ScrollBehavior = "smooth") => {
+  }, []);
+  const scrollLingxiaToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const el = lingxiaMsgViewportRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior });
-  };
+  }, []);
+
   useEffect(() => {
-    if (lingxiaNearBottom) {
+    const el = lingxiaMsgViewportRef.current;
+    if (!el) return;
+    const onScroll = () => updateLingxiaNearBottom(isLingxiaNearBottom());
+    el.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [isLingxiaNearBottom, updateLingxiaNearBottom]);
+
+  useEffect(() => {
+    const lastMessage = activeLingxiaMsgs[activeLingxiaMsgs.length - 1];
+    const userJustSent = lastMessage?.role === "user";
+    if (userJustSent) updateLingxiaNearBottom(true);
+    if (userJustSent || lingxiaNearBottomRef.current) {
       scrollLingxiaToBottom(activeLingxiaStreaming ? "auto" : "smooth");
     }
-  }, [activeLingxiaMsgs, activeLingxiaStreaming, lingxiaNearBottom]);
+  }, [activeLingxiaMsgs, activeLingxiaStreaming, scrollLingxiaToBottom, updateLingxiaNearBottom]);
 
   // 技能行子组件
   // 技能行组件（内联，避免 Hook 规则问题）
@@ -3041,7 +3096,6 @@ export default function Home() {
             {/* 消息区 */}
             <div
               ref={lingxiaMsgViewportRef}
-              onScroll={() => setLingxiaNearBottom(isLingxiaNearBottom())}
               className="flex-1 min-h-0 overflow-y-auto pt-6 px-6 space-y-5 stealth-scrollbar" style={{ paddingBottom: 100 }}
             >
 
@@ -3075,7 +3129,7 @@ export default function Home() {
                 const isLast = idx === activeLingxiaMsgs.length - 1;
                 const isPlaceholder = isLast && m.role === "assistant" && m.text === "" && activeLingxiaStreaming;
                 return (
-                  <div key={idx}>
+                  <div key={m.id || `${m.role}-${idx}`}>
                   <ChatMessage
                     role={m.role as "user" | "assistant"}
                     text={m.text}
@@ -3103,7 +3157,7 @@ export default function Home() {
                 <button
                   className="pointer-events-auto text-xs px-3 py-1.5 rounded-full shadow-md"
                   style={{ background: "var(--oc-bg-surface)", border: "1px solid var(--oc-border-strong)", color: "var(--oc-text-primary)" }}
-                  onClick={() => { setLingxiaNearBottom(true); scrollLingxiaToBottom("smooth"); }}
+                  onClick={() => { updateLingxiaNearBottom(true); scrollLingxiaToBottom("smooth"); }}
                 >
                   回到底部
                 </button>
@@ -3140,7 +3194,11 @@ export default function Home() {
                 if (chatV2Enabled) {
                   if (!finalText.trim() || chatV2.isStreaming) return false;
                   setMentionedUsers([]);
-                  setLingxiaNearBottom(true);
+                  updateLingxiaNearBottom(true);
+                  streamSeqRef.current += 1;
+                  chatV2ReconcileTargetRef.current = webConversationId
+                    ? { conversationId: webConversationId, streamSeq: streamSeqRef.current }
+                    : null;
                   await chatV2.send(finalText);
                   clearLingxiaDraft();
                   setLingxiaInput("");

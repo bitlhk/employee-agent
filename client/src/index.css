@@ -3665,6 +3665,14 @@ input.session-searchbar__input:focus-visible,
   color: #94bdf5;
   text-decoration-color: rgba(148,189,245,0.48);
 }
+.lingxia-md-image {
+  display: block;
+  max-width: 100%;
+  max-height: 520px;
+  margin: 0.55em 0;
+  border-radius: 8px;
+  object-fit: contain;
+}
 .lingxia-md-strong { font-weight: 650; color: var(--oc-text-primary); }
 .lingxia-md-em     { font-style: italic; color: rgba(229,231,235,0.85); }
 
@@ -4121,6 +4129,35 @@ input.session-searchbar__input:focus-visible,
 .lingxia-toolcard__file:hover {
   background: rgba(99,102,241,0.22);
   border-color: rgba(99,102,241,0.34);
+}
+
+/* ── Assistant typing indicator ── */
+.lingxia-typing-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: .58;
+  animation: lingxiaTypingBounce 1.18s ease-in-out infinite;
+}
+
+.lingxia-typing-dots span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.lingxia-typing-dots span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+@keyframes lingxiaTypingBounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: .48;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: .9;
+  }
 }
 
 /* ── Message Copy Button ── */

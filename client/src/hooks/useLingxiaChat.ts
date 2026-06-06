@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatEvent } from "@shared/runtime/chat-event";
 import { reduceLingxiaChatState, type LingxiaChatMessage } from "@/lib/chat-state-reducer";
 import { HttpChatTransport } from "@/lib/http-chat-transport";
@@ -44,6 +44,8 @@ export type UseLingxiaChatResult = {
 };
 
 const WS_FIRST_EVENT_TIMEOUT_MS = 150000;
+const STREAMING_FIRST_EVENT_IDLE_TIMEOUT_MS = 180000;
+const STREAMING_IDLE_TIMEOUT_MS = 90000;
 const makeLxMsgId = () => `lx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const makeClientRunId = () => `run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -62,6 +64,19 @@ function isTerminalTransportEvent(event: ChatEvent) {
 
 function isFirstChatEvent(event: ChatEvent) {
   return event.type !== "transport.connected" && event.type !== "transport.disconnected";
+}
+
+function isStreamingProgressEvent(event: ChatEvent) {
+  return event.type === "delta"
+    || event.type === "thinking"
+    || event.type === "tool_call"
+    || event.type === "command_output"
+    || event.type === "item_status"
+    || event.type === "workspace.files"
+    || event.type === "agent.dispatch"
+    || event.type === "agent.tool_update"
+    || event.type === "agent.complete"
+    || event.type === "perf";
 }
 
 export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatResult {
@@ -94,6 +109,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
   const inFlightRecoveringRef = useRef(false);
   const isMountedRef = useRef(true);
   const skipNextHistoryPersistRef = useRef<string>("");
+  const streamingWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -140,11 +156,16 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
       ?? ("messageId" in event && typeof event.messageId === "string" ? event.messageId : undefined)
       ?? activeAssistantIdRef.current;
 
-    setMessages((prev) => reduceLingxiaChatState(prev, event, {
+    const applyMessageEvent = () => setMessages((prev) => reduceLingxiaChatState(prev, event, {
       targetMessageId,
       adoptId: adoptId ?? undefined,
       nowMs: now(),
     }));
+    if (isTerminalTransportEvent(event) || event.type === "transport.recovered" || event.type === "transport.recovery_failed") {
+      applyMessageEvent();
+    } else {
+      startTransition(applyMessageEvent);
+    }
 
     if (isTerminalTransportEvent(event)) {
       inFlightRecoveringRef.current = false;
@@ -155,6 +176,31 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
       setIsStreaming(false);
     }
   }, [adoptId, now]);
+
+  const clearStreamingWatchdog = useCallback(() => {
+    if (streamingWatchdogRef.current) {
+      clearTimeout(streamingWatchdogRef.current);
+      streamingWatchdogRef.current = null;
+    }
+  }, []);
+
+  const armStreamingWatchdog = useCallback((messageId: string | undefined, timeoutMs: number) => {
+    clearStreamingWatchdog();
+    if (!messageId) return;
+    streamingWatchdogRef.current = setTimeout(() => {
+      if (!isMountedRef.current) return;
+      streamingWatchdogRef.current = null;
+      const activeMessageId = activeAssistantIdRef.current ?? messageId;
+      inFlightRecoveringRef.current = false;
+      abortControllerRef.current?.abort("stream_timeout");
+      activeTransportRef.current = null;
+      httpTransportRef.current?.close("stream_timeout");
+      wsTransportRef.current?.close("stream_timeout");
+      firstEventWaiterRef.current?.reject(new Error("stream_timeout"));
+      firstEventWaiterRef.current = null;
+      dispatchEvent({ type: "transport.error", message: "stream_timeout" }, activeMessageId);
+    }, timeoutMs);
+  }, [clearStreamingWatchdog, dispatchEvent]);
 
   const startRecovery = useCallback((event: Extract<ChatEvent, { type: "transport.truncated" }>, messageId: string) => {
     if (!adoptId || typeof event.streamEndMs !== "number") {
@@ -210,7 +256,14 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
   }, [adoptId, apiBase, dispatchEvent]);
 
   const handleEvent = useCallback((event: ChatEvent) => {
+    if (isTerminalTransportEvent(event) || event.type === "transport.recovered" || event.type === "transport.recovery_failed") {
+      clearStreamingWatchdog();
+    } else if (isStreamingProgressEvent(event)) {
+      armStreamingWatchdog(activeAssistantIdRef.current, STREAMING_IDLE_TIMEOUT_MS);
+    }
+
     if (event.type === "transport.truncated") {
+      clearStreamingWatchdog();
       const messageId = event.messageId || activeAssistantIdRef.current;
       if (!messageId) return;
       const enriched = { ...event, messageId };
@@ -220,6 +273,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
       return;
     }
     if (event.type === "transport.in_flight") {
+      clearStreamingWatchdog();
       const messageId = activeAssistantIdRef.current;
       if (!messageId) return;
       inFlightRecoveringRef.current = true;
@@ -239,7 +293,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
       return;
     }
     dispatchEvent(event);
-  }, [dispatchEvent, startRecovery]);
+  }, [armStreamingWatchdog, clearStreamingWatchdog, dispatchEvent, startRecovery]);
 
   const settleFirstEventWaiter = useCallback((transport: ChatTransportName, event: ChatEvent) => {
     const waiter = firstEventWaiterRef.current;
@@ -296,6 +350,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
     abortControllerRef.current?.abort();
     httpTransportRef.current?.close("unmount");
     wsTransportRef.current?.close("unmount");
+    clearStreamingWatchdog();
   }, []);
 
   const send = useCallback(async (message: string) => {
@@ -318,6 +373,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
     abortControllerRef.current = controller;
     setIsStreaming(true);
     setConnStatus("connected");
+    armStreamingWatchdog(assistantId, STREAMING_FIRST_EVENT_IDLE_TIMEOUT_MS);
 
     const payload = {
       adoptId,
@@ -358,21 +414,24 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
       await transports.http.send(payload, controller.signal);
     } catch (error) {
       setConnStatus("error");
+      clearStreamingWatchdog();
       dispatchEvent({
         type: "transport.error",
         message: error instanceof Error ? error.message : "send_failed",
       }, assistantId);
     } finally {
       if (!keepStreamingAfterReturn && !inFlightRecoveringRef.current && !controller.signal.aborted) {
+        clearStreamingWatchdog();
         setIsStreaming(false);
       }
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
     }
-  }, [adoptId, channel, contextTurns, conversationId, dispatchEvent, isHermesRuntime, memoryEnabled, now, runtimeMode, transports, waitForFirstEvent]);
+  }, [adoptId, armStreamingWatchdog, channel, clearStreamingWatchdog, contextTurns, conversationId, dispatchEvent, isHermesRuntime, memoryEnabled, now, runtimeMode, transports, waitForFirstEvent]);
 
   const abort = useCallback((reason?: string) => {
+    clearStreamingWatchdog();
     abortControllerRef.current?.abort(reason);
     httpTransportRef.current?.close(reason);
     wsTransportRef.current?.close(reason);
@@ -381,7 +440,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
     firstEventWaiterRef.current = null;
     inFlightRecoveringRef.current = false;
     setIsStreaming(false);
-  }, []);
+  }, [clearStreamingWatchdog]);
 
   const clear = useCallback(() => {
     abort("clear");

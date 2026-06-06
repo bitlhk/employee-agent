@@ -187,6 +187,19 @@ function toolCallsFromOpenClawContent(content: unknown, timestamp: number): Chat
   return calls.map((call) => call.status === "running" ? { ...call, status: "done" as const } : call);
 }
 
+function historyToolCallsSignature(toolCalls?: ChatHistoryToolCall[]): string {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return "";
+  return toolCalls
+    .map((tool) => [
+      tool.id,
+      tool.name,
+      tool.status,
+      String(tool.arguments || "").slice(0, 120),
+      String(tool.result || "").slice(0, 120),
+    ].join(":"))
+    .join("|");
+}
+
 function extractOpenClawChatMessages(sessionFile: string, maxMessages = 200): ChatHistoryMessage[] {
   if (!sessionFile || !existsSync(sessionFile)) return [];
   const messages: ChatHistoryMessage[] = [];
@@ -309,9 +322,10 @@ function dedupeHistoryMessages(messages: ChatHistoryMessage[], maxMessages: numb
   const deduped: ChatHistoryMessage[] = [];
   for (const message of messages) {
     const normalizedText = normalizeHistoryText(message.text);
-    if (!normalizedText) continue;
+    const toolSignature = historyToolCallsSignature(message.toolCalls);
+    if (!normalizedText && !toolSignature) continue;
     const timeBucket = message.timestamp > 0 ? String(message.timestamp) : "no-ts";
-    const fingerprint = `${message.role}|${timeBucket}|${normalizedText}`;
+    const fingerprint = `${message.role}|${timeBucket}|${normalizedText || toolSignature}`;
     if (seen.has(fingerprint)) continue;
     seen.add(fingerprint);
     deduped.push({
