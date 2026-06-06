@@ -92,6 +92,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
   const firstEventWaiterRef = useRef<FirstEventWaiter | null>(null);
   const activeSendStartedAtRef = useRef<number | undefined>(undefined);
   const inFlightRecoveringRef = useRef(false);
+  const isMountedRef = useRef(true);
   const skipNextHistoryPersistRef = useRef<string>("");
 
   useEffect(() => {
@@ -133,6 +134,8 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
   }, [apiBase]);
 
   const dispatchEvent = useCallback((event: ChatEvent, explicitTargetMessageId?: string) => {
+    if (!isMountedRef.current) return;
+
     const targetMessageId = explicitTargetMessageId
       ?? ("messageId" in event && typeof event.messageId === "string" ? event.messageId : undefined)
       ?? activeAssistantIdRef.current;
@@ -285,6 +288,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
   }, [handleEvent, settleFirstEventWaiter, transports]);
 
   useEffect(() => () => {
+    isMountedRef.current = false;
     for (const timer of recoveryTimersRef.current.values()) clearInterval(timer);
     recoveryTimersRef.current.clear();
     firstEventWaiterRef.current?.reject(new Error("unmount"));

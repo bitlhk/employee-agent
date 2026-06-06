@@ -13,12 +13,12 @@
 
 | # | 分类 | 改进项 | 优先级 | 状态 |
 |---|------|--------|--------|------|
-| 1 | 稳定性 | async effect `cancelled` flag | 高 | TODO |
-| 2 | 稳定性 | 消息队列（发送时 agent 忙则入队） | 高 | TODO |
-| 3 | 稳定性 | Stable callback refs 防流式重渲染 | 高 | TODO |
+| 1 | 稳定性 | async effect `cancelled` flag | 高 | DONE |
+| 2 | 稳定性 | 消息队列（发送时 agent 忙则入队） | 高 | DEFER |
+| 3 | 稳定性 | Stable callback refs 防流式重渲染 | 高 | DEFER |
 | 4 | 稳定性 | end-of-stream DB 对账 | 中 | TODO |
 | 5 | 稳定性 | Pre-send 配置健康检查 | 中 | TODO |
-| 6 | 稳定性 | ErrorBoundary Try Again（替代整页刷新） | 中 | TODO |
+| 6 | 稳定性 | ErrorBoundary Try Again（替代整页刷新） | 中 | DONE |
 | 7 | UI | 消息入场动画 `messageIn` | 中 | TODO |
 | 8 | UI | Avatar 分组（一个回合一个头像） | 中 | TODO |
 | 9 | UI | `useChatScroll` 统一滚动逻辑 | 中 | TODO |
@@ -58,6 +58,8 @@ useEffect(() => {
 - `server/` 侧不涉及
 
 **实施方式：** 每个 `useEffect` 内的 async IIFE 顶部加 `let cancelled = false`，所有 setState 前加 `if (!cancelled)`，cleanup 返回 `() => { cancelled = true; }`。
+
+**Done 2026-06-06:** `client/src/hooks/useLingxiaChat.ts` 增加 `isMountedRef`，在 hook cleanup 时置为 `false`，并在 `dispatchEvent()` 入口做 no-op 防护。这样 recovery/status fetch 或 transport 回调即使在组件卸载后返回，也不会继续触发 `setMessages()` / `setIsStreaming()`。当前没有批量改所有页面级 async effect，避免扩大变更面；后续可按 React warning 再逐个补。
 
 ---
 
@@ -100,6 +102,8 @@ UI 展示：`{queuedCount > 0 && <div>{queuedCount} 条等待中</div>}`
 - 新增队列 state 和 drain effect
 - 在 ChatInput submit handler 替换为 `handleSubmitOrQueue`
 
+**Deferred 2026-06-06:** 主聊天当前已通过 `isStreaming`/按钮禁用避免并发发送。直接引入自动队列会改变用户交互语义：用户以为“立即发送”，实际会排到上一轮完成后执行，且 OpenClaw 会话、工具调用和历史保存可能出现顺序争议。建议先做产品确认：忙碌期间是继续禁用、允许“排队发送”，还是允许用户取消上一轮后发送。
+
 ---
 
 ### #3 Stable callback refs 防流式重渲染
@@ -134,6 +138,8 @@ useEffect(() => { handleSendRef.current = actions.handleSend; });
 **需要修改的文件：**
 - `client/src/hooks/useLingxiaChat.ts` — `send` callback 的依赖数组
 - `client/src/components/AIChatBox.tsx` — 传递给子组件的 handler refs
+
+**Deferred 2026-06-06:** `useLingxiaChat` 当前已经用 `messagesRef` 保存最新消息，并且 `send` 没直接依赖 `messages`；主聊天主要渲染逻辑在 `Home.tsx`，不是文档里提到的通用 `AIChatBox.tsx`。如果继续做，需要先用 React profiler 或日志确认 streaming chunk 是否真的造成关键子树重复重渲染，再针对实际热点拆 memo/ref，否则容易做成无收益重构。
 
 ---
 
@@ -213,6 +219,8 @@ useEffect(() => {
 - `client/src/components/ErrorBoundary.tsx`
 - 把 `window.location.reload()` 改为 `this.setState({ hasError: false, error: null })`
 - 保留 "Reload Page" 作为第二个按钮（兜底）
+
+**Done 2026-06-06:** `client/src/components/ErrorBoundary.tsx` 已增加 `Try Again`，点击后只重置 ErrorBoundary state 并重新渲染子树；同时保留 `Reload Page` 作为兜底刷新入口。
 
 ---
 
@@ -399,3 +407,5 @@ for (let i = 0; i < staleIds.length; i += CHUNK) {
 > 在此追加讨论，格式：`**[作者] [日期]:** 内容`
 
 **[Claude] 2026-06-06:** 文档初始化完成。#1/#2/#3 建议作为第一批实施，改动最小但收益最高。#7（消息入场动画）和 #9（useChatScroll）可以一起做，都在前端 UI 层，互不依赖。
+
+**[Codex] 2026-06-06:** 已落地 #1/#6。#2 暂缓，因为消息队列会改变忙碌期间发送语义，需要先定产品策略。#3 暂缓，因为当前 `useLingxiaChat.send` 未直接依赖 `messages`，需要先证明 streaming 重渲染热点。#7/#9 属于 UI 体验优化，可作为下一批，但不建议和刚稳定下来的 OpenClaw 流式链路同一批大改。
