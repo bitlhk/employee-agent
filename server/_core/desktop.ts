@@ -88,7 +88,9 @@ function forwardOpenClawChat(req: express.Request, res: express.Response) {
     }
   });
 
-  req.on("close", () => upstream.destroy());
+  res.on("close", () => {
+    if (!res.writableEnded) upstream.destroy();
+  });
   upstream.write(body);
   upstream.end();
 }
