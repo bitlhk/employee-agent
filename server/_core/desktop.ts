@@ -2,7 +2,14 @@ import express from "express";
 import http from "http";
 import bcrypt from "bcryptjs";
 import path from "path";
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import {
   getSkillMarketItem,
   getUserByEmail,
@@ -12,6 +19,7 @@ import {
 } from "../db";
 import { sdk } from "./sdk";
 import {
+  APP_ROOT,
   bumpSessionEpoch,
   openClawAgentDir,
   resolveRuntimeWorkspaceByIds,
@@ -20,6 +28,7 @@ import { listMcpToolGroups } from "./claw-skills";
 import { skillRegistry } from "./skills/skill-registry";
 import { parseSkillSourceDirectory } from "./skills/skill-source";
 import type { SkillSource } from "../../shared/types/skill";
+import { getAvailableClawModelsFromConfig } from "../routers/helpers";
 
 type DesktopUser = {
   id: string;
@@ -55,6 +64,13 @@ type DesktopSkillItem = {
   source?: string;
   marketId?: number;
   installed?: boolean;
+};
+
+type DesktopModelItem = {
+  id: string;
+  name: string;
+  desc?: string;
+  isDefault?: boolean;
 };
 
 function publicBaseUrl(req: express.Request): string {
@@ -185,6 +201,56 @@ function readDesktopSkillContent(skillId: string): string {
   const stat = statSync(mdPath);
   if (!stat.isFile() || stat.size > 256 * 1024) return "";
   return readFileSync(mdPath, "utf8");
+}
+
+function readDesktopModelOverride(adoptId: string): string {
+  try {
+    const overridesPath = path.join(
+      APP_ROOT,
+      "data",
+      "claw-model-overrides.json"
+    );
+    const raw = existsSync(overridesPath)
+      ? JSON.parse(readFileSync(overridesPath, "utf8") || "{}")
+      : {};
+    return String(raw?.[adoptId] || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function writeDesktopModelOverride(adoptId: string, modelId: string): void {
+  const overridesPath = path.join(
+    APP_ROOT,
+    "data",
+    "claw-model-overrides.json"
+  );
+  let raw: Record<string, string> = {};
+  try {
+    raw = existsSync(overridesPath)
+      ? JSON.parse(readFileSync(overridesPath, "utf8") || "{}")
+      : {};
+  } catch {
+    raw = {};
+  }
+  raw[adoptId] = modelId;
+  mkdirSync(path.dirname(overridesPath), { recursive: true });
+  writeFileSync(overridesPath, JSON.stringify(raw, null, 2), "utf8");
+}
+
+function listDesktopModels(): {
+  selected: string;
+  defaultModel: string;
+  models: DesktopModelItem[];
+} {
+  const adoptId = defaultDesktopAdoptId();
+  const models = getAvailableClawModelsFromConfig();
+  const defaultModel =
+    models.find(model => model.isDefault)?.id || models[0]?.id || "";
+  const override = readDesktopModelOverride(adoptId);
+  const modelIds = new Set(models.map(model => model.id));
+  const selected = override && modelIds.has(override) ? override : defaultModel;
+  return { selected, defaultModel, models };
 }
 
 async function listDesktopMarketSkills(): Promise<DesktopSkillItem[]> {
@@ -596,6 +662,40 @@ export function registerDesktopRoutes(app: express.Express) {
 
   app.get("/api/desktop/openclaw/health", (_req, res) => {
     res.json({ status: "ok", mode: "desktop-openclaw-proxy" });
+  });
+
+  app.get("/api/desktop/models", async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
+    try {
+      res.json(listDesktopModels());
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Desktop models failed",
+      });
+    }
+  });
+
+  app.post("/api/desktop/model-select", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
+    try {
+      const modelId = String(req.body?.modelId || "").trim();
+      const models = listDesktopModels();
+      if (!modelId || !models.models.some(model => model.id === modelId)) {
+        res.status(400).json({ error: "Unsupported model" });
+        return;
+      }
+      writeDesktopModelOverride(defaultDesktopAdoptId(), modelId);
+      res.json({ ok: true, modelId });
+    } catch (error) {
+      res.status(500).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Desktop model select failed",
+      });
+    }
   });
 
   app.get("/api/desktop/sessions", async (req, res) => {
