@@ -194,6 +194,13 @@ function normalizeText(value: unknown): string {
     .trim();
 }
 
+function preserveMarkdownText(value: unknown): string {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+}
+
 function truncateText(value: unknown, max = 48): string {
   const text = normalizeText(value);
   if (!text) return "";
@@ -470,7 +477,7 @@ function readDesktopSessionMessagesFromFile(
     if (event?.type !== "message") continue;
     const role = String(event?.message?.role || "");
     if (role !== "user" && role !== "assistant") continue;
-    const content = normalizeText(
+    const content = preserveMarkdownText(
       textFromOpenClawContent(event?.message?.content)
     );
     if (!content) continue;
