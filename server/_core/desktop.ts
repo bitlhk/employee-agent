@@ -2,10 +2,24 @@ import express from "express";
 import http from "http";
 import bcrypt from "bcryptjs";
 import path from "path";
-import { existsSync, readFileSync, statSync } from "fs";
-import { getUserByEmail, getUserById } from "../db";
+import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import {
+  getSkillMarketItem,
+  getUserByEmail,
+  getUserById,
+  incrementSkillDownload,
+  listApprovedSkillMarketItems,
+} from "../db";
 import { sdk } from "./sdk";
-import { openClawAgentDir } from "./helpers";
+import {
+  bumpSessionEpoch,
+  openClawAgentDir,
+  resolveRuntimeWorkspaceByIds,
+} from "./helpers";
+import { listMcpToolGroups } from "./claw-skills";
+import { skillRegistry } from "./skills/skill-registry";
+import { parseSkillSourceDirectory } from "./skills/skill-source";
+import type { SkillSource } from "../../shared/types/skill";
 
 type DesktopUser = {
   id: string;
@@ -32,6 +46,17 @@ type DesktopHistoryItem =
   | { kind: "user"; id: number; content: string; timestamp: number }
   | { kind: "assistant"; id: number; content: string; timestamp: number };
 
+type DesktopSkillItem = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  path?: string;
+  source?: string;
+  marketId?: number;
+  installed?: boolean;
+};
+
 function publicBaseUrl(req: express.Request): string {
   const proto =
     String(req.headers["x-forwarded-proto"] || "")
@@ -55,6 +80,10 @@ function defaultDesktopAgentId(): string {
   return process.env.DESKTOP_OPENCLAW_AGENT_ID || "trial_lgc-ppstsl9ddr";
 }
 
+function defaultDesktopAdoptId(): string {
+  return defaultDesktopAgentId().replace(/^trial_/, "");
+}
+
 function bearerToken(req: express.Request): string {
   const auth = String(req.headers.authorization || "");
   const match = auth.match(/^Bearer\s+(.+)$/i);
@@ -71,6 +100,153 @@ function truncateText(value: unknown, max = 48): string {
   const text = normalizeText(value);
   if (!text) return "";
   return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function parseSkillMarkdownMeta(text: string): {
+  name?: string;
+  description?: string;
+  category?: string;
+} {
+  const raw = String(text || "");
+  const frontmatter = raw.match(/^---\s*[\r\n]+([\s\S]*?)[\r\n]+---/);
+  const block = frontmatter?.[1] || "";
+  const pick = (key: string) => {
+    const match = block.match(
+      new RegExp(`^${key}:\\s*['"]?([^'"\\n]+)['"]?`, "im")
+    );
+    return match?.[1]?.trim();
+  };
+  const firstHeading = raw.match(/^\s*#\s+(.+)$/m)?.[1]?.trim();
+  return {
+    name: pick("name") || firstHeading,
+    description: pick("description"),
+    category: pick("category"),
+  };
+}
+
+function readSkillItemFromDir(skillId: string, dir: string): DesktopSkillItem {
+  const mdPath = path.join(dir, "SKILL.md");
+  let meta: ReturnType<typeof parseSkillMarkdownMeta> = {};
+  try {
+    if (existsSync(mdPath)) {
+      const stat = statSync(mdPath);
+      if (stat.isFile() && stat.size < 256 * 1024) {
+        meta = parseSkillMarkdownMeta(readFileSync(mdPath, "utf8"));
+      }
+    }
+  } catch {
+    meta = {};
+  }
+  return {
+    id: skillId,
+    name: meta.name || skillId,
+    description: meta.description || "已安装在当前智能体下的技能。",
+    category: meta.category || "已安装",
+    path: dir,
+    source: "installed",
+    installed: true,
+  };
+}
+
+function listDesktopInstalledSkills(): DesktopSkillItem[] {
+  const runtimeAgentId = defaultDesktopAgentId();
+  const adoptId = defaultDesktopAdoptId();
+  const skillsDir = path.join(
+    resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId),
+    "skills"
+  );
+  if (!existsSync(skillsDir)) return [];
+  const items: DesktopSkillItem[] = [];
+  try {
+    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      const skillDir = path.join(skillsDir, entry.name);
+      items.push(readSkillItemFromDir(entry.name, skillDir));
+    }
+  } catch {
+    return [];
+  }
+  return items.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+}
+
+function readDesktopSkillContent(skillId: string): string {
+  const runtimeAgentId = defaultDesktopAgentId();
+  const adoptId = defaultDesktopAdoptId();
+  const skillsDir = path.join(
+    resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId),
+    "skills"
+  );
+  const safeId = String(skillId || "").trim();
+  if (!/^[a-zA-Z0-9._-]{1,96}$/.test(safeId)) return "";
+  const mdPath = path.resolve(path.join(skillsDir, safeId, "SKILL.md"));
+  const root = path.resolve(skillsDir);
+  if (!mdPath.startsWith(root + path.sep) || !existsSync(mdPath)) return "";
+  const stat = statSync(mdPath);
+  if (!stat.isFile() || stat.size > 256 * 1024) return "";
+  return readFileSync(mdPath, "utf8");
+}
+
+async function listDesktopMarketSkills(): Promise<DesktopSkillItem[]> {
+  const installed = new Set(listDesktopInstalledSkills().map(item => item.id));
+  const rows = await listApprovedSkillMarketItems();
+  return rows.map((row: any) => {
+    const id = String(row.skillId || row.id || "").trim();
+    return {
+      id,
+      marketId: Number(row.id),
+      name: String(row.name || row.title || row.skillId || `技能 ${row.id}`),
+      description: String(row.description || "技能市场上架技能。"),
+      category: String(row.category || "技能市场"),
+      source: "market",
+      installed: installed.has(id),
+    };
+  });
+}
+
+async function installDesktopMarketSkill(marketId: number): Promise<{
+  ok: boolean;
+  skillId: string;
+  name: string;
+}> {
+  const adoptId = defaultDesktopAdoptId();
+  const runtimeAgentId = defaultDesktopAgentId();
+  const item = await getSkillMarketItem(marketId);
+  if (!item || item.status !== "approved") {
+    throw new Error("技能不存在或未上架");
+  }
+  if (!item.packagePath || !existsSync(item.packagePath)) {
+    throw new Error("技能包源不存在");
+  }
+
+  const parsed = parseSkillSourceDirectory(
+    item.packagePath,
+    item.skillId || item.name || "market-skill"
+  );
+  const source: SkillSource = {
+    kind: "marketplace",
+    skillId: parsed.skillId || item.skillId,
+    displayName: item.name || parsed.displayName || item.skillId,
+    description: item.description || parsed.description || "",
+    sourcePath: item.packagePath,
+    marketplaceId: String(item.id),
+    version: String(item.version || parsed.manifest?.version || "1.0.0"),
+  };
+  const installed = await skillRegistry.install(adoptId, source);
+  if (!installed.ok) {
+    throw new Error(installed.error.detail);
+  }
+  await skillRegistry.updateScan(adoptId, source.skillId, {
+    warnings: parsed.warnings,
+    scannedAt: new Date().toISOString(),
+  });
+  await incrementSkillDownload(marketId);
+  bumpSessionEpoch(adoptId);
+  return {
+    ok: true,
+    skillId: source.skillId,
+    name: source.displayName || source.skillId,
+  };
 }
 
 function toUnixSeconds(value: unknown): number {
@@ -463,6 +639,65 @@ export function registerDesktopRoutes(app: express.Express) {
       messages: readDesktopSessionMessagesFromFile(found.sessionFile),
     });
   });
+
+  app.get("/api/desktop/capabilities", async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
+    try {
+      const [market, installed] = await Promise.all([
+        listDesktopMarketSkills(),
+        Promise.resolve(listDesktopInstalledSkills()),
+      ]);
+      res.json({
+        skills: {
+          installed,
+          market,
+        },
+        tools: listMcpToolGroups(),
+        agents: [],
+      });
+    } catch (error) {
+      res.status(500).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Desktop capabilities failed",
+      });
+    }
+  });
+
+  app.get("/api/desktop/skill-content", async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
+    const skillId = String(req.query.skillId || "").trim();
+    if (!skillId) {
+      res.status(400).json({ error: "skillId required" });
+      return;
+    }
+    res.type("text/plain").send(readDesktopSkillContent(skillId));
+  });
+
+  app.post(
+    "/api/desktop/skill-market/install",
+    express.json(),
+    async (req, res) => {
+      const user = await requireDesktopUser(req, res);
+      if (!user) return;
+      try {
+        const marketId = Number(req.body?.marketId || 0);
+        if (!Number.isFinite(marketId) || marketId <= 0) {
+          res.status(400).json({ error: "marketId required" });
+          return;
+        }
+        res.json(await installDesktopMarketSkill(marketId));
+      } catch (error) {
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Desktop install failed",
+        });
+      }
+    }
+  );
 
   app.post("/api/desktop/openclaw/v1/chat/completions", forwardOpenClawChat);
 }

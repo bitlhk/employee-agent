@@ -234,7 +234,7 @@ function mcpServerExistsOnDisk(serverId: string, raw: any): boolean {
   return existsSync(path.join(OPENCLAW_HOME, "mcp", serverId));
 }
 
-function listMcpToolGroups() {
+export function listMcpToolGroups() {
   const servers = readOpenClawMcpServers();
   const serverRows = Object.entries(servers).map(([serverId, raw]) => {
     const disabled = Boolean((raw as any)?.disabled);
