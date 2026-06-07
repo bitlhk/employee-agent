@@ -1,7 +1,10 @@
 import express from "express";
 import http from "http";
+import type { IncomingMessage, Server } from "http";
 import bcrypt from "bcryptjs";
 import path from "path";
+import { createHash, generateKeyPairSync, randomUUID, sign } from "crypto";
+import { WebSocket, WebSocketServer } from "ws";
 import {
   existsSync,
   mkdirSync,
@@ -21,9 +24,12 @@ import { sdk } from "./sdk";
 import {
   APP_ROOT,
   bumpSessionEpoch,
+  INTERNAL_BASE_URL,
   openClawAgentDir,
   resolveRuntimeWorkspaceByIds,
 } from "./helpers";
+import { normalizeWsEvent } from "./runtime";
+import { buildRuntimeUserMessage } from "./tool_schema";
 import { listMcpToolGroups } from "./claw-skills";
 import { skillRegistry } from "./skills/skill-registry";
 import { parseSkillSourceDirectory } from "./skills/skill-source";
@@ -73,6 +79,42 @@ type DesktopModelItem = {
   isDefault?: boolean;
 };
 
+const ED25519_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+const { publicKey: DESKTOP_WS_PUB, privateKey: DESKTOP_WS_PRIV } =
+  generateKeyPairSync("ed25519");
+const DESKTOP_WS_SPKI = DESKTOP_WS_PUB.export({ type: "spki", format: "der" });
+const DESKTOP_WS_RAW_PUB = DESKTOP_WS_SPKI.subarray(ED25519_PREFIX.length);
+const b64u = (buffer: Buffer) =>
+  buffer
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/g, "");
+const DESKTOP_WS_DEV_PUB = b64u(DESKTOP_WS_RAW_PUB);
+const DESKTOP_WS_DEV_ID = createHash("sha256")
+  .update(DESKTOP_WS_RAW_PUB)
+  .digest("hex");
+const DESKTOP_WS_SCOPES = ["operator.admin", "operator.read", "operator.write"];
+
+function signDesktopGatewayPayload(nonce: string, gatewayToken: string) {
+  const signedAt = Date.now();
+  const payload = [
+    "v2",
+    DESKTOP_WS_DEV_ID,
+    "openclaw-control-ui",
+    "ui",
+    "operator",
+    DESKTOP_WS_SCOPES.join(","),
+    String(signedAt),
+    gatewayToken,
+    nonce,
+  ].join("|");
+  return {
+    sig: b64u(sign(null, Buffer.from(payload, "utf8"), DESKTOP_WS_PRIV)),
+    signedAt,
+  };
+}
+
 function publicBaseUrl(req: express.Request): string {
   const proto =
     String(req.headers["x-forwarded-proto"] || "")
@@ -82,6 +124,13 @@ function publicBaseUrl(req: express.Request): string {
     "http";
   const host = req.get("host") || `127.0.0.1:${process.env.PORT || "5000"}`;
   return `${proto}://${host}`;
+}
+
+function publicWsBaseUrl(req: express.Request): string {
+  const base = publicBaseUrl(req);
+  if (base.startsWith("https://")) return `wss://${base.slice("https://".length)}`;
+  if (base.startsWith("http://")) return `ws://${base.slice("http://".length)}`;
+  return base;
 }
 
 function desktopToken(): string {
@@ -104,6 +153,39 @@ function bearerToken(req: express.Request): string {
   const auth = String(req.headers.authorization || "");
   const match = auth.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() || "";
+}
+
+function bearerTokenFromIncoming(req: IncomingMessage, url: URL): string {
+  const auth = String(req.headers.authorization || "");
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return (
+    match?.[1]?.trim() ||
+    url.searchParams.get("access_token") ||
+    url.searchParams.get("token") ||
+    ""
+  ).trim();
+}
+
+async function verifyDesktopToken(token: string): Promise<DesktopUser | null> {
+  if (!token) return null;
+
+  // Backward-compatible MVP token for local smoke tests only. Real desktop
+  // clients should use /api/desktop/login and send the returned user session.
+  if (token === desktopToken()) {
+    return { id: "desktop-mvp-user", name: "Desktop MVP User" };
+  }
+
+  const session = await sdk.verifySession(token);
+  if (!session?.userId) return null;
+  const user = await getUserById(session.userId);
+  if (!user) return null;
+  return {
+    id: String(user.id),
+    name: user.name || user.email || session.name || "用户",
+    email: user.email,
+    role: user.role,
+    accessLevel: (user as any).accessLevel || "public_only",
+  };
 }
 
 function normalizeText(value: unknown): string {
@@ -497,26 +579,7 @@ function findDesktopSession(sessionIdOrKey: string): {
 async function authenticateDesktopRequest(
   req: express.Request
 ): Promise<DesktopUser | null> {
-  const token = bearerToken(req);
-  if (!token) return null;
-
-  // Backward-compatible MVP token for local smoke tests only. Real desktop
-  // clients should use /api/desktop/login and send the returned user session.
-  if (token === desktopToken()) {
-    return { id: "desktop-mvp-user", name: "Desktop MVP User" };
-  }
-
-  const session = await sdk.verifySession(token);
-  if (!session?.userId) return null;
-  const user = await getUserById(session.userId);
-  if (!user) return null;
-  return {
-    id: String(user.id),
-    name: user.name || user.email || session.name || "用户",
-    email: user.email,
-    role: user.role,
-    accessLevel: (user as any).accessLevel || "public_only",
-  };
+  return verifyDesktopToken(bearerToken(req));
 }
 
 async function requireDesktopUser(
@@ -597,6 +660,403 @@ async function forwardOpenClawChat(
   upstream.end();
 }
 
+export function registerDesktopWSProxy(server: Server) {
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", async (req: IncomingMessage, socket, head) => {
+    const url = new URL(req.url || "/", `http://${req.headers.host}`);
+    if (url.pathname !== "/api/desktop/openclaw/ws") return;
+
+    try {
+      const user = await verifyDesktopToken(bearerTokenFromIncoming(req, url));
+      if (!user) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+
+      const requestedAgentId = String(url.searchParams.get("agentId") || "")
+        .trim();
+      const agentId = requestedAgentId || defaultDesktopAgentId();
+      if (!agentId) {
+        socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+
+      wss.handleUpgrade(req, socket, head, ws => {
+        wss.emit("connection", ws, req, {
+          user,
+          agentId,
+          sessionKey: String(url.searchParams.get("sessionKey") || "").trim(),
+        });
+      });
+    } catch (error) {
+      console.error("[DESKTOP-WS] upgrade error:", error);
+      socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+      socket.destroy();
+    }
+  });
+
+  wss.on(
+    "connection",
+    (
+      client: WebSocket,
+      _req: IncomingMessage,
+      meta: { user: DesktopUser; agentId: string; sessionKey?: string }
+    ) => {
+      const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
+      if (!gatewayToken) {
+        client.send(
+          JSON.stringify({
+            type: "error",
+            message: "CLAW_GATEWAY_TOKEN is not configured",
+          })
+        );
+        client.close();
+        return;
+      }
+
+      const gatewayUrl = `ws://${process.env.CLAW_REMOTE_HOST || "127.0.0.1"}:${process.env.CLAW_GATEWAY_PORT || "18789"}`;
+      const gw = new WebSocket(gatewayUrl, {
+        headers: { Origin: INTERNAL_BASE_URL },
+      });
+      const pendingClientMessages: string[] = [];
+      const commandOutputBuffers = new Map<string, string>();
+      let ready = false;
+      let sessionKey =
+        meta.sessionKey ||
+        `agent:${meta.agentId}:main:desktop_${Date.now().toString(36)}`;
+      let sawAssistantDelta = false;
+      let lastChatSnapshotText = "";
+
+      const sendToClient = (payload: object) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify(payload));
+        }
+      };
+
+      const emitAssistantDelta = (content: string) => {
+        if (!content) return;
+        sendToClient({
+          choices: [
+            { index: 0, delta: { content }, finish_reason: null },
+          ],
+        });
+      };
+
+      sendToClient({
+        type: "connected",
+        agentId: meta.agentId,
+        sessionKey,
+        ready: false,
+      });
+
+      gw.on("message", (raw: Buffer) => {
+        try {
+          const msg = JSON.parse(raw.toString());
+
+          if (msg.event === "connect.challenge") {
+            const nonce = String(msg.payload?.nonce || "");
+            const { sig, signedAt } = signDesktopGatewayPayload(
+              nonce,
+              gatewayToken
+            );
+            gw.send(
+              JSON.stringify({
+                type: "req",
+                id: randomUUID(),
+                method: "connect",
+                params: {
+                  minProtocol: 3,
+                  maxProtocol: 4,
+                  client: {
+                    id: "openclaw-control-ui",
+                    version: "1.0.0",
+                    platform: "lingxia",
+                    mode: "ui",
+                  },
+                  role: "operator",
+                  scopes: DESKTOP_WS_SCOPES,
+                  auth: { token: gatewayToken },
+                  device: {
+                    id: DESKTOP_WS_DEV_ID,
+                    publicKey: DESKTOP_WS_DEV_PUB,
+                    signature: sig,
+                    signedAt,
+                    nonce,
+                  },
+                  caps: ["tool-events"],
+                },
+              })
+            );
+            return;
+          }
+
+          if (msg.type === "res" && msg.id === "desktop-init-session") {
+            if (!msg.ok) {
+              sendToClient({
+                type: "error",
+                message: msg.error?.message || "OpenClaw session failed",
+              });
+              client.close();
+              return;
+            }
+            sessionKey = msg.payload?.key || sessionKey;
+            ready = true;
+            sendToClient({
+              type: "connected",
+              agentId: meta.agentId,
+              sessionKey,
+              ready: true,
+            });
+            for (const pending of pendingClientMessages.splice(0)) {
+              client.emit("message", Buffer.from(pending));
+            }
+            return;
+          }
+
+          if (msg.type === "res" && msg.ok === true && !ready) {
+            gw.send(
+              JSON.stringify({
+                type: "req",
+                id: "desktop-init-session",
+                method: "sessions.create",
+                params: { agentId: meta.agentId, key: sessionKey },
+              })
+            );
+            return;
+          }
+
+          if (msg.type === "res" && msg.ok === false && !ready) {
+            sendToClient({
+              type: "error",
+              message: msg.error?.message || "OpenClaw gateway error",
+            });
+            client.close();
+            return;
+          }
+
+          if (
+            msg.event === "health" ||
+            msg.event === "tick" ||
+            msg.event === "heartbeat"
+          ) {
+            return;
+          }
+
+          const normalized = normalizeWsEvent(msg, sessionKey);
+          if (normalized.kind !== "events") {
+            if (msg.type === "res" && msg.ok === false) {
+              sendToClient({
+                type: "error",
+                message: msg.error?.message || "OpenClaw RPC error",
+              });
+            }
+            return;
+          }
+
+          const rawEvent = typeof msg.event === "string" ? msg.event : "";
+          const rawPayload =
+            msg.payload && typeof msg.payload === "object" ? msg.payload : {};
+          const rawStream =
+            typeof rawPayload.stream === "string" ? rawPayload.stream : "";
+          const rawState =
+            typeof rawPayload.state === "string" ? rawPayload.state : "";
+
+          for (const event of normalized.events) {
+            switch (event.type) {
+              case "delta":
+                if (
+                  rawEvent === "chat" &&
+                  rawState === "delta" &&
+                  sawAssistantDelta
+                ) {
+                  break;
+                }
+                if (rawEvent === "agent" && rawStream === "assistant") {
+                  sawAssistantDelta = true;
+                }
+                emitAssistantDelta(event.content);
+                break;
+
+              case "chat_snapshot": {
+                if (sawAssistantDelta) break;
+                const snapshot = event.content;
+                const delta = snapshot.startsWith(lastChatSnapshotText)
+                  ? snapshot.slice(lastChatSnapshotText.length)
+                  : snapshot;
+                lastChatSnapshotText = snapshot;
+                emitAssistantDelta(delta);
+                break;
+              }
+
+              case "thinking":
+                sendToClient({
+                  choices: [
+                    {
+                      index: 0,
+                      delta: { reasoning_content: event.content },
+                      finish_reason: null,
+                    },
+                  ],
+                });
+                break;
+
+              case "tool_call":
+                if (event.phase === "start") {
+                  const toolCallId = event.toolCallId || `tc_${Date.now()}`;
+                  commandOutputBuffers.set(toolCallId, "");
+                  sendToClient({
+                    _event: "tool_call",
+                    id: toolCallId,
+                    name: event.name || "tool",
+                    arguments: JSON.stringify(event.args || {}),
+                  });
+                } else {
+                  const toolCallId = event.toolCallId || "";
+                  const buffered = commandOutputBuffers.get(toolCallId) || "";
+                  commandOutputBuffers.delete(toolCallId);
+                  sendToClient({
+                    _event: "tool_result",
+                    tool_call_id: toolCallId,
+                    result:
+                      buffered ||
+                      (typeof event.result === "string" ? event.result : ""),
+                    is_error: Boolean(event.isError),
+                  });
+                }
+                break;
+
+              case "command_output":
+                if (event.phase === "delta") {
+                  const toolCallId = event.toolCallId || "";
+                  if (toolCallId && commandOutputBuffers.has(toolCallId)) {
+                    commandOutputBuffers.set(
+                      toolCallId,
+                      (commandOutputBuffers.get(toolCallId) || "") +
+                        (event.output || "")
+                    );
+                  }
+                } else {
+                  const toolCallId = event.toolCallId || "";
+                  if (toolCallId && event.output) {
+                    commandOutputBuffers.set(toolCallId, event.output);
+                  }
+                }
+                break;
+
+              case "item_status":
+                sendToClient({
+                  __status: event.progressText,
+                  _event: "agent_status",
+                  kind: "progress",
+                  label: event.progressText,
+                });
+                break;
+
+              case "lifecycle_end":
+                sendToClient({ __stream_end: true });
+                sendToClient({
+                  choices: [
+                    { index: 0, delta: {}, finish_reason: "stop" },
+                  ],
+                });
+                break;
+
+              case "chat_final": {
+                if (event.content && !sawAssistantDelta) {
+                  const delta = event.content.startsWith(lastChatSnapshotText)
+                    ? event.content.slice(lastChatSnapshotText.length)
+                    : event.content;
+                  lastChatSnapshotText = event.content;
+                  emitAssistantDelta(delta);
+                }
+                sendToClient({
+                  choices: [
+                    { index: 0, delta: {}, finish_reason: "stop" },
+                  ],
+                });
+                break;
+              }
+
+              case "error":
+                sendToClient({ error: event.message });
+                break;
+
+              default:
+                break;
+            }
+          }
+        } catch (error) {
+          console.error("[DESKTOP-WS] parse error:", error);
+        }
+      });
+
+      gw.on("error", error => {
+        sendToClient({
+          type: "error",
+          message: error.message || "OpenClaw gateway websocket error",
+        });
+      });
+
+      gw.on("close", () => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.close(1012, "OpenClaw gateway closed");
+        }
+      });
+
+      client.on("message", (raw: Buffer) => {
+        try {
+          const msg = JSON.parse(raw.toString());
+          if (msg.type !== "chat") return;
+          if (!ready) {
+            pendingClientMessages.push(raw.toString());
+            sendToClient({
+              __status: "正在初始化 OpenClaw 会话",
+              _event: "agent_status",
+              kind: "progress",
+              label: "正在初始化 OpenClaw 会话",
+            });
+            return;
+          }
+
+          sawAssistantDelta = false;
+          lastChatSnapshotText = "";
+          commandOutputBuffers.clear();
+          sendToClient({
+            __status: "已连接 OpenClaw，正在处理请求",
+            _event: "agent_status",
+            kind: "progress",
+            label: "已连接 OpenClaw，正在处理请求",
+          });
+          gw.send(
+            JSON.stringify({
+              type: "req",
+              id: randomUUID(),
+              method: "chat.send",
+              params: {
+                sessionKey,
+                message: buildRuntimeUserMessage(String(msg.message || "")),
+                idempotencyKey: String(msg.clientRunId || randomUUID()),
+                thinking: msg.runtimeMode === "plan" ? "on" : "off",
+                deliver: false,
+              },
+            })
+          );
+        } catch {
+          // Ignore malformed client messages.
+        }
+      });
+
+      client.on("close", () => gw.close());
+      client.on("error", () => gw.close());
+    }
+  );
+
+  console.log("[DESKTOP-WS] registered at /api/desktop/openclaw/ws");
+}
+
 export function registerDesktopRoutes(app: express.Express) {
   app.post("/api/desktop/login", express.json(), async (req, res) => {
     try {
@@ -646,6 +1106,7 @@ export function registerDesktopRoutes(app: express.Express) {
     const user = await requireDesktopUser(req, res);
     if (!user) return;
     const base = publicBaseUrl(req);
+    const wsBase = publicWsBaseUrl(req);
     const agentId = defaultDesktopAgentId();
     res.json({
       mode: "mvp",
@@ -653,6 +1114,9 @@ export function registerDesktopRoutes(app: express.Express) {
       gatewayUrl:
         process.env.DESKTOP_OPENCLAW_GATEWAY_URL ||
         `${base}/api/desktop/openclaw`,
+      gatewayWsUrl:
+        process.env.DESKTOP_OPENCLAW_GATEWAY_WS_URL ||
+        `${wsBase}/api/desktop/openclaw/ws`,
       gatewayToken: bearerToken(req),
       defaultAgentId: agentId,
       agents: [
