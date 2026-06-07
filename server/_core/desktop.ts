@@ -1,5 +1,16 @@
 import express from "express";
 import http from "http";
+import bcrypt from "bcryptjs";
+import { getUserByEmail, getUserById } from "../db";
+import { sdk } from "./sdk";
+
+type DesktopUser = {
+  id: string;
+  name: string;
+  email?: string | null;
+  role?: string | null;
+  accessLevel?: string | null;
+};
 
 function publicBaseUrl(req: express.Request): string {
   const proto =
@@ -28,16 +39,44 @@ function bearerToken(req: express.Request): string {
   return match?.[1]?.trim() || "";
 }
 
-function requireDesktopToken(req: express.Request, res: express.Response) {
-  const expected = desktopToken();
-  if (!expected) return true;
-  if (bearerToken(req) === expected) return true;
-  res.status(401).json({ error: "Unauthorized" });
-  return false;
+async function authenticateDesktopRequest(
+  req: express.Request,
+): Promise<DesktopUser | null> {
+  const token = bearerToken(req);
+  if (!token) return null;
+
+  // Backward-compatible MVP token for local smoke tests only. Real desktop
+  // clients should use /api/desktop/login and send the returned user session.
+  if (token === desktopToken()) {
+    return { id: "desktop-mvp-user", name: "Desktop MVP User" };
+  }
+
+  const session = await sdk.verifySession(token);
+  if (!session?.userId) return null;
+  const user = await getUserById(session.userId);
+  if (!user) return null;
+  return {
+    id: String(user.id),
+    name: user.name || user.email || session.name || "用户",
+    email: user.email,
+    role: user.role,
+    accessLevel: (user as any).accessLevel || "public_only",
+  };
 }
 
-function forwardOpenClawChat(req: express.Request, res: express.Response) {
-  if (!requireDesktopToken(req, res)) return;
+async function requireDesktopUser(
+  req: express.Request,
+  res: express.Response,
+): Promise<DesktopUser | null> {
+  const user = await authenticateDesktopRequest(req);
+  if (user) return user;
+  res.status(401).json({ error: "Unauthorized" });
+  return null;
+}
+
+async function forwardOpenClawChat(req: express.Request, res: express.Response) {
+  const user = await requireDesktopUser(req, res);
+  if (!user) return;
 
   const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
   if (!gatewayToken) {
@@ -96,19 +135,60 @@ function forwardOpenClawChat(req: express.Request, res: express.Response) {
 }
 
 export function registerDesktopRoutes(app: express.Express) {
-  app.get("/api/desktop/bootstrap", (req, res) => {
+  app.post("/api/desktop/login", express.json(), async (req, res) => {
+    try {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      const password = String(req.body?.password || "");
+      if (!email || !password) {
+        res.status(400).json({ error: "Email and password are required" });
+        return;
+      }
+
+      const user = await getUserByEmail(email);
+      if (!user?.password) {
+        res.status(401).json({ error: "邮箱或密码错误" });
+        return;
+      }
+      const ok = await bcrypt.compare(password, user.password);
+      if (!ok) {
+        res.status(401).json({ error: "邮箱或密码错误" });
+        return;
+      }
+
+      const accessToken = await sdk.signSession({
+        userId: user.id,
+        name: user.name || user.email || email,
+      });
+      res.json({
+        success: true,
+        accessToken,
+        user: {
+          id: String(user.id),
+          name: user.name || user.email || email,
+          email: user.email,
+          role: user.role,
+          accessLevel: (user as any).accessLevel || "public_only",
+        },
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Desktop login failed",
+      });
+    }
+  });
+
+  app.get("/api/desktop/bootstrap", async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
     const base = publicBaseUrl(req);
     const agentId = defaultDesktopAgentId();
     res.json({
       mode: "mvp",
-      user: {
-        id: "desktop-mvp-user",
-        name: "Desktop MVP User",
-      },
+      user,
       gatewayUrl:
         process.env.DESKTOP_OPENCLAW_GATEWAY_URL ||
         `${base}/api/desktop/openclaw`,
-      gatewayToken: desktopToken(),
+      gatewayToken: bearerToken(req),
       defaultAgentId: agentId,
       agents: [
         {
