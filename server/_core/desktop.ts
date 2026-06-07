@@ -549,6 +549,13 @@ async function forwardOpenClawChat(
   const sessionKey =
     String(req.headers["x-openclaw-session-key"] || "").trim() ||
     `agent:${runtimeAgentId}:main:desktop`;
+  const models = listDesktopModels();
+  const allowedModelIds = new Set(models.models.map(model => model.id));
+  const requestedModel = String(req.headers["x-openclaw-model"] || "").trim();
+  const backendModel =
+    requestedModel && allowedModelIds.has(requestedModel)
+      ? requestedModel
+      : models.selected;
 
   const upstream = http.request(
     {
@@ -563,9 +570,7 @@ async function forwardOpenClawChat(
         Authorization: `Bearer ${gatewayToken}`,
         "x-openclaw-agent-id": runtimeAgentId,
         "x-openclaw-session-key": sessionKey,
-        ...(req.headers["x-openclaw-model"]
-          ? { "x-openclaw-model": String(req.headers["x-openclaw-model"]) }
-          : {}),
+        ...(backendModel ? { "x-openclaw-model": backendModel } : {}),
       },
     },
     upstreamRes => {
