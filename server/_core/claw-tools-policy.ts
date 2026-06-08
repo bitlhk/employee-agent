@@ -20,6 +20,10 @@ export function registerToolsPolicyRoutes(app: express.Express) {
     { id: "web", label: "Web", tools: [
       { id: "web_search", label: "web_search", description: "Search the web", source: "core" },
       { id: "web_fetch", label: "web_fetch", description: "Fetch web content", source: "core" },
+      { id: "managed_browser_open", label: "managed_browser_open", description: "Open a public web page through the managed browser service", source: "employee_agent" },
+      { id: "managed_browser_extract", label: "managed_browser_extract", description: "Extract public web page content as Markdown", source: "employee_agent" },
+      { id: "managed_browser_snapshot", label: "managed_browser_snapshot", description: "Read a page structure snapshot", source: "employee_agent" },
+      { id: "managed_browser_screenshot", label: "managed_browser_screenshot", description: "Capture a page screenshot when browser runtime is configured", source: "employee_agent" },
     ]},
     { id: "memory", label: "Memory", tools: [
       { id: "memory_search", label: "memory_search", description: "Semantic memory search", source: "core" },
@@ -33,10 +37,10 @@ export function registerToolsPolicyRoutes(app: express.Express) {
   ] as const;
 
   const PROFILE_ALLOW: Record<string, string[]> = {
-    starter_memory: ["read", "memory_search", "memory_get", "web_fetch"],
-    minimal: ["read", "web_fetch", "memory_search", "memory_get"],
-    coding: ["read", "write", "edit", "web_search", "web_fetch", "memory_search", "memory_get", "sessions_list", "sessions_send", "session_status"],
-    messaging: ["read", "web_fetch", "memory_search", "memory_get", "sessions_list", "sessions_send", "session_status"],
+    starter_memory: ["read", "memory_search", "memory_get", "web_fetch", "managed_browser_open", "managed_browser_extract", "managed_browser_snapshot"],
+    minimal: ["read", "web_fetch", "memory_search", "memory_get", "managed_browser_open", "managed_browser_extract", "managed_browser_snapshot"],
+    coding: ["read", "write", "edit", "web_search", "web_fetch", "managed_browser_open", "managed_browser_extract", "managed_browser_snapshot", "managed_browser_screenshot", "memory_search", "memory_get", "sessions_list", "sessions_send", "session_status"],
+    messaging: ["read", "web_fetch", "managed_browser_open", "managed_browser_extract", "managed_browser_snapshot", "memory_search", "memory_get", "sessions_list", "sessions_send", "session_status"],
     full: TOOL_GROUPS.flatMap((g) => g.tools.map((t) => t.id)),
   };
 

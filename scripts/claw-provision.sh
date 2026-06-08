@@ -244,6 +244,12 @@ DEFAULT_MODEL = (default_model or "").strip()
 enterprise_tools = {
     "profile": "coding",
     "deny": ["gateway", "nodes", "browser", "sessions_spawn"],
+    "alsoAllow": [
+        "managed_browser_open",
+        "managed_browser_extract",
+        "managed_browser_snapshot",
+        "managed_browser_screenshot"
+    ],
     "fs": {"workspaceOnly": True},
     "exec": {"ask": "off", "security": "full"}
 }

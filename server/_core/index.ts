@@ -38,6 +38,7 @@ import { registerFilesRoutes } from "./claw-files";
 import { registerOfficeExcelRoutes } from "./office-excel";
 import { registerOfficeVideoRoutes } from "./office-video";
 import { registerSandboxRoutes } from "./claw-sandbox";
+import { registerManagedBrowserRoutes } from "./managed-browser";
 import { registerChatStreamRoutes } from "./claw-chat";
 import { registerRecoverRoutes } from "./claw-recover";
 import { registerCoopUploadRoutes } from "./coop-upload";
@@ -286,6 +287,7 @@ async function startServer() {
   registerOfficeVideoRoutes(app);
   registerOfficeTaskWorkbenchRoutes(app);
   registerSandboxRoutes(app);
+  registerManagedBrowserRoutes(app);
   registerChatStreamRoutes(app);
   registerRecoverRoutes(app);
   registerCoopUploadRoutes(app);

@@ -49,12 +49,13 @@ path, agent_id, profile = sys.argv[1], sys.argv[2], sys.argv[3]
 profile_map = {
     "starter": {
         "profile": "messaging",
-        "allow": ["web_search", "web_fetch", "read"],
+        "allow": ["web_search", "web_fetch", "read", "managed_browser_open", "managed_browser_extract", "managed_browser_snapshot"],
         "deny": ["exec","process","write","edit","cron","gateway","browser","nodes"],
         "fs": {"workspaceOnly": True}
     },
     "plus": {
         "profile": "coding",
+        "alsoAllow": ["managed_browser_open", "managed_browser_extract", "managed_browser_snapshot", "managed_browser_screenshot"],
         "deny": ["gateway","nodes","browser","cron","sessions_spawn"],
         "fs": {"workspaceOnly": True}
     },

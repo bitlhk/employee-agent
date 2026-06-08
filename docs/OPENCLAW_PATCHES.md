@@ -606,4 +606,81 @@ Operational note:
 Backup:
 
 - `/home/ubuntu/openclaw-backups/skywork-http-mcp-20260606-143351`
+
+## 2026-06-06: Managed browser platform tools
+
+### Decision
+
+Browser-style web reading is a platform basic capability, but it should not be
+implemented by enabling arbitrary sandbox network access for every agent.
+
+Employee Agent now provides managed browser tools as OpenClaw plugin tools:
+
+- `managed_browser_open`
+- `managed_browser_extract`
+- `managed_browser_snapshot`
+- `managed_browser_screenshot`
+
+These tools follow the same direction as the wealth assistant platform tools:
+OpenClaw exposes a standard tool schema, while Employee Agent owns execution,
+SSRF checks, limits, and audit.
+
+### Architecture
+
+```text
+OpenClaw tool call
+  -> openclaw-plugin-managed-browser
+    -> POST http://127.0.0.1:5180/api/internal/managed-browser/tool
+      -> Employee Agent managed browser service
+```
+
+The plugin does not read secrets or environment variables. It only calls the
+local loopback Employee Agent service. The internal service rejects private,
+local, and cloud metadata URLs, limits response size, and records audit events.
+
+### Current runtime
+
+The first implementation is a lite runtime based on server-side HTTP fetch and
+HTML extraction:
+
+- Useful for public pages, articles, public docs, announcements, and simple
+  HTML pages.
+- Returns explicit `AUTH_REQUIRED` / `needsUserSession=true` when the page
+  redirects to login, SSO, QR code login, or identity verification.
+- `managed_browser_screenshot` is present but returns a clear runtime-not-
+  configured error until a browser runtime such as Playwright/Browserbase is
+  installed.
+
+This keeps the OpenClaw tool contract stable while allowing the executor to be
+upgraded later.
+
+Important limitation: this server-side lite runtime does not have the user's
+local browser cookies or enterprise login session. Feishu/Lark private docs,
+bank intranet pages, and other authenticated pages will be detected as
+`AUTH_REQUIRED` instead of extracted. Those scenarios should be handled by the
+future desktop local bridge or by user-uploaded/exported files, not by opening
+unrestricted sandbox network access.
+
+### Files
+
+- `plugins/openclaw-managed-browser/`
+- `server/_core/managed-browser.ts`
+- `server/_core/index.ts`
+- `scripts/configure-openclaw-sandbox.sh`
+- `scripts/claw-provision.sh`
+- `scripts/update-agent-profile.sh`
+- `server/_core/claw-tools-policy.ts`
+
+### Local verification
+
+- `managed-browser` plugin installed and enabled in local OpenClaw.
+- Gateway restarted and loaded 7 plugins including `managed-browser`.
+- Smoke prompt to `trial_lgc-ppstsl9ddr` called `managed_browser_extract` on
+  `https://example.com`.
+- Tool summary: 1 call, 0 failures.
+- Final answer: `标题是：Example Domain`。
+- Feishu private doc verification:
+  `https://booster.feishu.cn/docx/IYhWdfWOtokrPNxxenJcJaknnic` redirects to
+  `accounts.feishu.cn`; internal service returns `ok=false`,
+  `errorCode=AUTH_REQUIRED`, `needsUserSession=true`.
 - `/home/ubuntu/openclaw-backups/remove-disabled-stdio-mcp-20260606-143453`
