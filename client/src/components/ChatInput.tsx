@@ -1,4 +1,5 @@
-import { useRef, useState, useCallback, useEffect, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, useCallback, useEffect, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { FileText, Upload } from "lucide-react";
 import { prepareChatAttachments } from "@/lib/image-compress";
 
 type MentionUser = {
@@ -29,6 +30,50 @@ type ChatInputProps = {
 };
 
 const MAX_INPUT_HISTORY = 30;
+
+type AttachmentChipProps = {
+  file: File;
+  index: number;
+  onRemove: (index: number) => void;
+};
+
+function AttachmentChip({ file, index, onRemove }: AttachmentChipProps) {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const isImage = file.type.startsWith("image/");
+
+  useEffect(() => {
+    if (!isImage) {
+      setThumbUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, isImage]);
+
+  return (
+    <div className={`lingxia-attachment-chip ${isImage ? "is-image" : ""}`}>
+      {thumbUrl ? (
+        <img className="lingxia-attachment-thumb" src={thumbUrl} alt={file.name} />
+      ) : (
+        <span className="lingxia-attachment-file-icon" aria-hidden="true">
+          <FileText size={14} strokeWidth={2} />
+        </span>
+      )}
+      <span className="lingxia-attachment-name" title={file.name}>
+        {file.name}
+      </span>
+      <button
+        type="button"
+        className="lingxia-attachment-remove"
+        onClick={() => onRemove(index)}
+        aria-label={`移除 ${file.name}`}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
 
 function resizeTextareaNextFrame(el: HTMLTextAreaElement | null) {
   if (!el) return;
@@ -68,6 +113,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const dragCounterRef = useRef(0);
   const inputHistoryRef = useRef<string[]>([]);
   const historyCursorRef = useRef<number | null>(null);
   const draftBeforeHistoryRef = useRef("");
@@ -75,6 +121,7 @@ export function ChatInput({
   const [attachments, setAttachments] = useState<File[]>([]);
   const [submittingAttachments, setSubmittingAttachments] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
 
   // ── 语音录制状态 ──
   const [recording, setRecording] = useState(false);
@@ -290,9 +337,7 @@ export function ChatInput({
     }
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  const appendPreparedAttachments = useCallback(async (files: File[]) => {
     if (!files.length) return;
     setSubmittingAttachments(true);
     try {
@@ -301,19 +346,51 @@ export function ChatInput({
     } finally {
       setSubmittingAttachments(false);
     }
+  }, []);
+
+  const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    await appendPreparedAttachments(files);
   };
 
   const handlePaste = async (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(e.clipboardData?.files || []);
     if (!files.length) return;
     e.preventDefault();
-    setSubmittingAttachments(true);
-    try {
-      const prepared = await prepareChatAttachments(files);
-      setAttachments(prev => [...prev, ...prepared]);
-    } finally {
-      setSubmittingAttachments(false);
-    }
+    await appendPreparedAttachments(files);
+  };
+
+  const hasDraggedFiles = (e: DragEvent<HTMLElement>) => Array.from(e.dataTransfer?.types || []).includes("Files");
+
+  const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    setDragActive(true);
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = submittingAttachments ? "none" : "copy";
+    if (!dragActive) setDragActive(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setDragActive(false);
+  };
+
+  const handleDrop = async (e: DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setDragActive(false);
+    if (submittingAttachments) return;
+    await appendPreparedAttachments(Array.from(e.dataTransfer.files || []));
   };
 
   const removeAttachment = (index: number) => {
@@ -450,7 +527,25 @@ export function ChatInput({
   }, [recording, transcribing, value]);
 
   return (
-    <div className="flex-none mb-4 mt-0" style={{ position: "relative", paddingLeft: 40, paddingRight: 40 }}>
+    <div
+      className={`flex-none mb-4 mt-0 ${dragActive ? "is-drag-active" : ""}`}
+      style={{ position: "relative", paddingLeft: 40, paddingRight: 40 }}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={(e) => { void handleDrop(e); }}
+    >
+      {dragActive && (
+        <div className="lingxia-drop-overlay" aria-hidden="true">
+          <div className="lingxia-drop-overlay-inner">
+            <span className="lingxia-drop-overlay-icon">
+              <Upload size={15} strokeWidth={2.2} />
+            </span>
+            <span>松开即可添加附件</span>
+          </div>
+        </div>
+      )}
+
       {/* @mention 浮层 */}
       {mentionOpen && filteredUsers.length > 0 && (
         <div
@@ -519,13 +614,14 @@ export function ChatInput({
 
       {/* 附件预览 */}
       {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-2">
+        <div className="lingxia-attachment-list">
           {attachments.map((file, i) => (
-            <div key={i} className="lingxia-attachment-chip flex items-center gap-1 px-2 py-1 rounded-md text-xs">
-              <span className="max-w-[120px] truncate">{file.name}</span>
-              <button onClick={() => removeAttachment(i)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: "0 2px", lineHeight: 1, opacity: 0.7 }}>×</button>
-            </div>
+            <AttachmentChip
+              key={`${file.name}-${file.size}-${file.lastModified}-${i}`}
+              file={file}
+              index={i}
+              onRemove={removeAttachment}
+            />
           ))}
         </div>
       )}

@@ -4832,10 +4832,115 @@ html:has(:root[data-theme-mode="light"]) body {
 }
 
 /* 附件 chip */
+.lingxia-attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .lingxia-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 240px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border-radius: 9px;
   background: rgba(255,255,255,0.06);
   border: 1px solid var(--oc-border);
   color: var(--oc-text-secondary);
+  font-size: 12px;
+  line-height: 1.2;
+}
+.lingxia-attachment-chip.is-image {
+  min-height: 48px;
+  padding-left: 5px;
+}
+.lingxia-attachment-thumb {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05);
+}
+.lingxia-attachment-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.07);
+}
+.lingxia-attachment-name {
+  min-width: 0;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lingxia-attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.68;
+}
+.lingxia-attachment-remove:hover {
+  background: rgba(255,255,255,0.08);
+  opacity: 1;
+}
+
+.lingxia-drop-overlay {
+  position: absolute;
+  inset: -8px 32px;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed color-mix(in oklab, var(--oc-accent) 60%, var(--oc-border));
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--oc-card) 80%, transparent);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.24);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+.lingxia-drop-overlay-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.28);
+  color: var(--oc-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.lingxia-drop-overlay-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--oc-accent);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
 }
 
 /* 导出菜单 */
@@ -4869,6 +4974,25 @@ html:has(:root[data-theme-mode="light"]) body {
   background: #F3F4F6 !important;
   border-color: #E5E7EB !important;
   color: #374151 !important;
+}
+:root[data-theme-mode="light"] .lingxia-attachment-thumb {
+  border-color: #E5E7EB !important;
+  background: #FFFFFF !important;
+}
+:root[data-theme-mode="light"] .lingxia-attachment-file-icon {
+  background: #FFFFFF !important;
+}
+:root[data-theme-mode="light"] .lingxia-attachment-remove:hover {
+  background: rgba(17,24,39,0.08) !important;
+}
+:root[data-theme-mode="light"] .lingxia-drop-overlay {
+  background: rgba(255,255,255,0.86) !important;
+  box-shadow: 0 12px 32px rgba(15,23,42,0.12) !important;
+}
+:root[data-theme-mode="light"] .lingxia-drop-overlay-inner {
+  background: rgba(255,255,255,0.94) !important;
+  color: #111827 !important;
+  box-shadow: 0 6px 18px rgba(15,23,42,0.08) !important;
 }
 :root[data-theme-mode="light"] .lingxia-export-menu {
   background: #FFFFFF !important;
