@@ -7,6 +7,7 @@ import path from "path";
 import { createHash, generateKeyPairSync, randomUUID, sign } from "crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import {
+  createReadStream,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -1739,6 +1740,131 @@ export function registerDesktopRoutes(app: express.Express) {
       const result = await desktopCronProvider.runJobNow(desktopCronHandle(claw), id);
       if (!result.ok) return res.status(500).json({ error: result.error.detail });
       res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  // Files
+  const DESKTOP_FILES_MAX_LIST_DEPTH = 4;
+  const DESKTOP_FILES_MAX_ENTRIES = 500;
+  const DESKTOP_FILES_MAX_READ_BYTES = 10 * 1024 * 1024;
+  const DESKTOP_FILES_MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+  const DESKTOP_FILES_PROTECTED = new Set([
+    "AGENT.md","AGENTS.md","SOUL.md","TOOLS.md","MEMORY.md",
+    "IDENTITY.md","HEARTBEAT.md","USER.md",
+  ]);
+  const DESKTOP_FILES_ALLOWED_EXT = new Set([
+    "md","txt","csv","json","yaml","yml","xml","toml","ini","conf","log",
+    "pdf","docx","xls","xlsx","pptx","png","jpg","jpeg","gif","svg","webp",
+    "html","htm","css","zip","tar","gz","mp3","wav","m4a","aac","webm","ogg","mp4",
+  ]);
+
+  function desktopFilesSafeJoin(workspace: string, relPath: string): string | null {
+    if (!relPath) return workspace;
+    if (relPath.startsWith("/") || relPath.includes("\0") || relPath.includes("..")) return null;
+    const abs = path.normalize(path.join(workspace, relPath));
+    if (!abs.startsWith(workspace + path.sep) && abs !== workspace) return null;
+    return abs;
+  }
+
+  function desktopFilesListDir(workspace: string, subPath = ""): { name: string; path: string; type: "file" | "directory"; size?: number; modifiedAt: string }[] {
+    if (!existsSync(workspace)) return [];
+    const startAbs = desktopFilesSafeJoin(workspace, subPath);
+    if (!startAbs) return [];
+    const out: { name: string; path: string; type: "file" | "directory"; size?: number; modifiedAt: string }[] = [];
+    function walk(absPath: string, relPath: string, depth: number) {
+      if (depth > DESKTOP_FILES_MAX_LIST_DEPTH || out.length >= DESKTOP_FILES_MAX_ENTRIES) return;
+      let entries: string[];
+      try { entries = readdirSync(absPath); } catch { return; }
+      for (const name of entries) {
+        if (out.length >= DESKTOP_FILES_MAX_ENTRIES) break;
+        if (name.startsWith(".")) continue;
+        const childAbs = path.join(absPath, name);
+        const childRel = relPath ? `${relPath}/${name}` : name;
+        let st;
+        try { st = statSync(childAbs); } catch { continue; }
+        out.push({ name, path: childRel, type: st.isDirectory() ? "directory" : "file", size: st.isDirectory() ? undefined : Number(st.size), modifiedAt: st.mtime.toISOString() });
+        if (st.isDirectory()) walk(childAbs, childRel, depth + 1);
+      }
+    }
+    walk(startAbs, subPath, 0);
+    return out;
+  }
+
+  app.get("/api/desktop/files/list", async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const subPath = String(req.query.path || "").trim();
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      const files = desktopFilesListDir(workspace, subPath);
+      res.json({ files, protectedFiles: Array.from(DESKTOP_FILES_PROTECTED) });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.get("/api/desktop/files/read", async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const relPath = String(req.query.path || "").trim();
+      if (!relPath) return res.status(400).json({ error: "path required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      const abs = desktopFilesSafeJoin(workspace, relPath);
+      if (!abs || !existsSync(abs)) return res.status(404).json({ error: "file not found" });
+      const st = statSync(abs);
+      if (!st.isFile()) return res.status(400).json({ error: "not a file" });
+      if (st.size > DESKTOP_FILES_MAX_READ_BYTES) return res.status(413).json({ error: "file too large to preview" });
+      const content = readFileSync(abs, "utf8");
+      res.json({ path: relPath, content, size: Number(st.size), modifiedAt: st.mtime.toISOString() });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.get("/api/desktop/files/download", async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const relPath = String(req.query.path || "").trim();
+      if (!relPath) return res.status(400).json({ error: "path required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      const abs = desktopFilesSafeJoin(workspace, relPath);
+      if (!abs || !existsSync(abs) || !statSync(abs).isFile()) return res.status(404).json({ error: "file not found" });
+      const filename = path.basename(abs);
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+      res.setHeader("Content-Type", "application/octet-stream");
+      createReadStream(abs).pipe(res);
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/files/upload", express.json({ limit: "55mb" }), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const body = (req.body || {}) as any;
+      const subPath = String(body.path || "").trim();
+      const filenameRaw = String(body.filename || "").trim();
+      const contentBase64 = String(body.contentBase64 || "");
+      if (!filenameRaw || !contentBase64) return res.status(400).json({ error: "filename and contentBase64 required" });
+      const filename = filenameRaw.replace(/[\\/:*?"<>|]/g, "_").replace(/\.\.+/g, "_").replace(/^\.+/, "_").slice(0, 200);
+      if (!filename) return res.status(400).json({ error: "invalid filename" });
+      const ext = filename.includes(".") ? filename.slice(filename.lastIndexOf(".") + 1).toLowerCase() : "";
+      if (!DESKTOP_FILES_ALLOWED_EXT.has(ext)) return res.status(400).json({ error: `file type .${ext} not allowed` });
+      let buf: Buffer;
+      try { buf = Buffer.from(contentBase64, "base64"); } catch { return res.status(400).json({ error: "invalid base64" }); }
+      if (buf.length > DESKTOP_FILES_MAX_UPLOAD_BYTES) return res.status(413).json({ error: "file too large" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      const targetRel = subPath ? `${subPath}/${filename}` : filename;
+      const abs = desktopFilesSafeJoin(workspace, targetRel);
+      if (!abs) return res.status(400).json({ error: "path_not_allowed" });
+      mkdirSync(path.dirname(abs), { recursive: true });
+      writeFileSync(abs, buf);
+      res.json({ ok: true, path: targetRel, size: buf.length });
     } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
   });
 }
