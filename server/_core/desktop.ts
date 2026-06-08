@@ -32,8 +32,18 @@ import {
 import { normalizeWsEvent } from "./runtime";
 import { buildRuntimeUserMessage } from "./tool_schema";
 import { listMcpToolGroups } from "./claw-skills";
-import { getFeishuStatus, unbindFeishu } from "./claw-feishu";
-import { cleanupOpenClawWeixinBindingForAdopt, getWeixinStatus } from "./claw-weixin";
+import {
+  getFeishuStatus,
+  pollFeishuBindStatus,
+  startFeishuBindFlow,
+  unbindFeishu,
+} from "./claw-feishu";
+import {
+  cleanupOpenClawWeixinBindingForAdopt,
+  desktopPollWeixinBind,
+  desktopStartWeixinBind,
+  getWeixinStatus,
+} from "./claw-weixin";
 import { skillRegistry } from "./skills/skill-registry";
 import { parseSkillSourceDirectory } from "./skills/skill-source";
 import type { SkillSource } from "../../shared/types/skill";
@@ -1305,6 +1315,66 @@ export function registerDesktopRoutes(app: express.Express) {
             ? error.message
             : "Desktop channel status failed",
       });
+    }
+  });
+
+  app.post("/api/desktop/channels/weixin/begin", async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
+    try {
+      const result = await desktopStartWeixinBind(defaultDesktopAdoptId());
+      if (!result.ok) return res.status(502).json({ error: result.error });
+      res.json({ qrCode: result.qrCode, pollToken: result.pollToken });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : "weixin begin failed" });
+    }
+  });
+
+  app.post("/api/desktop/channels/weixin/poll", async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
+    try {
+      const pollToken = String(req.body?.pollToken || "").trim();
+      if (!pollToken) return res.status(400).json({ error: "pollToken required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const result = await desktopPollWeixinBind(adoptId, claw, pollToken);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : "weixin poll failed" });
+    }
+  });
+
+  app.post("/api/desktop/channels/feishu/begin", async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
+    try {
+      const result = await startFeishuBindFlow();
+      if (!result.ok) return res.status(502).json({ error: result.error.detail });
+      res.json(result.value);
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : "feishu begin failed" });
+    }
+  });
+
+  app.post("/api/desktop/channels/feishu/poll", async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
+    try {
+      const pollToken = String(req.body?.pollToken || "").trim();
+      if (!pollToken) return res.status(400).json({ error: "pollToken required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const result = await pollFeishuBindStatus(adoptId, Number(claw.userId), pollToken);
+      if (!result.ok) return res.status(502).json({ error: result.error.detail });
+      if (result.value.status === "confirmed") {
+        return res.json({ status: "confirmed", targetLabel: result.value.bindHandle.targetLabel || "" });
+      }
+      res.json({ status: result.value.status, pollToken: (result.value as any).pollToken });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : "feishu poll failed" });
     }
   });
 

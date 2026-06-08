@@ -292,6 +292,52 @@ export function getWeixinStatus(adoptId: string): WeixinBindingStatus {
   return statusFromBinding(findBindingForAdopt(adoptId));
 }
 
+export async function desktopStartWeixinBind(adoptId: string): Promise<
+  | { ok: true; qrCode: string; pollToken: string }
+  | { ok: false; error: string }
+> {
+  if (!isOfficialPluginEnabled()) {
+    return { ok: false, error: "微信插件未启用，请联系管理员" };
+  }
+  const loginAccountId = pendingLoginAccountId(adoptId);
+  const result = await startOfficialWeixinLogin(loginAccountId);
+  if (!result.qrcodeUrl) {
+    return { ok: false, error: result.message || "获取微信二维码失败" };
+  }
+  return { ok: true, qrCode: result.qrcodeUrl, pollToken: loginAccountId };
+}
+
+export async function desktopPollWeixinBind(
+  adoptId: string,
+  claw: any,
+  pollToken: string,
+): Promise<
+  | { status: "confirmed"; targetLabel: string }
+  | { status: "wait" }
+  | { status: "expired" }
+> {
+  const result = await waitOfficialWeixinLogin(pollToken);
+  if (!result.connected) {
+    if (result.alreadyConnected) {
+      const reusable = findReusableOfficialAccount();
+      if (reusable) {
+        const userId = String(reusable.account?.userId || "").trim();
+        upsertOpenClawWeixinBinding({ adoptId, claw, accountId: reusable.accountId, userId });
+        return { status: "confirmed", targetLabel: userId || reusable.accountId };
+      }
+    }
+    if (String(result.message || "").toLowerCase().includes("expired")) {
+      return { status: "expired" };
+    }
+    return { status: "wait" };
+  }
+  const accountId = await saveOfficialWeixinAccount(result);
+  const account = accountId ? loadOfficialAccount(accountId) : null;
+  const userId = String(account?.userId || result.userId || "").trim();
+  upsertOpenClawWeixinBinding({ adoptId, claw, accountId, userId });
+  return { status: "confirmed", targetLabel: userId || accountId };
+}
+
 export function registerWeixinRoutes(app: express.Express) {
   const WEIXIN_INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
 
