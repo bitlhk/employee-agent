@@ -70,6 +70,9 @@ docs/IP_ACCESS_LIMIT_IMPLEMENTATION.md
 docs/WSS_INTEGRATION_PLAN.md
 docs/ACCESS_STATS_V2_PLAN.md
 docs/RESOURCE_OPTIMIZATION.md
+# 2026-06-08 第三轮：运维日志和内部协作跟踪（含内部路径/ID/备份信息）
+docs/OPENCLAW_PATCHES.md
+docs/hermes-desktop-improvements.md
 EXCLUDES
 
 # ── 2. 确保 .env.example 存在 ──
