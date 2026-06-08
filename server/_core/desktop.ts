@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from "fs";
 import {
+  getClawByAdoptId,
   getSkillMarketItem,
   getUserByEmail,
   getUserById,
@@ -31,8 +32,8 @@ import {
 import { normalizeWsEvent } from "./runtime";
 import { buildRuntimeUserMessage } from "./tool_schema";
 import { listMcpToolGroups } from "./claw-skills";
-import { getFeishuStatus } from "./claw-feishu";
-import { getWeixinStatus } from "./claw-weixin";
+import { getFeishuStatus, unbindFeishu } from "./claw-feishu";
+import { cleanupOpenClawWeixinBindingForAdopt, getWeixinStatus } from "./claw-weixin";
 import { skillRegistry } from "./skills/skill-registry";
 import { parseSkillSourceDirectory } from "./skills/skill-source";
 import type { SkillSource } from "../../shared/types/skill";
@@ -1304,6 +1305,28 @@ export function registerDesktopRoutes(app: express.Express) {
             ? error.message
             : "Desktop channel status failed",
       });
+    }
+  });
+
+  app.post("/api/desktop/channels/:key/unbind", async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
+    const key = String(req.params.key || "").trim();
+    try {
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (key === "weixin") {
+        if (!claw) return res.status(404).json({ error: "agent not found" });
+        cleanupOpenClawWeixinBindingForAdopt(adoptId, claw);
+        return res.json({ ok: true });
+      }
+      if (key === "feishu") {
+        await unbindFeishu(adoptId);
+        return res.json({ ok: true });
+      }
+      return res.status(400).json({ error: "unsupported channel" });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : "unbind failed" });
     }
   });
 
