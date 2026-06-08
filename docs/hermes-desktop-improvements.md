@@ -23,7 +23,7 @@
 | 8 | UI | Avatar 分组（一个回合一个头像） | 中 | DEFER |
 | 9 | UI | `useChatScroll` 统一滚动逻辑 | 中 | DONE |
 | 10 | UI | 打字指示器（三点 + toolProgress 文字） | 中 | DONE |
-| 11 | UI | Context 窗口圆形进度表盘 | 低 | N/A |
+| 11 | UI | Context 窗口圆形进度表盘（ContextGauge） | 低 | DEFER |
 | 12 | 工程 | 输入历史（上下箭头翻历史） | 低 | DONE |
 | 13 | 工程 | 拖拽 dragCounter 防误触发 | 低 | N/A |
 | 14 | 工程 | Session cache 增量同步 O(1) | 低 | DEFER |
@@ -54,11 +54,15 @@
 | 39 | 性能 | `activeToolElapsed` 提取为子组件，消除工具执行期间每秒全树重渲染 | 中 | DONE |
 | 40 | 性能 | `startTransition` 包裹流式 `setMessages`，防止 streaming 抢占用户交互 | 中 | DONE |
 | 41 | 稳定性 | 老 SSE 路径超时后 `lingxiaStreaming` 未自动清除（`chatV2Enabled=false` 时） | 低 | DONE |
+| 42 | UI | 文件拖拽上传（drag-to-attach + 全屏遮罩提示） | 高 | DONE |
+| 43 | UI | 图片附件发送前缩略图预览（当前只显示文件名） | 中 | DONE |
+| 44 | UI | 消息内图片点击放大 lightbox | 中 | DEFER |
+| 45 | UI | 空对话建议词 chips（快速填充输入框） | 低 | DEFER |
 
-### 剩余项优先级（2026-06-06 复核，含第七轮新增）
+### 剩余项优先级（2026-06-06 复核，含第八轮新增）
 
 **P0 / 下一批建议做**
-- 当前无 P0 待办。#39/#40/#41 已完成；剩余未做项均为产品体验或长期工程项。
+- 暂无。当前主聊天稳定性和高频输入体验的高优项已经清零。
 
 **P1 / 有价值但先观察**
 - **#5 Pre-send 配置健康检查**：当前已有健康检查、readiness banner 和诊断信息；暂不建议再做“发送前硬拦截”，否则慢链路/临时失败会误伤用户。后续如果 API key/模型未配置类投诉增加，再把健康检查前置到发送按钮。
@@ -72,12 +76,14 @@
 **Closed / 暂不做**
 - **#3 Stable callback refs**：Claude 原始假设不完全成立；`useLingxiaChat.send` 不依赖 `messages`，核心重渲染问题已通过稳定 key、passive scroll、watchdog、memo 等实际热点处理。后续如果要优化，应拆 `Home.tsx`，不是照搬 callback-ref 模式。
 - **#8 Avatar 分组**：视觉偏好项。当前透明工具摘要 + 气泡布局更符合现有风格，强行分组可能减少信息定位清晰度。
-- **#11 ContextGauge**：已有 `contextPercent` 文本展示，圆形表盘会增加视觉噪音，不符合当前简洁办公风格。
+- **#11 ContextGauge**：圆形表盘本身是纯展示，没有配套行动（如接近上限时引导开新会话）的话，跟现有文字 chip 没有本质区别。等后续做"上下文快满自动提示"功能时一起做。
 - **#13 dragCounter**：主聊天没有完整拖拽上传入口，当前风险不成立。
 - **#21 diff 代码块专用渲染**：员工智能体不是代码 review 主场景，普通代码块已可复制和高亮，收益低。
 - **#23 Slash 面板细节**：依赖 #18；#18 暂缓时该项关闭。
 - **#27 启动后台深度验证**：当前首屏已有非阻塞诊断和 readiness banner，不需要再加一套 Hermes 桌面安装验证。
 - **#29 MediaSegment key**：当前主聊天没有 Hermes 那套 `MEDIA:` segment 渲染链，问题不成立。
+- **#44 消息内图片 lightbox**：暂时不做。当前已有安全图片渲染和发送前缩略图，lightbox 需要额外处理移动端手势、Markdown 图片链接冲突和安全边界；等用户明确反馈“图片看不清”再进入下一批。
+- **#45 空对话建议词 chips**：暂时不做。通用建议词在员工办公场景容易偏消费化，也会干扰用户直接输入任务；如后续需要，应按岗位/场景配置，而不是放固定通用 chips。
 
 ---
 
@@ -382,16 +388,72 @@ CSS（`main.css:2367-2375`）：
 
 ---
 
-### #11 Context 窗口圆形进度表盘
-**优先级：低**
+### #11 Context 窗口圆形进度表盘（ContextGauge）
+**优先级：低 | 状态：TODO**
+
+**问题：** 当前输入框下方状态栏把上下文占用率展示为纯文字 chip（`上下文 XX%`），不够直观，接近上限时用户很难一眼感知。
 
 **Hermes 做法** — `src/renderer/src/screens/Chat/ContextGauge.tsx`
 
-SVG 圆环，hover 展示 tooltip（用了多少 token，cache read/write 比例）。employee-agent 的 `ChatMessage.tsx` 已有 `contextPercent` 字段，但只是文字显示。
+SVG 圆环（size=26, stroke=3, radius=11.5），fill 用 `strokeDasharray` 控制填充弧度，数字居中显示，hover/focus 弹出 tooltip 含：已用%、已用/总 token 数、cache read/write 命中率。
 
-**需要修改的文件：**
-- 新建 `client/src/components/ContextGauge.tsx`（直接参考 Hermes 实现，约 100 行）
-- `client/src/components/AIChatBox.tsx` — 在输入框工具栏区域引入
+```tsx
+// 核心几何：
+const circumference = 2 * Math.PI * radius;          // ≈72.26
+const filled = (pct / 100) * circumference;
+// SVG 圆弧：
+<circle
+  strokeDasharray={`${filled} ${circumference}`}
+  transform={`rotate(-90 ${size/2} ${size/2})`}     // 从12点钟方向开始
+/>
+```
+
+**employee-agent 数据来源：**
+- `latestContextMessage.contextPercent` — 已计算的百分比（0-100）
+- `latestContextMessage.usage.input` — 输入 token 数
+- `latestContextMessage.contextWindow` — 模型总窗口大小
+- 这三个字段已经通过 `__perf` chunk 填入消息对象（`Home.tsx:1984-1988`）
+
+**实施步骤：**
+
+1. **新建 `client/src/components/ContextGauge.tsx`**，参考 Hermes 实现，props：
+   ```ts
+   interface ContextGaugeProps {
+     pct: number;           // 0-100
+     usedTokens?: number;
+     windowTokens?: number;
+   }
+   ```
+   SVG 圆环 + 中央数字 + hover tooltip。`pct >= 80` 时 fill 改 `var(--oc-warning, #f59e0b)`。用 `memo` 包裹。
+
+2. **修改 `client/src/pages/Home.tsx`**，在 `statusExtras` 渲染处（约第 3259 行），对 `key === "context"` 的 chip 改为渲染 `<ContextGauge>`：
+   ```tsx
+   statusExtras={chatComposerStatus.map((item) =>
+     item.key === "context" ? (
+       <ContextGauge
+         key="context"
+         pct={latestContextMessage?.contextPercent ?? 0}
+         usedTokens={latestContextMessage?.usage?.input}
+         windowTokens={latestContextMessage?.contextWindow}
+       />
+     ) : (
+       <span key={item.key} className="lingxia-composer-status-chip" data-tone={item.tone || "muted"}>
+         {item.label}
+       </span>
+     )
+   )}
+   ```
+   同时移除 `chatComposerStatus` 中 key=`"tokens"` 的 fallback chip（原始 token 数对用户无意义）。
+
+3. **在 `client/src/index.css`** 添加样式（参考 Hermes `main.css:2593-2660`）：
+   ```css
+   .lingxia-ctx-gauge { position: relative; width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; cursor: default; outline: none; }
+   .lingxia-ctx-gauge-track { stroke: var(--oc-border); }
+   .lingxia-ctx-gauge-fill { stroke: var(--oc-accent); transition: stroke-dasharray 0.3s ease; }
+   .lingxia-ctx-gauge-fill.is-warning { stroke: var(--oc-warning, #f59e0b); }
+   .lingxia-ctx-gauge-num { position: absolute; font-size: 9px; font-weight: 600; color: var(--oc-text-secondary); font-variant-numeric: tabular-nums; }
+   .lingxia-ctx-tooltip { /* 参考 Hermes chat-ctx-tooltip，position:absolute; bottom:calc(100%+8px); right:0; opacity:0 → hover opacity:1 */ }
+   ```
 
 ---
 
@@ -1129,6 +1191,178 @@ if (Date.now() - lastEventAtRef.current > 90_000) {
 
 ---
 
+### #42 文件拖拽上传
+**优先级：高 | 成本：小（2~3h）**
+
+**问题：** Employee-agent 完全没有拖拽文件上传支持（无 `onDragEnter`/`onDragOver`/`onDrop` 处理器）。用户只能点击上传按钮或粘贴，无法直接把文件从桌面/文件管理器拖入聊天框。
+
+**Hermes 做法** — `src/renderer/src/screens/Chat/Chat.tsx:63, 299-353`
+
+```ts
+const dragCounter = useRef(0); // dragCounter 防止子元素进出触发闪烁（#13 已分析）
+
+const handleDragEnter = useCallback((e: React.DragEvent) => {
+  e.preventDefault();
+  dragCounter.current += 1;
+  if (dragCounter.current === 1) setDragActive(true);
+}, []);
+
+const handleDragLeave = useCallback(() => {
+  dragCounter.current = Math.max(0, dragCounter.current - 1);
+  if (dragCounter.current === 0) setDragActive(false);
+}, []);
+
+const handleDrop = useCallback(async (e: React.DragEvent) => {
+  e.preventDefault();
+  dragCounter.current = 0;
+  setDragActive(false);
+  const files = Array.from(e.dataTransfer.files);
+  await ingestFiles(files); // 与点击上传走同一套 compress 逻辑
+}, []);
+
+// JSX：聊天容器包裹层
+<div onDragEnter={handleDragEnter} onDragOver={(e) => e.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+  {/* 遮罩层 */}
+  {dragActive && (
+    <div className="chat-drop-overlay" aria-hidden>
+      <div className="chat-drop-overlay-inner">拖放文件到此处上传</div>
+    </div>
+  )}
+  ...
+</div>
+```
+
+CSS（`main.css:2997`）：
+```css
+.chat-drop-overlay {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.chat-drop-overlay-inner {
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  padding: 24px 36px;
+  color: #fff; font-size: 16px; font-weight: 600;
+}
+```
+
+**需要修改的文件：**
+- `client/src/pages/Home.tsx` 或 `client/src/components/ChatInput.tsx` — 在聊天容器外层加四个 drag 事件处理器 + `dragCounter` ref + `dragActive` state
+- `client/src/index.css` — 加 `.lingxia-drop-overlay` + `.lingxia-drop-overlay-inner` 样式
+
+**注意：** 文件拖入后直接调用 `prepareChatAttachments(files)` 走压缩逻辑，与点击上传、粘贴路径完全一致。
+
+---
+
+### #43 图片附件发送前缩略图预览
+**优先级：中 | 成本：小（1h）**
+
+**问题：** `ChatInput.tsx:523` 的附件列表只渲染文件名文字 chip（`lingxia-attachment-chip`），图片类型没有缩略图。用户无法确认图片内容就发送了，体验差。
+
+**Hermes 做法：** 附件区域对图片文件渲染 `<img src={URL.createObjectURL(file)} />` 缩略图，64×64px，加载后释放 object URL。
+
+**修法：**
+```tsx
+// ChatInput.tsx 附件 map 里：
+{attachments.map((file, i) => {
+  const isImage = file.type.startsWith("image/");
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isImage) return;
+    const url = URL.createObjectURL(file);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, isImage]);
+
+  return (
+    <div key={i} className="lingxia-attachment-chip">
+      {isImage && thumbUrl
+        ? <img src={thumbUrl} alt={file.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }} />
+        : <span className="max-w-[120px] truncate">{file.name}</span>
+      }
+      <button onClick={() => removeAttachment(i)}>×</button>
+    </div>
+  );
+})}
+```
+
+**注意：** 不能在 `map` 里直接 `useState`（Hook 规则）——应把单个附件提取为 `AttachmentChip` 子组件。
+
+---
+
+### #44 消息内图片点击放大（Lightbox）
+**优先级：中 | 成本：小（1h）**
+
+**问题：** AI 回复内容或用户发送的图片，点击后没有任何反应。Hermes 有全屏 lightbox 遮罩，用户可放大查看图片细节。
+
+**Hermes 做法** — `src/renderer/src/screens/Chat/MessageRow.tsx:155-195`
+```tsx
+const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+
+// 在 img 上加 onClick：
+<img src={src} onClick={() => setPreviewSrc(src)} style={{ cursor: "zoom-in" }} />
+
+// Lightbox 遮罩：
+{previewSrc && (
+  <div className="chat-image-preview-backdrop" onClick={() => setPreviewSrc(null)} role="dialog" aria-modal="true">
+    <img src={previewSrc} className="chat-image-preview-image" onClick={(e) => e.stopPropagation()} />
+  </div>
+)}
+```
+
+CSS：
+```css
+.chat-image-preview-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9999; cursor: zoom-out;
+}
+.chat-image-preview-image {
+  max-width: 90vw; max-height: 90vh;
+  border-radius: 8px; object-fit: contain;
+}
+```
+
+**需要修改的文件：**
+- `client/src/components/ChatMarkdown.tsx` — 在 `components.img` override 里（#36 已有）加 `onClick → setPreviewSrc`，用 portal 渲染遮罩层；或在 `ChatMessage.tsx` 层面用 state 管理 preview src。
+
+---
+
+### #45 空对话建议词 chips
+**优先级：低 | 成本：极低（30min）**
+
+**问题：** 空对话状态只有欢迎文字（`Home.tsx:3110`），没有可点击的建议词。Hermes 的 `ChatEmptyState` 有 6 个建议按钮，点击直接填充输入框，降低用户冷启动摩擦。
+
+**Hermes 做法** — `src/renderer/src/screens/Chat/ChatEmptyState.tsx`
+```tsx
+const SUGGESTIONS = [
+  { Icon: Search, text: "帮我搜索..." },
+  { Icon: Calendar, text: "设置一个提醒..." },
+  { Icon: Mail, text: "帮我写一封邮件..." },
+  { Icon: Code, text: "写一个脚本..." },
+  { Icon: Clock, text: "整理我的日程..." },
+  { Icon: BarChart, text: "分析这份数据..." },
+];
+
+<div className="chat-empty-suggestions">
+  {SUGGESTIONS.map(({ Icon, text }) => (
+    <button key={text} className="chat-suggestion" onClick={() => onSelectSuggestion(text)}>
+      <Icon size={14} />{text}
+    </button>
+  ))}
+</div>
+```
+
+**需要修改的文件：**
+- `client/src/pages/Home.tsx:3110` — 在欢迎气泡下方加 2-4 个建议 chips，`onClick` 调用 `setLingxiaInput(text)` 并 focus textarea
+
+---
+
 ## 讨论区
 
 > 在此追加讨论，格式：`**[作者] [日期]:** 内容`
@@ -1297,3 +1531,66 @@ if (Date.now() - lastEventAtRef.current > 90_000) {
 - **#41 DONE**：老 SSE fallback 90 秒无事件时现在会 abort 当前 stream、递增 stream seq、防旧 reader 继续写入，并退出 `lingxiaStreaming`。
 
 当前准确信息：DONE 24 项（#1 #4 #6 #7 #9 #10 #12 #15 #17 #20 #24 #25 #26 #28 #30 #31 #32 #33 #34 #36 #38 #39 #40 #41），TODO 0 项，DEFER 9 项（#2 #5 #8 #14 #16 #18 #19 #35 #37），N/A 8 项。
+
+**[Claude] 2026-06-06（第八轮 UI 一致性深度对比，新增 #42–#45）：**
+
+对比 Hermes 与 employee-agent UI 层全部代码后，过滤掉方向错误的项（employee-agent 已有或更好的：session 置顶/重命名/批量删除、toast 系统、消息复制按钮、token usage 展示、TTS、@mention、骨架屏、删除确认弹窗——均为 employee-agent 领先），找出 Hermes 有、employee-agent 缺失的 4 条真实 UI 差距：
+
+- **#42 文件拖拽上传（高优）** — employee-agent 无任何 drag 事件处理器，用户无法把文件拖进聊天框。Hermes `Chat.tsx` 有 `dragCounter` + blur 遮罩完整实现。2~3h 工作量，接受所有文件类型，走与点击/粘贴相同的 `prepareChatAttachments` 路径。
+- **#43 图片附件缩略图（中优）** — 发送前附件区只显示文件名 chip，图片看不到内容。Hermes 显示 64px 缩略图；需提取 `AttachmentChip` 子组件持有 object URL state。
+- **#44 消息内图片 lightbox（中优）** — AI 回复或用户消息里的图片点击无反应。Hermes 有 `chat-image-preview-backdrop` 全屏预览；可复用 #36 已加的 `components.img` override，扩展加 onClick + portal。
+- **#45 空对话建议词 chips（低优）** — 空聊天只有一句欢迎文字，Hermes 有 6 个可点击建议按钮。30 分钟工作量，`setLingxiaInput(text)` 即可。
+
+**建议 Codex 下一批（按 ROI）：**
+1. **#42** 拖拽上传 — 高频操作缺口，实现清晰，优先
+2. **#43** 缩略图 — 中等，需提取子组件，约 1h
+3. **#44** Lightbox — 中等，复用 #36 img override，约 1h
+4. **#45** 建议词 — 低，30min，可顺带做
+
+**[Codex] 2026-06-06（第九轮 #42/#43 落地）:** 已完成第八轮 UI 建议中的高频输入项：
+- **#42 DONE**：`ChatInput` 增加文件拖拽上传，使用 `dragCounterRef` 防止拖入子元素时遮罩闪烁；drop 后复用现有 `prepareChatAttachments` 路径，因此拖拽、点击上传、粘贴截图三条路径都会走同一套图片压缩逻辑。
+- **#43 DONE**：附件区提取 `AttachmentChip` 子组件，图片附件发送前显示缩略图，非图片显示紧凑文件标识；缩略图使用 `URL.createObjectURL`，组件卸载时自动 `revokeObjectURL`。
+- **#44 DEFER / 暂时不做**：消息内图片 lightbox 先延后，避免把消息渲染安全策略、移动端预览交互和附件输入体验混在一批改。
+- **#45 DEFER / 暂时不做**：空对话建议词暂不做通用 chips，后续如要做，建议跟岗位/场景绑定。
+
+当前准确信息：DONE 26 项（#1 #4 #6 #7 #9 #10 #12 #15 #17 #20 #24 #25 #26 #28 #30 #31 #32 #33 #34 #36 #38 #39 #40 #41 #42 #43），TODO 0 项，DEFER 11 项（#2 #5 #8 #14 #16 #18 #19 #35 #37 #44 #45），N/A 8 项。
+
+---
+
+## Review Notes
+
+_外部 review，2026-06-06_
+
+### 整体评价
+
+文档结构扎实，状态追踪粒度非常细，每一条都有源文件定位、Hermes 参考代码、实施路径和 Done/Defer 注记，方便后续接手的人直接上手。26 项 DONE 在一天内完成说明执行节奏很快。
+
+### 几点建议
+
+**1. DEFER 项缺少 owner 和触发条件**
+
+`#2 消息队列` 和 `#5 Pre-send 健康检查` 的 DEFER 理由都是"需要产品确认"，但没有写谁来确认、什么时候回来看。建议在每条 DEFER 后面补一行：
+
+```
+**Re-evaluate when:** <触发条件或责任人>
+```
+
+否则这些条目容易进死角，下次 review 时还是 DEFER，无限循环。
+
+**2. #44 Lightbox 的关闭理由可以更主动**
+
+当前写的是"等用户明确反馈'图片看不清'"，但用户一般不会主动说这个，他们只是不用图片。建议改成数据驱动的条件，比如：
+
+> 等图片类消息占全部消息比例数据出来，或者收到 ≥3 条"图片太小看不清"反馈时重新评估。
+
+**3. #45 建议词 chips 的 DEFER 理由很好，但可以给一个更明确的下一步**
+
+"跟岗位/场景绑定"是对的方向，建议在这条后面加一句：
+
+> 如果后续上线岗位模板（如销售助手、财务分析师），可以在模板里配置 3-4 条预置建议词，不做全局通用版本。
+
+这样后续做模板功能时能直接想到。
+
+**4. 讨论区记录很详细，但有些过于碎片化**
+
+目前讨论区里同一天出现了 8-9 轮 Claude/Codex 的交替记录，内容密度高但浏览困难。建议按功能分组折叠，或者把已关闭的历史讨论轮次归档到文档末尾的 `## 历史讨论存档` 块里，只在讨论区保留最后一次有效结论。

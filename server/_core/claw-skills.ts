@@ -1,7 +1,17 @@
 import express from "express";
 import { createHash } from "crypto";
 import { execSync } from "child_process";
-import { cpSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, copyFileSync, readdirSync, statSync } from "fs";
+import {
+  cpSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  rmSync,
+  copyFileSync,
+  readdirSync,
+  statSync,
+} from "fs";
 import path from "path";
 import type { SkillSource } from "../../shared/types/skill";
 import {
@@ -19,7 +29,11 @@ import {
 } from "./helpers";
 import { skillRegistry } from "./skills/skill-registry";
 import { skillInstaller } from "./skills/skill-installer";
-import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer, parseSkillSourceDirectory } from "./skills/skill-source";
+import {
+  MAX_SKILL_PACKAGE_BYTES,
+  parseSkillPackageBuffer,
+  parseSkillSourceDirectory,
+} from "./skills/skill-source";
 
 function registryErrorStatus(kind?: string): number {
   if (kind === "not_found") return 404;
@@ -45,7 +59,8 @@ const MCP_TOOL_CATALOG = [
     id: "wind",
     name: "Wind 金融数据",
     category: "专业投研",
-    description: "覆盖行情、财务、公告新闻、指数和市场分析等 Wind 数据能力，供金融类技能和主对话按需调用。",
+    description:
+      "覆盖行情、财务、公告新闻、指数和市场分析等 Wind 数据能力，供金融类技能和主对话按需调用。",
     children: [
       {
         id: "wind-financial-docs",
@@ -53,8 +68,14 @@ const MCP_TOOL_CATALOG = [
         description: "查询公告、新闻、研报、财经资讯和金融资料检索能力。",
         serverIds: ["wind_financial_docs"],
         tools: [
-          { name: "公告与新闻检索", description: "按公司、关键词和时间范围查找公告新闻。" },
-          { name: "研报资料查询", description: "检索研究报告、摘要和相关金融文档。" },
+          {
+            name: "公告与新闻检索",
+            description: "按公司、关键词和时间范围查找公告新闻。",
+          },
+          {
+            name: "研报资料查询",
+            description: "检索研究报告、摘要和相关金融文档。",
+          },
         ],
       },
       {
@@ -63,9 +84,18 @@ const MCP_TOOL_CATALOG = [
         description: "覆盖 A 股、港股、美股的行情、K 线、财务和公司事件。",
         serverIds: ["wind_stock_data"],
         tools: [
-          { name: "股票行情查询", description: "查询最新价、涨跌幅、成交量和行情快照。" },
-          { name: "K线与分钟数据", description: "获取日线、分钟线和历史走势。" },
-          { name: "财务与事件数据", description: "查询财报、股本、分红、风险和公司事件。" },
+          {
+            name: "股票行情查询",
+            description: "查询最新价、涨跌幅、成交量和行情快照。",
+          },
+          {
+            name: "K线与分钟数据",
+            description: "获取日线、分钟线和历史走势。",
+          },
+          {
+            name: "财务与事件数据",
+            description: "查询财报、股本、分红、风险和公司事件。",
+          },
         ],
       },
       {
@@ -74,8 +104,14 @@ const MCP_TOOL_CATALOG = [
         description: "查询指数行情、成分、行业板块和相关基本面数据。",
         serverIds: ["wind_index_data"],
         tools: [
-          { name: "指数行情查询", description: "查询指数最新行情、K 线和估值指标。" },
-          { name: "成分与板块分析", description: "查看指数成分、行业板块和权重变化。" },
+          {
+            name: "指数行情查询",
+            description: "查询指数最新行情、K 线和估值指标。",
+          },
+          {
+            name: "成分与板块分析",
+            description: "查看指数成分、行业板块和权重变化。",
+          },
         ],
       },
       {
@@ -84,8 +120,14 @@ const MCP_TOOL_CATALOG = [
         description: "覆盖 ETF、公募基金行情、档案、持仓、业绩和管理人数据。",
         serverIds: ["wind_fund_data"],
         tools: [
-          { name: "基金行情与净值", description: "查询基金净值、涨跌、业绩和风险指标。" },
-          { name: "持仓与管理人", description: "查询基金持仓、持有人和管理公司信息。" },
+          {
+            name: "基金行情与净值",
+            description: "查询基金净值、涨跌、业绩和风险指标。",
+          },
+          {
+            name: "持仓与管理人",
+            description: "查询基金持仓、持有人和管理公司信息。",
+          },
         ],
       },
       {
@@ -94,8 +136,14 @@ const MCP_TOOL_CATALOG = [
         description: "查询债券档案、主体、估值、行情和发行人财务数据。",
         serverIds: ["wind_bond_data"],
         tools: [
-          { name: "债券档案查询", description: "查询债券基础信息、期限、票息和发行条款。" },
-          { name: "估值与主体数据", description: "查询债券估值、成交、主体财务和评级信息。" },
+          {
+            name: "债券档案查询",
+            description: "查询债券基础信息、期限、票息和发行条款。",
+          },
+          {
+            name: "估值与主体数据",
+            description: "查询债券估值、成交、主体财务和评级信息。",
+          },
         ],
       },
       {
@@ -104,8 +152,14 @@ const MCP_TOOL_CATALOG = [
         description: "查询宏观指标、行业指标、经济周期和统计数据。",
         serverIds: ["wind_economic_data"],
         tools: [
-          { name: "宏观指标查询", description: "查询 GDP、CPI、PMI、社融等宏观指标。" },
-          { name: "行业指标查询", description: "查询行业景气、价格、产量和库存数据。" },
+          {
+            name: "宏观指标查询",
+            description: "查询 GDP、CPI、PMI、社融等宏观指标。",
+          },
+          {
+            name: "行业指标查询",
+            description: "查询行业景气、价格、产量和库存数据。",
+          },
         ],
       },
       {
@@ -115,7 +169,10 @@ const MCP_TOOL_CATALOG = [
         serverIds: ["wind_analytics_data"],
         tools: [
           { name: "技术指标计算", description: "查询或计算常用技术分析指标。" },
-          { name: "风险与组合分析", description: "支持风险指标、收益分析和组合诊断。" },
+          {
+            name: "风险与组合分析",
+            description: "支持风险指标、收益分析和组合诊断。",
+          },
         ],
       },
     ],
@@ -125,7 +182,8 @@ const MCP_TOOL_CATALOG = [
     id: "qieman",
     name: "且慢财富工具",
     category: "个人财富",
-    description: "面向财富规划、组合诊断、基金分析和目标测算场景，由财富类技能统一调度。",
+    description:
+      "面向财富规划、组合诊断、基金分析和目标测算场景，由财富类技能统一调度。",
     children: [
       {
         id: "qieman-wealth",
@@ -133,20 +191,39 @@ const MCP_TOOL_CATALOG = [
         description: "查询且慢侧基金、组合、目标测算和财富诊断工具。",
         serverIds: ["qieman"],
         tools: [
-          { name: "基金分析", description: "查询基金资料、业绩、风险和持仓特征。" },
-          { name: "组合诊断", description: "分析组合配置、波动、收益和集中度。" },
-          { name: "目标测算", description: "按目标金额、期限和风险偏好做规划测算。" },
-          { name: "财富健康检查", description: "评估资产结构、现金流和风险暴露。" },
+          {
+            name: "基金分析",
+            description: "查询基金资料、业绩、风险和持仓特征。",
+          },
+          {
+            name: "组合诊断",
+            description: "分析组合配置、波动、收益和集中度。",
+          },
+          {
+            name: "目标测算",
+            description: "按目标金额、期限和风险偏好做规划测算。",
+          },
+          {
+            name: "财富健康检查",
+            description: "评估资产结构、现金流和风险暴露。",
+          },
         ],
       },
     ],
-    recommendedSkills: ["wealth-family-advisor", "wealth-healthcheck", "wealth-goalcalc", "fund-analyst", "portfolio-doctor"],
+    recommendedSkills: [
+      "wealth-family-advisor",
+      "wealth-healthcheck",
+      "wealth-goalcalc",
+      "fund-analyst",
+      "portfolio-doctor",
+    ],
   },
   {
     id: "bond-quote-parse",
     name: "债券群聊报价解析",
     category: "债券承销",
-    description: "解析债券申购群聊、报价语料和 CSV 表格，提取机构、利率、投标量和错误项。",
+    description:
+      "解析债券申购群聊、报价语料和 CSV 表格，提取机构、利率、投标量和错误项。",
     children: [
       {
         id: "bond-quote-parse",
@@ -155,8 +232,14 @@ const MCP_TOOL_CATALOG = [
         serverIds: ["bond_quote_parse", "bond-quote-parse"],
         displayServerId: "bond-quote-parse",
         tools: [
-          { name: "报价文本解析", description: "从群聊文本中抽取债券简称、期限、收益率、量和机构。" },
-          { name: "报价表格校验", description: "校验 CSV 或表格中的缺失项、格式错误和重复记录。" },
+          {
+            name: "报价文本解析",
+            description: "从群聊文本中抽取债券简称、期限、收益率、量和机构。",
+          },
+          {
+            name: "报价表格校验",
+            description: "校验 CSV 或表格中的缺失项、格式错误和重复记录。",
+          },
         ],
       },
     ],
@@ -166,16 +249,26 @@ const MCP_TOOL_CATALOG = [
     id: "wealth-assistant",
     name: "客户经理财富助手",
     category: "财富管理",
-    description: "面向客户经理的财富助手能力，支持获取自己负责的客户数据，并结合推荐产品数据辅助客户经营和产品推荐。",
+    description:
+      "面向客户经理的财富助手能力，支持获取自己负责的客户数据，并结合推荐产品数据辅助客户经营和产品推荐。",
     children: [
       {
         id: "wealth-assistant",
         name: "客户经理财富助手",
-        description: "聚合客户数据与推荐产品数据，可查询客户列表、客户详情、基金/理财产品、净值历史和市场新闻。",
+        description:
+          "聚合客户数据与推荐产品数据，可查询客户列表、客户详情、基金/理财产品、净值历史和市场新闻。",
         serverIds: ["wealth_assistant"],
         tools: [
-          { name: "客户数据查询", description: "查询客户列表、搜索客户，并获取客户完整画像和资产信息。" },
-          { name: "推荐产品数据", description: "查询基金、理财产品、净值历史和市场新闻，辅助客户经理做产品匹配。" },
+          {
+            name: "客户数据查询",
+            description:
+              "查询客户列表、搜索客户，并获取客户完整画像和资产信息。",
+          },
+          {
+            name: "推荐产品数据",
+            description:
+              "查询基金、理财产品、净值历史和市场新闻，辅助客户经理做产品匹配。",
+          },
         ],
       },
     ],
@@ -186,14 +279,20 @@ const MCP_TOOL_CATALOG = [
 function readOpenClawMcpServers(): Record<string, any> {
   try {
     if (!existsSync(OPENCLAW_JSON_PATH)) return {};
-    const cfg = JSON.parse(String(readFileSync(OPENCLAW_JSON_PATH, "utf-8") || "{}"));
-    return cfg?.mcp?.servers && typeof cfg.mcp.servers === "object" ? cfg.mcp.servers : {};
+    const cfg = JSON.parse(
+      String(readFileSync(OPENCLAW_JSON_PATH, "utf-8") || "{}")
+    );
+    return cfg?.mcp?.servers && typeof cfg.mcp.servers === "object"
+      ? cfg.mcp.servers
+      : {};
   } catch {
     return {};
   }
 }
 
-function readSkillMarkdownCandidate(dir?: string): { text: string; source: "runtime" | "source" } | null {
+function readSkillMarkdownCandidate(
+  dir?: string
+): { text: string; source: "runtime" | "source" } | null {
   if (!dir || !existsSync(dir)) return null;
   try {
     const st = statSync(dir);
@@ -214,19 +313,25 @@ function extractSkillIntroduction(skillMd: string, fallback: string): string {
   const raw = String(skillMd || "");
   const fm = raw.match(/^---\s*[\r\n]+([\s\S]*?)[\r\n]+---\s*[\r\n]*/);
   const fmBlock = fm?.[1] || "";
-  const description = fmBlock.match(/^description:\s*['"]?([^'"\n]+)['"]?/mi)?.[1]?.trim();
+  const description = fmBlock
+    .match(/^description:\s*['"]?([^'"\n]+)['"]?/im)?.[1]
+    ?.trim();
   let body = fm ? raw.slice(fm[0].length) : raw;
   body = body
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/^\s*#\s+.+$/m, "")
     .trim();
   const intro = body || description || fallback || "暂无说明";
-  return intro.length > 6000 ? `${intro.slice(0, 6000).trimEnd()}\n\n（内容较长，已截断）` : intro;
+  return intro.length > 6000
+    ? `${intro.slice(0, 6000).trimEnd()}\n\n（内容较长，已截断）`
+    : intro;
 }
 
 function mcpServerExistsOnDisk(serverId: string, raw: any): boolean {
   const command = typeof raw?.command === "string" ? raw.command : "";
-  const args = Array.isArray(raw?.args) ? raw.args.map((x: any) => String(x || "")) : [];
+  const args = Array.isArray(raw?.args)
+    ? raw.args.map((x: any) => String(x || ""))
+    : [];
   const candidates = [command, ...args].filter(Boolean);
   for (const item of candidates) {
     if (item.startsWith("/") && existsSync(item)) return true;
@@ -246,23 +351,33 @@ export function listMcpToolGroups() {
       existsOnDisk: mcpServerExistsOnDisk(serverId, raw),
     };
   });
-  const byId = new Map(serverRows.map((row) => [row.serverId, row]));
+  const byId = new Map(serverRows.map(row => [row.serverId, row]));
   const knownServerIds = new Set<string>();
 
-  const groups = MCP_TOOL_CATALOG.map((item) => {
-    const children = item.children.map((child) => {
+  const groups = MCP_TOOL_CATALOG.map(item => {
+    const children = item.children.map(child => {
       for (const id of child.serverIds) knownServerIds.add(id);
-      const aliasServers = child.serverIds.map((serverId) => byId.get(serverId) || {
-        serverId,
-        configured: false,
-        enabled: false,
-        status: "missing",
-        existsOnDisk: existsSync(path.join(OPENCLAW_HOME, "mcp", serverId)),
-      });
-      const activeServer = aliasServers.find((server) => server.configured) || aliasServers[0];
-      const configured = aliasServers.some((server) => server.configured);
-      const enabled = aliasServers.some((server) => server.configured && server.enabled);
-      const status = enabled ? "available" : configured ? "disabled" : "missing";
+      const aliasServers = child.serverIds.map(
+        serverId =>
+          byId.get(serverId) || {
+            serverId,
+            configured: false,
+            enabled: false,
+            status: "missing",
+            existsOnDisk: existsSync(path.join(OPENCLAW_HOME, "mcp", serverId)),
+          }
+      );
+      const activeServer =
+        aliasServers.find(server => server.configured) || aliasServers[0];
+      const configured = aliasServers.some(server => server.configured);
+      const enabled = aliasServers.some(
+        server => server.configured && server.enabled
+      );
+      const status = enabled
+        ? "available"
+        : configured
+          ? "disabled"
+          : "missing";
       return {
         id: child.id,
         name: child.name,
@@ -271,19 +386,26 @@ export function listMcpToolGroups() {
         configured,
         enabled,
         status,
-        existsOnDisk: aliasServers.some((server) => server.existsOnDisk),
+        existsOnDisk: aliasServers.some(server => server.existsOnDisk),
         tools: child.tools,
       };
     });
-    const availableCount = children.filter((child) => child.status === "available").length;
-    const configuredCount = children.filter((child) => child.configured).length;
+    const availableCount = children.filter(
+      child => child.status === "available"
+    ).length;
+    const configuredCount = children.filter(child => child.configured).length;
     return {
       id: item.id,
       name: item.name,
       category: item.category,
       description: item.description,
       recommendedSkills: item.recommendedSkills,
-      status: availableCount > 0 ? "available" : configuredCount > 0 ? "disabled" : "missing",
+      status:
+        availableCount > 0
+          ? "available"
+          : configuredCount > 0
+            ? "disabled"
+            : "missing",
       availableCount,
       configuredCount,
       serverCount: children.length,
@@ -292,8 +414,8 @@ export function listMcpToolGroups() {
   });
 
   const extraGroups = serverRows
-    .filter((server) => !knownServerIds.has(server.serverId))
-    .map((server) => ({
+    .filter(server => !knownServerIds.has(server.serverId))
+    .map(server => ({
       id: server.serverId,
       name: server.serverId,
       category: "平台工具",
@@ -304,17 +426,24 @@ export function listMcpToolGroups() {
       availableCount: server.enabled ? 1 : 0,
       configuredCount: 1,
       serverCount: 1,
-      children: [{
-        id: server.serverId,
-        name: server.serverId,
-        description: "OpenClaw 配置中已注册的 MCP Server。",
-        serverId: server.serverId,
-        configured: true,
-        enabled: server.enabled,
-        status: server.status,
-        existsOnDisk: server.existsOnDisk,
-        tools: [{ name: "工具清单", description: "该 MCP 未纳入平台目录，具体能力以管理员配置为准。" }],
-      }],
+      children: [
+        {
+          id: server.serverId,
+          name: server.serverId,
+          description: "OpenClaw 配置中已注册的 MCP Server。",
+          serverId: server.serverId,
+          configured: true,
+          enabled: server.enabled,
+          status: server.status,
+          existsOnDisk: server.existsOnDisk,
+          tools: [
+            {
+              name: "工具清单",
+              description: "该 MCP 未纳入平台目录，具体能力以管理员配置为准。",
+            },
+          ],
+        },
+      ],
     }));
 
   return {
@@ -322,21 +451,31 @@ export function listMcpToolGroups() {
     totals: {
       groups: groups.length + extraGroups.length,
       configuredServers: serverRows.length,
-      availableServers: serverRows.filter((row) => row.enabled).length,
+      availableServers: serverRows.filter(row => row.enabled).length,
     },
   };
 }
 
-async function discoverGeneratedRuntimeSkills(adoptId: string, runtimeAgentId: string, onlySkillId?: string): Promise<{
+async function discoverGeneratedRuntimeSkills(
+  adoptId: string,
+  runtimeAgentId: string,
+  onlySkillId?: string
+): Promise<{
   discovered: number;
   installed: Array<{ skillId: string; displayName: string }>;
   skipped: Array<{ skillId: string; reason: string }>;
 }> {
-  const runtimeSkillsRoot = path.join(resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId), "skills");
-  if (!existsSync(runtimeSkillsRoot)) return { discovered: 0, installed: [], skipped: [] };
+  const runtimeSkillsRoot = path.join(
+    resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId),
+    "skills"
+  );
+  if (!existsSync(runtimeSkillsRoot))
+    return { discovered: 0, installed: [], skipped: [] };
 
   const listed = await skillRegistry.listSkills(adoptId);
-  const registered = new Set(listed.ok ? listed.value.map((item) => item.id) : []);
+  const registered = new Set(
+    listed.ok ? listed.value.map(item => item.id) : []
+  );
   const installed: Array<{ skillId: string; displayName: string }> = [];
   const skipped: Array<{ skillId: string; reason: string }> = [];
 
@@ -348,7 +487,12 @@ async function discoverGeneratedRuntimeSkills(adoptId: string, runtimeAgentId: s
 
     try {
       const parsed = parseSkillSourceDirectory(sourceDir, entry.name);
-      if (onlySkillId && parsed.skillId !== onlySkillId && entry.name !== onlySkillId) continue;
+      if (
+        onlySkillId &&
+        parsed.skillId !== onlySkillId &&
+        entry.name !== onlySkillId
+      )
+        continue;
       if (registered.has(parsed.skillId)) {
         skipped.push({ skillId: parsed.skillId, reason: "already_registered" });
         continue;
@@ -382,7 +526,10 @@ async function discoverGeneratedRuntimeSkills(adoptId: string, runtimeAgentId: s
         scannedAt: new Date().toISOString(),
       });
       registered.add(parsed.skillId);
-      installed.push({ skillId: parsed.skillId, displayName: source.displayName });
+      installed.push({
+        skillId: parsed.skillId,
+        displayName: source.displayName,
+      });
     } catch (e: any) {
       skipped.push({ skillId: entry.name, reason: String(e?.message || e) });
     }
@@ -400,12 +547,24 @@ async function readSkillPackagePayload(req: express.Request): Promise<{
 }> {
   const body = (req.body || {}) as any;
   const adoptId = String(body.adoptId || req.query.adoptId || "").trim();
-  const filename = decodeParam(body.filename || req.query.filename || req.header("x-skill-filename") || "").trim();
-  const displayName = String(body.displayName || req.query.displayName || "").trim();
-  const description = String(body.description || req.query.description || "").trim();
+  const filename = decodeParam(
+    body.filename || req.query.filename || req.header("x-skill-filename") || ""
+  ).trim();
+  const displayName = String(
+    body.displayName || req.query.displayName || ""
+  ).trim();
+  const description = String(
+    body.description || req.query.description || ""
+  ).trim();
   const contentBase64 = String(body.contentBase64 || "").trim();
   if (contentBase64) {
-    return { adoptId, filename, fileBuf: Buffer.from(contentBase64, "base64"), displayName, description };
+    return {
+      adoptId,
+      filename,
+      fileBuf: Buffer.from(contentBase64, "base64"),
+      displayName,
+      description,
+    };
   }
 
   const chunks: Buffer[] = [];
@@ -414,13 +573,21 @@ async function readSkillPackagePayload(req: express.Request): Promise<{
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as any);
     total += buf.length;
     if (total > MAX_SKILL_PACKAGE_BYTES) {
-      const err = new Error("file too large (max 50MB)") as Error & { statusCode?: number };
+      const err = new Error("file too large (max 50MB)") as Error & {
+        statusCode?: number;
+      };
       err.statusCode = 413;
       throw err;
     }
     chunks.push(buf);
   }
-  return { adoptId, filename, fileBuf: Buffer.concat(chunks), displayName, description };
+  return {
+    adoptId,
+    filename,
+    fileBuf: Buffer.concat(chunks),
+    displayName,
+    description,
+  };
 }
 
 export function registerSkillRoutes(app: express.Express) {
@@ -449,11 +616,16 @@ export function registerSkillRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      const runtimeAgentId = await resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
+      const runtimeAgentId = await resolveRuntimeAgentId(
+        adoptId,
+        String((claw as any).agentId || "")
+      );
       await discoverGeneratedRuntimeSkills(adoptId, runtimeAgentId);
       const result = await skillRegistry.listSkills(adoptId);
       if (!result.ok) {
-        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        res
+          .status(registryErrorStatus(result.error.kind))
+          .json({ error: result.error.detail, kind: result.error.kind });
         return;
       }
       res.json({ items: result.value });
@@ -475,10 +647,12 @@ export function registerSkillRoutes(app: express.Express) {
       if (!claw) return;
       const listed = await skillRegistry.listSkills(adoptId);
       if (!listed.ok) {
-        res.status(registryErrorStatus(listed.error.kind)).json({ error: listed.error.detail, kind: listed.error.kind });
+        res
+          .status(registryErrorStatus(listed.error.kind))
+          .json({ error: listed.error.detail, kind: listed.error.kind });
         return;
       }
-      const skill = listed.value.find((item) => item.id === skillId);
+      const skill = listed.value.find(item => item.id === skillId);
       if (!skill) {
         res.status(404).json({ error: "skill not found" });
         return;
@@ -488,7 +662,10 @@ export function registerSkillRoutes(app: express.Express) {
       if (runtimeRead) {
         res.json({
           skillId,
-          introduction: extractSkillIntroduction(runtimeRead.text, skill.source.description || ""),
+          introduction: extractSkillIntroduction(
+            runtimeRead.text,
+            skill.source.description || ""
+          ),
           source: "runtime",
         });
         return;
@@ -498,7 +675,10 @@ export function registerSkillRoutes(app: express.Express) {
       if (sourceRead) {
         res.json({
           skillId,
-          introduction: extractSkillIntroduction(sourceRead.text, skill.source.description || ""),
+          introduction: extractSkillIntroduction(
+            sourceRead.text,
+            skill.source.description || ""
+          ),
           source: "source",
         });
         return;
@@ -526,11 +706,23 @@ export function registerSkillRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      const runtimeAgentId = await resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
-      const discovered = await discoverGeneratedRuntimeSkills(adoptId, runtimeAgentId, skillId || undefined);
-      const result = await skillRegistry.reconcile(adoptId, skillId ? { skillId } : undefined);
+      const runtimeAgentId = await resolveRuntimeAgentId(
+        adoptId,
+        String((claw as any).agentId || "")
+      );
+      const discovered = await discoverGeneratedRuntimeSkills(
+        adoptId,
+        runtimeAgentId,
+        skillId || undefined
+      );
+      const result = await skillRegistry.reconcile(
+        adoptId,
+        skillId ? { skillId } : undefined
+      );
       if (!result.ok) {
-        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        res
+          .status(registryErrorStatus(result.error.kind))
+          .json({ error: result.error.detail, kind: result.error.kind });
         return;
       }
       console.log("[SKILL-RECONCILE]", {
@@ -562,7 +754,9 @@ export function registerSkillRoutes(app: express.Express) {
       if (!claw) return;
       const result = await skillRegistry.setEnabled(adoptId, skillId, enabled);
       if (!result.ok) {
-        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        res
+          .status(registryErrorStatus(result.error.kind))
+          .json({ error: result.error.detail, kind: result.error.kind });
         return;
       }
       res.json({ item: result.value });
@@ -585,7 +779,9 @@ export function registerSkillRoutes(app: express.Express) {
       if (!claw) return;
       const result = await skillRegistry.uninstall(adoptId, skillId);
       if (!result.ok) {
-        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        res
+          .status(registryErrorStatus(result.error.kind))
+          .json({ error: result.error.detail, kind: result.error.kind });
         return;
       }
       res.json({ ok: true });
@@ -608,7 +804,9 @@ export function registerSkillRoutes(app: express.Express) {
       if (!claw) return;
       const result = await skillRegistry.destroy(adoptId, skillId);
       if (!result.ok) {
-        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        res
+          .status(registryErrorStatus(result.error.kind))
+          .json({ error: result.error.detail, kind: result.error.kind });
         return;
       }
       res.json({ ok: true });
@@ -625,14 +823,18 @@ export function registerSkillRoutes(app: express.Express) {
       const skillId = String(body.skillId || "").trim();
       const displayName = String(body.displayName || "").trim();
       if (!adoptId || !skillId || !displayName) {
-        res.status(400).json({ error: "adoptId, skillId and displayName required" });
+        res
+          .status(400)
+          .json({ error: "adoptId, skillId and displayName required" });
         return;
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       const result = await skillRegistry.rename(adoptId, skillId, displayName);
       if (!result.ok) {
-        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        res
+          .status(registryErrorStatus(result.error.kind))
+          .json({ error: result.error.detail, kind: result.error.kind });
         return;
       }
       res.json({ item: result.value });
@@ -679,13 +881,21 @@ export function registerSkillRoutes(app: express.Express) {
       });
     } catch (e: any) {
       console.error("[skill-package inspect] failed", e);
-      res.status(Number(e?.statusCode || 400)).json({ error: String(e?.message || "inspect skill package failed") });
+      res
+        .status(Number(e?.statusCode || 400))
+        .json({ error: String(e?.message || "inspect skill package failed") });
     }
   });
 
   app.post("/api/claw/skill-package/upload", async (req, res) => {
     try {
-      const { adoptId, filename, fileBuf, displayName: requestedName, description: requestedDescription } = await readSkillPackagePayload(req);
+      const {
+        adoptId,
+        filename,
+        fileBuf,
+        displayName: requestedName,
+        description: requestedDescription,
+      } = await readSkillPackagePayload(req);
 
       if (!adoptId) {
         res.status(400).json({ error: "adoptId required" });
@@ -708,7 +918,9 @@ export function registerSkillRoutes(app: express.Express) {
       const parsed = await parseSkillPackageBuffer(fileBuf, filename);
       const displayName = requestedName || parsed.displayName;
       if (!displayName || displayName.length < 2) {
-        res.status(400).json({ error: "displayName must be at least 2 characters" });
+        res
+          .status(400)
+          .json({ error: "displayName must be at least 2 characters" });
         return;
       }
       const displayDescription = requestedDescription || parsed.description;
@@ -727,16 +939,26 @@ export function registerSkillRoutes(app: express.Express) {
       let idxRows: any[] = [];
       if (existsSync(idxPathUpload)) {
         const rawIdx = String(readFileSync(idxPathUpload, "utf-8") || "[]");
-          try { idxRows = JSON.parse(rawIdx); } catch { idxRows = []; }
+        try {
+          idxRows = JSON.parse(rawIdx);
+        } catch {
+          idxRows = [];
+        }
       }
       const mdMeta = parsed.mdMeta || {};
       const indexRow = {
-        adoptId, filename: safeName, path: zipPath, sha256, size: fileBuf.length,
-        manifest: parsed.manifest || {}, mdMeta,
-        displayName, displayDescription,
+        adoptId,
+        filename: safeName,
+        path: zipPath,
+        sha256,
+        size: fileBuf.length,
+        manifest: parsed.manifest || {},
+        mdMeta,
+        displayName,
+        displayDescription,
         installedSkillId: parsed.skillId,
         installedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
       };
       idxRows.push(indexRow);
       writeFileSync(idxPathUpload, JSON.stringify(idxRows, null, 2), "utf-8");
@@ -751,16 +973,25 @@ export function registerSkillRoutes(app: express.Express) {
       };
       const installed = await skillRegistry.install(adoptId, source);
       if (!installed.ok) {
-        res.status(registryErrorStatus(installed.error.kind)).json({ error: installed.error.detail, kind: installed.error.kind });
+        res
+          .status(registryErrorStatus(installed.error.kind))
+          .json({ error: installed.error.detail, kind: installed.error.kind });
         return;
       }
       await skillRegistry.updateScan(adoptId, parsed.skillId, {
         warnings: parsed.warnings,
         scannedAt: new Date().toISOString(),
       });
-      const reconciled = await skillRegistry.reconcile(adoptId, { skillId: parsed.skillId });
+      const reconciled = await skillRegistry.reconcile(adoptId, {
+        skillId: parsed.skillId,
+      });
       if (!reconciled.ok) {
-        res.status(registryErrorStatus(reconciled.error.kind)).json({ error: reconciled.error.detail, kind: reconciled.error.kind });
+        res
+          .status(registryErrorStatus(reconciled.error.kind))
+          .json({
+            error: reconciled.error.detail,
+            kind: reconciled.error.kind,
+          });
         return;
       }
 
@@ -775,7 +1006,9 @@ export function registerSkillRoutes(app: express.Express) {
       });
     } catch (e: any) {
       console.error("[skill-package upload] failed", e);
-      res.status(Number(e?.statusCode || 500)).json({ error: String(e?.message || "skill package upload failed") });
+      res
+        .status(Number(e?.statusCode || 500))
+        .json({ error: String(e?.message || "skill package upload failed") });
     }
   });
 
@@ -784,7 +1017,10 @@ export function registerSkillRoutes(app: express.Express) {
       const body = (req.body || {}) as any;
       const adoptId = String(body.adoptId || "").trim();
       const skillId = String(body.skillId || "").trim();
-      const version = String(body.version || "1.0.0").trim().slice(0, 32) || "1.0.0";
+      const version =
+        String(body.version || "1.0.0")
+          .trim()
+          .slice(0, 32) || "1.0.0";
       if (!adoptId || !skillId) {
         res.status(400).json({ error: "adoptId and skillId required" });
         return;
@@ -795,16 +1031,22 @@ export function registerSkillRoutes(app: express.Express) {
 
       const listed = await skillRegistry.listSkills(adoptId);
       if (!listed.ok) {
-        res.status(registryErrorStatus(listed.error.kind)).json({ error: listed.error.detail, kind: listed.error.kind });
+        res
+          .status(registryErrorStatus(listed.error.kind))
+          .json({ error: listed.error.detail, kind: listed.error.kind });
         return;
       }
-      const skill = listed.value.find((item) => item.id === skillId);
+      const skill = listed.value.find(item => item.id === skillId);
       if (!skill) {
         res.status(404).json({ error: "skill not found" });
         return;
       }
       if (!["uploaded", "generated"].includes(skill.source.kind)) {
-        res.status(400).json({ error: "only uploaded or generated skills can be submitted" });
+        res
+          .status(400)
+          .json({
+            error: "only uploaded or generated skills can be submitted",
+          });
         return;
       }
       if (!skill.source.sourcePath || !existsSync(skill.source.sourcePath)) {
@@ -838,7 +1080,9 @@ export function registerSkillRoutes(app: express.Express) {
       res.json({ ok: true, marketItemId, status: "pending" });
     } catch (e: any) {
       console.error("[skill-market submit] failed", e);
-      res.status(500).json({ error: String(e?.message || "submit skill to market failed") });
+      res
+        .status(500)
+        .json({ error: String(e?.message || "submit skill to market failed") });
     }
   });
 
@@ -857,7 +1101,9 @@ export function registerSkillRoutes(app: express.Express) {
         const raw = String(readFileSync(idxPath, "utf-8") || "[]").trim();
         if (raw) rows = JSON.parse(raw);
       }
-      rows = (Array.isArray(rows) ? rows : []).filter((x: any) => String(x?.adoptId||"") === adoptId);
+      rows = (Array.isArray(rows) ? rows : []).filter(
+        (x: any) => String(x?.adoptId || "") === adoptId
+      );
       res.json({ items: rows });
     } catch (e) {
       console.error("[skill-package mine] failed", e);
@@ -883,15 +1129,19 @@ export function registerSkillRoutes(app: express.Express) {
       let rows: any[] = [];
       if (existsSync(idxPath)) {
         const raw = String(readFileSync(idxPath, "utf-8") || "[]");
-        try { rows = JSON.parse(raw); } catch { rows = []; }
+        try {
+          rows = JSON.parse(raw);
+        } catch {
+          rows = [];
+        }
       }
 
-      const found = rows.find((x: any) =>
-        String(x?.adoptId || "") === adoptId && (
-          (filename && String(x?.filename || "") === filename) ||
-          (skillId && String(x?.installedSkillId || "") === skillId) ||
-          (sha256 && String(x?.sha256 || "") === sha256)
-        )
+      const found = rows.find(
+        (x: any) =>
+          String(x?.adoptId || "") === adoptId &&
+          ((filename && String(x?.filename || "") === filename) ||
+            (skillId && String(x?.installedSkillId || "") === skillId) ||
+            (sha256 && String(x?.sha256 || "") === sha256))
       );
 
       if (!found) {
@@ -914,7 +1164,9 @@ export function registerSkillRoutes(app: express.Express) {
           // runtimeAgentId 优先：与 chat-stream / install 保持一致
           const trialAgentId = `trial_${adoptId}`;
           const trialAgentDir = openClawAgentDir(trialAgentId);
-          const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : claw.agentId;
+          const runtimeAgentId = existsSync(trialAgentDir)
+            ? trialAgentId
+            : claw.agentId;
           const skillsBase = `${resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId)}/skills`;
 
           // 1) 精确匹配
@@ -925,7 +1177,9 @@ export function registerSkillRoutes(app: express.Express) {
             // 2) fallback：查找包含 installedSkillId 关键词的子目录（防止命名漂移）
             try {
               const { readdirSync } = await import("fs");
-              const candidates = readdirSync(skillsBase).filter(d => d.includes(sid) || sid.includes(d));
+              const candidates = readdirSync(skillsBase).filter(
+                d => d.includes(sid) || sid.includes(d)
+              );
               for (const c of candidates) {
                 const cDir = `${skillsBase}/${c}`;
                 rmSync(cDir, { recursive: true, force: true });
@@ -939,8 +1193,11 @@ export function registerSkillRoutes(app: express.Express) {
       if (sid) {
         const trialAgentIdD = `trial_${adoptId}`;
         const trialAgentDirD = openClawAgentDir(trialAgentIdD);
-        const runtimeAgentIdD = existsSync(trialAgentDirD) ? trialAgentIdD : String(claw?.agentId || "");
-        if (runtimeAgentIdD) clearAgentSessionsCache(runtimeAgentIdD, OPENCLAW_BASE_HOME);
+        const runtimeAgentIdD = existsSync(trialAgentDirD)
+          ? trialAgentIdD
+          : String(claw?.agentId || "");
+        if (runtimeAgentIdD)
+          clearAgentSessionsCache(runtimeAgentIdD, OPENCLAW_BASE_HOME);
       }
       bumpSessionEpoch(adoptId);
       res.json({ ok: true });
@@ -981,9 +1238,17 @@ export function registerSkillRoutes(app: express.Express) {
       let rows: any[] = [];
       if (existsSync(idxPath)) {
         const raw = String(readFileSync(idxPath, "utf-8") || "[]");
-        try { rows = JSON.parse(raw); } catch { rows = []; }
+        try {
+          rows = JSON.parse(raw);
+        } catch {
+          rows = [];
+        }
       }
-      const found = rows.find((x: any) => String(x?.adoptId||"")===adoptId && String(x?.filename||"")===filename);
+      const found = rows.find(
+        (x: any) =>
+          String(x?.adoptId || "") === adoptId &&
+          String(x?.filename || "") === filename
+      );
       if (!found) {
         res.status(404).json({ error: "package not found" });
         return;
@@ -994,11 +1259,12 @@ export function registerSkillRoutes(app: express.Express) {
         return;
       }
 
-
       // runtimeAgentId: prefer trial_{adoptId} if it exists, else fall back to db agentId
       const trialAgentIdInst = `trial_${adoptId}`;
       const trialAgentDirInst = openClawAgentDir(trialAgentIdInst);
-      const runtimeAgentId = existsSync(trialAgentDirInst) ? trialAgentIdInst : String(claw.agentId || "");
+      const runtimeAgentId = existsSync(trialAgentDirInst)
+        ? trialAgentIdInst
+        : String(claw.agentId || "");
 
       // skillId = zip 包内顶层目录名（原样，不做二次加工）
       // fallback：文件名去掉时间戳前缀和 .zip
@@ -1020,11 +1286,17 @@ with zipfile.ZipFile(${JSON.stringify(zipPath)}, 'r') as z:
       writeFileSync(pyProbePath, py_probe, "utf-8");
       let probeRaw = "";
       try {
-        probeRaw = execSync(`python3 ${pyProbePath}`, { encoding: "utf-8", timeout: 5000 });
+        probeRaw = execSync(`python3 ${pyProbePath}`, {
+          encoding: "utf-8",
+          timeout: 5000,
+        });
       } finally {
-        try { rmSync(pyProbePath, { force: true }); } catch {}
+        try {
+          rmSync(pyProbePath, { force: true });
+        } catch {}
       }
-      const skillId: string = JSON.parse(probeRaw.trim())?.skillId || "uploaded-skill";
+      const skillId: string =
+        JSON.parse(probeRaw.trim())?.skillId || "uploaded-skill";
 
       const skillDir = `${resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId)}/skills/${skillId}`;
 
@@ -1055,17 +1327,32 @@ print(json.dumps({'ok':True}))`;
       const pyInstallPath = `/tmp/claw_install_${Date.now()}.py`;
       writeFileSync(pyInstallPath, py, "utf-8");
       try {
-        execSync(`python3 ${pyInstallPath}`, { encoding: "utf-8", timeout: 12000 });
+        execSync(`python3 ${pyInstallPath}`, {
+          encoding: "utf-8",
+          timeout: 12000,
+        });
       } finally {
-        try { rmSync(pyInstallPath, { force: true }); } catch {}
+        try {
+          rmSync(pyInstallPath, { force: true });
+        } catch {}
       }
 
       // 确保 SKILL.md 存在（zip 里已有则已解压；兜底写一个轻量版）
       const skillMdPath = `${skillDir}/SKILL.md`;
       if (!existsSync(skillMdPath)) {
-        const title = String(found?.displayName || found?.manifest?.name || skillId).trim();
-        let desc = String(found?.displayDescription || found?.manifest?.description || "uploaded skill").replace(/\s+/g, " ").trim().slice(0, 180);
-        writeFileSync(skillMdPath,
+        const title = String(
+          found?.displayName || found?.manifest?.name || skillId
+        ).trim();
+        let desc = String(
+          found?.displayDescription ||
+            found?.manifest?.description ||
+            "uploaded skill"
+        )
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 180);
+        writeFileSync(
+          skillMdPath,
           `---\nname: ${skillId}\ndescription: "${desc.replace(/"/g, "'")}"\n---\n\n# ${title}\n\n${desc}\n`,
           "utf-8"
         );
@@ -1073,8 +1360,15 @@ print(json.dumps({'ok':True}))`;
 
       // 更新索引记录
       rows = rows.map((r: any) => {
-        if (String(r?.adoptId||"")===adoptId && String(r?.filename||"")===filename) {
-          return { ...r, installedSkillId: skillId, installedAt: new Date().toISOString() };
+        if (
+          String(r?.adoptId || "") === adoptId &&
+          String(r?.filename || "") === filename
+        ) {
+          return {
+            ...r,
+            installedSkillId: skillId,
+            installedAt: new Date().toISOString(),
+          };
         }
         return r;
       });
@@ -1110,9 +1404,17 @@ print(json.dumps({'ok':True}))`;
       let idx: any[] = [];
       if (existsSync(idxPath)) {
         const raw = String(readFileSync(idxPath, "utf-8") || "[]");
-        try { idx = JSON.parse(raw); } catch { idx = []; }
+        try {
+          idx = JSON.parse(raw);
+        } catch {
+          idx = [];
+        }
       }
-      const found = idx.find((x: any) => String(x?.adoptId||"")===adoptId && String(x?.filename||"")===filename);
+      const found = idx.find(
+        (x: any) =>
+          String(x?.adoptId || "") === adoptId &&
+          String(x?.filename || "") === filename
+      );
       if (!found) {
         res.status(404).json({ error: "package not found" });
         return;
@@ -1122,10 +1424,14 @@ print(json.dumps({'ok':True}))`;
       let rows: any[] = [];
       if (existsSync(regPath)) {
         const raw = String(readFileSync(regPath, "utf-8") || "[]");
-        try { rows = JSON.parse(raw); } catch { rows = []; }
+        try {
+          rows = JSON.parse(raw);
+        } catch {
+          rows = [];
+        }
       }
 
-      const id = `shared-${found.sha256?.slice(0,10) || Date.now()}`;
+      const id = `shared-${found.sha256?.slice(0, 10) || Date.now()}`;
       const row = {
         id,
         title: title || filename,
@@ -1140,7 +1446,7 @@ print(json.dumps({'ok':True}))`;
       rows = rows.filter((r: any) => r.id !== id);
       rows.push(row);
       mkdirSync(`${APP_ROOT}/data`, { recursive: true });
-      writeFileSync(regPath, JSON.stringify(rows, null, 2), 'utf-8');
+      writeFileSync(regPath, JSON.stringify(rows, null, 2), "utf-8");
 
       res.json({ ok: true, item: row });
     } catch (e) {
@@ -1166,9 +1472,15 @@ print(json.dumps({'ok':True}))`;
       const regPath = `${APP_ROOT}/data/shared-skill-registry.json`;
       let registry: any[] = [];
       if (existsSync(regPath)) {
-        try { registry = JSON.parse(String(readFileSync(regPath, "utf-8") || "[]")); } catch { registry = []; }
+        try {
+          registry = JSON.parse(String(readFileSync(regPath, "utf-8") || "[]"));
+        } catch {
+          registry = [];
+        }
       }
-      const marketItem = registry.find((r: any) => String(r?.id || "") === marketItemId);
+      const marketItem = registry.find(
+        (r: any) => String(r?.id || "") === marketItemId
+      );
       if (!marketItem) {
         res.status(404).json({ error: "market item not found" });
         return;
@@ -1178,11 +1490,16 @@ print(json.dumps({'ok':True}))`;
       const idxPath = `${APP_ROOT}/data/skill-packages/index.json`;
       let allPkgs: any[] = [];
       if (existsSync(idxPath)) {
-        try { allPkgs = JSON.parse(String(readFileSync(idxPath, "utf-8") || "[]")); } catch { allPkgs = []; }
+        try {
+          allPkgs = JSON.parse(String(readFileSync(idxPath, "utf-8") || "[]"));
+        } catch {
+          allPkgs = [];
+        }
       }
-      const srcPkg = allPkgs.find((x: any) =>
-        String(x?.adoptId || "") === String(marketItem.fromAdoptId || "") &&
-        String(x?.filename || "") === String(marketItem.filename || "")
+      const srcPkg = allPkgs.find(
+        (x: any) =>
+          String(x?.adoptId || "") === String(marketItem.fromAdoptId || "") &&
+          String(x?.filename || "") === String(marketItem.filename || "")
       );
       if (!srcPkg || !srcPkg.path || !existsSync(srcPkg.path)) {
         res.status(404).json({ error: "source package file not found" });
@@ -1200,7 +1517,9 @@ print(json.dumps({'ok':True}))`;
       // 4. probe skillId + unzip to workspace (same as install API)
       const trialAgentId = `trial_${adoptId}`;
       const trialAgentDir = openClawAgentDir(trialAgentId);
-      const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : String(claw.agentId || "");
+      const runtimeAgentId = existsSync(trialAgentDir)
+        ? trialAgentId
+        : String(claw.agentId || "");
 
       const pyProbe = `import zipfile, json, re
 with zipfile.ZipFile(${JSON.stringify(dstZipPath)}, 'r') as z:
@@ -1217,11 +1536,17 @@ with zipfile.ZipFile(${JSON.stringify(dstZipPath)}, 'r') as z:
       writeFileSync(pyProbePath, pyProbe, "utf-8");
       let probeRaw = "";
       try {
-        probeRaw = execSync(`python3 ${pyProbePath}`, { encoding: "utf-8", timeout: 5000 });
+        probeRaw = execSync(`python3 ${pyProbePath}`, {
+          encoding: "utf-8",
+          timeout: 5000,
+        });
       } finally {
-        try { rmSync(pyProbePath, { force: true }); } catch {}
+        try {
+          rmSync(pyProbePath, { force: true });
+        } catch {}
       }
-      const skillId: string = JSON.parse(probeRaw.trim())?.skillId || "market-skill";
+      const skillId: string =
+        JSON.parse(probeRaw.trim())?.skillId || "market-skill";
 
       const skillDir = `${resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId)}/skills/${skillId}`;
       const pyInstall = `import zipfile, os, json
@@ -1251,17 +1576,26 @@ print(json.dumps({'ok':True}))`;
       const pyInstallPath = `/tmp/claw_mkt_install_${Date.now()}.py`;
       writeFileSync(pyInstallPath, pyInstall, "utf-8");
       try {
-        execSync(`python3 ${pyInstallPath}`, { encoding: "utf-8", timeout: 12000 });
+        execSync(`python3 ${pyInstallPath}`, {
+          encoding: "utf-8",
+          timeout: 12000,
+        });
       } finally {
-        try { rmSync(pyInstallPath, { force: true }); } catch {}
+        try {
+          rmSync(pyInstallPath, { force: true });
+        } catch {}
       }
 
       // ensure SKILL.md exists
       const skillMdPath = `${skillDir}/SKILL.md`;
       if (!existsSync(skillMdPath)) {
         const title = String(marketItem.title || skillId).trim();
-        const desc = String(marketItem.description || "from skill market").replace(/\s+/g, " ").trim().slice(0, 180);
-        writeFileSync(skillMdPath,
+        const desc = String(marketItem.description || "from skill market")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 180);
+        writeFileSync(
+          skillMdPath,
           `---\nname: ${skillId}\ndescription: "${desc.replace(/"/g, "'")}"\n---\n\n# ${title}\n\n${desc}\n`,
           "utf-8"
         );
@@ -1277,7 +1611,8 @@ print(json.dumps({'ok':True}))`;
         manifest: srcPkg.manifest || {},
         mdMeta: srcPkg.mdMeta || {},
         displayName: marketItem.title || srcPkg.displayName || srcFilename,
-        displayDescription: marketItem.description || srcPkg.displayDescription || "",
+        displayDescription:
+          marketItem.description || srcPkg.displayDescription || "",
         createdAt: new Date().toISOString(),
         installedSkillId: skillId,
         installedAt: new Date().toISOString(),
