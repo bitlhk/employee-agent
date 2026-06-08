@@ -1815,9 +1815,8 @@ export function registerDesktopRoutes(app: express.Express) {
         const childAbs = path.join(absPath, name);
         const childRel = relPath ? `${relPath}/${name}` : name;
         let st;
-        // lstatSync — don't follow symlinks during listing
         try { st = statSync(childAbs, { bigint: false }); } catch { continue; }
-        // If it's a symlink target that escapes workspace, skip it
+        // Skip symlinks that escape workspace
         try {
           const real = realpathSync(childAbs);
           if (real !== realWs && !real.startsWith(realWs + path.sep)) continue;
@@ -1852,7 +1851,6 @@ export function registerDesktopRoutes(app: express.Express) {
       const claw = await getClawByAdoptId(adoptId);
       if (!claw) return res.status(404).json({ error: "agent not found" });
       const workspace = resolveClawWorkspace(claw);
-      // desktopFilesSafeExisting resolves symlinks and verifies containment
       const abs = desktopFilesSafeExisting(workspace, relPath);
       if (!abs) return res.status(404).json({ error: "file not found" });
       const st = statSync(abs);
