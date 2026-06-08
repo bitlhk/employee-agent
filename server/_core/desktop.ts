@@ -1,4 +1,5 @@
 import express from "express";
+import QRCode from "qrcode";
 import http from "http";
 import type { IncomingMessage, Server } from "http";
 import bcrypt from "bcryptjs";
@@ -159,6 +160,14 @@ function desktopToken(): string {
     process.env.INTERNAL_API_KEY ||
     "desktop-mvp-token"
   );
+}
+
+async function toQrDataUrl(data: string): Promise<string> {
+  try {
+    return await QRCode.toDataURL(data, { width: 200, margin: 1 });
+  } catch {
+    return "";
+  }
 }
 
 function defaultDesktopAgentId(): string {
@@ -1324,7 +1333,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const result = await desktopStartWeixinBind(defaultDesktopAdoptId());
       if (!result.ok) return res.status(502).json({ error: result.error });
-      res.json({ qrCode: result.qrCode, pollToken: result.pollToken });
+      const qrDataUrl = await toQrDataUrl(result.qrCode);
+      res.json({ qrCode: result.qrCode, pollToken: result.pollToken, qrDataUrl });
     } catch (error) {
       res.status(500).json({ error: error instanceof Error ? error.message : "weixin begin failed" });
     }
@@ -1352,7 +1362,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const result = await startFeishuBindFlow();
       if (!result.ok) return res.status(502).json({ error: result.error.detail });
-      res.json(result.value);
+      const qrDataUrl = await toQrDataUrl(result.value.qrCode);
+      res.json({ ...result.value, qrDataUrl });
     } catch (error) {
       res.status(500).json({ error: error instanceof Error ? error.message : "feishu begin failed" });
     }
