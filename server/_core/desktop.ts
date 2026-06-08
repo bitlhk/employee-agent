@@ -31,6 +31,8 @@ import {
 import { normalizeWsEvent } from "./runtime";
 import { buildRuntimeUserMessage } from "./tool_schema";
 import { listMcpToolGroups } from "./claw-skills";
+import { getFeishuStatus } from "./claw-feishu";
+import { getWeixinStatus } from "./claw-weixin";
 import { skillRegistry } from "./skills/skill-registry";
 import { parseSkillSourceDirectory } from "./skills/skill-source";
 import type { SkillSource } from "../../shared/types/skill";
@@ -77,6 +79,13 @@ type DesktopModelItem = {
   name: string;
   desc?: string;
   isDefault?: boolean;
+};
+
+type DesktopChannelStatus = {
+  key: string;
+  status: "connected" | "not_connected" | "not_configured" | "unsupported";
+  label?: string;
+  detail?: string;
 };
 
 const ED25519_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -147,6 +156,47 @@ function defaultDesktopAgentId(): string {
 
 function defaultDesktopAdoptId(): string {
   return defaultDesktopAgentId().replace(/^trial_/, "");
+}
+
+function listDesktopChannels(): { channels: DesktopChannelStatus[] } {
+  const adoptId = defaultDesktopAdoptId();
+  const weixin = getWeixinStatus(adoptId);
+  const feishu = getFeishuStatus(adoptId);
+
+  return {
+    channels: [
+      {
+        key: "weixin",
+        status: weixin.bound ? "connected" : "not_connected",
+        label: "微信",
+        detail: weixin.targetLabel || weixin.userId || weixin.accountId || "",
+      },
+      {
+        key: "feishu",
+        status: feishu.bound ? "connected" : "not_connected",
+        label: feishu.domain === "lark" ? "Lark" : "飞书",
+        detail: feishu.targetLabel || "",
+      },
+      {
+        key: "wecom",
+        status: "unsupported",
+        label: "企业微信",
+        detail: "桌面端暂未接入",
+      },
+      {
+        key: "dingtalk",
+        status: "unsupported",
+        label: "钉钉",
+        detail: "桌面端暂未接入",
+      },
+      {
+        key: "qqbot",
+        status: "unsupported",
+        label: "QQ Bot",
+        detail: "桌面端暂未接入",
+      },
+    ],
+  };
 }
 
 function bearerToken(req: express.Request): string {
@@ -1238,6 +1288,21 @@ export function registerDesktopRoutes(app: express.Express) {
           error instanceof Error
             ? error.message
             : "Desktop capabilities failed",
+      });
+    }
+  });
+
+  app.get("/api/desktop/channels", async (req, res) => {
+    const user = await requireDesktopUser(req, res);
+    if (!user) return;
+    try {
+      res.json(listDesktopChannels());
+    } catch (error) {
+      res.status(500).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Desktop channel status failed",
       });
     }
   });
