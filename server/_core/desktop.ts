@@ -28,6 +28,7 @@ import {
   bumpSessionEpoch,
   INTERNAL_BASE_URL,
   openClawAgentDir,
+  resolveClawWorkspace,
   resolveRuntimeAgentId,
   resolveRuntimeWorkspaceByIds,
 } from "./helpers";
@@ -1137,6 +1138,30 @@ export function registerDesktopWSProxy(server: Server) {
   console.log("[DESKTOP-WS] registered at /api/desktop/openclaw/ws");
 }
 
+// ── Desktop Memory ───────────────────────────────────────────────────────────
+
+const DESKTOP_ENTRY_DELIMITER = "\n§\n";
+const DESKTOP_MEMORY_CHAR_LIMIT = 2200;
+const DESKTOP_USER_CHAR_LIMIT = 1375;
+
+function desktopReadFile(p: string): { content: string; exists: boolean; lastModified: number | null } {
+  if (!existsSync(p)) return { content: "", exists: false, lastModified: null };
+  try {
+    const content = readFileSync(p, "utf8");
+    const stat = statSync(p);
+    return { content, exists: true, lastModified: Math.floor(stat.mtimeMs / 1000) };
+  } catch { return { content: "", exists: false, lastModified: null }; }
+}
+function desktopParseEntries(content: string): { index: number; content: string }[] {
+  if (!content.trim()) return [];
+  return content.split(DESKTOP_ENTRY_DELIMITER)
+    .map((e, i) => ({ index: i, content: e.trim() }))
+    .filter(e => e.content.length > 0);
+}
+function desktopSerializeEntries(entries: { index: number; content: string }[]): string {
+  return entries.map(e => e.content).join(DESKTOP_ENTRY_DELIMITER);
+}
+
 // ── Desktop Cron ────────────────────────────────────────────────────────────
 
 const desktopCronProvider = new OpenClawCronProvider();
@@ -1497,6 +1522,101 @@ export function registerDesktopRoutes(app: express.Express) {
   );
 
   app.post("/api/desktop/openclaw/v1/chat/completions", forwardOpenClawChat);
+
+  // ── Memory management for enterprise desktop mode ────────────────────────
+
+  app.get("/api/desktop/memory/read", async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      const memFile = desktopReadFile(`${workspace}/MEMORY.md`);
+      const userFile = desktopReadFile(`${workspace}/USER.md`);
+      res.json({
+        memory: { ...memFile, entries: desktopParseEntries(memFile.content), charCount: memFile.content.length, charLimit: DESKTOP_MEMORY_CHAR_LIMIT },
+        user: { ...userFile, charCount: userFile.content.length, charLimit: DESKTOP_USER_CHAR_LIMIT },
+        stats: { totalSessions: 0, totalMessages: 0 },
+      });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/memory/entry/add", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const content = String(req.body?.content || "").trim();
+      if (!content) return res.status(400).json({ error: "content required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      const memPath = `${workspace}/MEMORY.md`;
+      const existing = desktopReadFile(memPath);
+      const entries = desktopParseEntries(existing.content);
+      const newContent = desktopSerializeEntries([...entries, { index: entries.length, content }]);
+      if (newContent.length > DESKTOP_MEMORY_CHAR_LIMIT) return res.status(400).json({ error: `超出记忆上限 (${newContent.length}/${DESKTOP_MEMORY_CHAR_LIMIT} 字符)` });
+      mkdirSync(workspace, { recursive: true });
+      writeFileSync(memPath, newContent, "utf8");
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/memory/entry/update", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const index = Number(req.body?.index ?? -1);
+      const content = String(req.body?.content || "").trim();
+      if (index < 0 || !content) return res.status(400).json({ error: "index and content required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      const memPath = `${workspace}/MEMORY.md`;
+      const existing = desktopReadFile(memPath);
+      const entries = desktopParseEntries(existing.content);
+      if (index >= entries.length) return res.status(400).json({ error: "entry not found" });
+      entries[index] = { ...entries[index], content };
+      const newContent = desktopSerializeEntries(entries);
+      if (newContent.length > DESKTOP_MEMORY_CHAR_LIMIT) return res.status(400).json({ error: "超出记忆上限" });
+      writeFileSync(memPath, newContent, "utf8");
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/memory/entry/remove", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const index = Number(req.body?.index ?? -1);
+      if (index < 0) return res.status(400).json({ error: "index required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      const memPath = `${workspace}/MEMORY.md`;
+      const existing = desktopReadFile(memPath);
+      const entries = desktopParseEntries(existing.content);
+      if (index >= entries.length) return res.status(400).json({ error: "entry not found" });
+      entries.splice(index, 1);
+      writeFileSync(memPath, desktopSerializeEntries(entries), "utf8");
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/memory/profile", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const content = String(req.body?.content || "");
+      if (content.length > DESKTOP_USER_CHAR_LIMIT) return res.status(400).json({ error: `超出上限 (${content.length}/${DESKTOP_USER_CHAR_LIMIT} 字符)` });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      mkdirSync(workspace, { recursive: true });
+      writeFileSync(`${workspace}/USER.md`, content, "utf8");
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
 
   // ── Cron management for enterprise desktop mode ──────────────────────────
 
