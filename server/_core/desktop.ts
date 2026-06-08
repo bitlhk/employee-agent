@@ -12,6 +12,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from "fs";
@@ -1758,7 +1759,8 @@ export function registerDesktopRoutes(app: express.Express) {
     "html","htm","css","zip","tar","gz","mp3","wav","m4a","aac","webm","ogg","mp4",
   ]);
 
-  function desktopFilesSafeJoin(workspace: string, relPath: string): string | null {
+  // Lexical pre-check — fast rejection of obvious traversal attempts.
+  function desktopFilesLexCheck(workspace: string, relPath: string): string | null {
     if (!relPath) return workspace;
     if (relPath.startsWith("/") || relPath.includes("\0") || relPath.includes("..")) return null;
     const abs = path.normalize(path.join(workspace, relPath));
@@ -1766,11 +1768,43 @@ export function registerDesktopRoutes(app: express.Express) {
     return abs;
   }
 
+  // For read/list/download: resolve symlinks and verify the real path is inside workspace.
+  function desktopFilesSafeExisting(workspace: string, relPath: string): string | null {
+    const lexAbs = desktopFilesLexCheck(workspace, relPath);
+    if (!lexAbs) return null;
+    try {
+      const real = realpathSync(lexAbs);
+      const realWs = realpathSync(workspace);
+      if (real !== realWs && !real.startsWith(realWs + path.sep)) return null;
+      return real;
+    } catch {
+      return null;
+    }
+  }
+
+  // For upload: file may not exist yet — resolve the parent dir after mkdirSync,
+  // verify it's inside workspace, then return the final write path.
+  function desktopFilesSafeUpload(workspace: string, targetRel: string): string | null {
+    const lexAbs = desktopFilesLexCheck(workspace, targetRel);
+    if (!lexAbs) return null;
+    try {
+      const realWs = realpathSync(workspace);
+      const parentAbs = path.dirname(lexAbs);
+      mkdirSync(parentAbs, { recursive: true });
+      const realParent = realpathSync(parentAbs);
+      if (realParent !== realWs && !realParent.startsWith(realWs + path.sep)) return null;
+      return path.join(realParent, path.basename(lexAbs));
+    } catch {
+      return null;
+    }
+  }
+
   function desktopFilesListDir(workspace: string, subPath = ""): { name: string; path: string; type: "file" | "directory"; size?: number; modifiedAt: string }[] {
     if (!existsSync(workspace)) return [];
-    const startAbs = desktopFilesSafeJoin(workspace, subPath);
-    if (!startAbs) return [];
+    // Use lexical check for list root — walk verifies each child via statSync (no symlink follow)
+    const startAbs = desktopFilesLexCheck(workspace, subPath) ?? workspace;
     const out: { name: string; path: string; type: "file" | "directory"; size?: number; modifiedAt: string }[] = [];
+    const realWs = (() => { try { return realpathSync(workspace); } catch { return workspace; } })();
     function walk(absPath: string, relPath: string, depth: number) {
       if (depth > DESKTOP_FILES_MAX_LIST_DEPTH || out.length >= DESKTOP_FILES_MAX_ENTRIES) return;
       let entries: string[];
@@ -1781,7 +1815,13 @@ export function registerDesktopRoutes(app: express.Express) {
         const childAbs = path.join(absPath, name);
         const childRel = relPath ? `${relPath}/${name}` : name;
         let st;
-        try { st = statSync(childAbs); } catch { continue; }
+        // lstatSync — don't follow symlinks during listing
+        try { st = statSync(childAbs, { bigint: false }); } catch { continue; }
+        // If it's a symlink target that escapes workspace, skip it
+        try {
+          const real = realpathSync(childAbs);
+          if (real !== realWs && !real.startsWith(realWs + path.sep)) continue;
+        } catch { continue; }
         out.push({ name, path: childRel, type: st.isDirectory() ? "directory" : "file", size: st.isDirectory() ? undefined : Number(st.size), modifiedAt: st.mtime.toISOString() });
         if (st.isDirectory()) walk(childAbs, childRel, depth + 1);
       }
@@ -1812,8 +1852,9 @@ export function registerDesktopRoutes(app: express.Express) {
       const claw = await getClawByAdoptId(adoptId);
       if (!claw) return res.status(404).json({ error: "agent not found" });
       const workspace = resolveClawWorkspace(claw);
-      const abs = desktopFilesSafeJoin(workspace, relPath);
-      if (!abs || !existsSync(abs)) return res.status(404).json({ error: "file not found" });
+      // desktopFilesSafeExisting resolves symlinks and verifies containment
+      const abs = desktopFilesSafeExisting(workspace, relPath);
+      if (!abs) return res.status(404).json({ error: "file not found" });
       const st = statSync(abs);
       if (!st.isFile()) return res.status(400).json({ error: "not a file" });
       if (st.size > DESKTOP_FILES_MAX_READ_BYTES) return res.status(413).json({ error: "file too large to preview" });
@@ -1831,8 +1872,8 @@ export function registerDesktopRoutes(app: express.Express) {
       const claw = await getClawByAdoptId(adoptId);
       if (!claw) return res.status(404).json({ error: "agent not found" });
       const workspace = resolveClawWorkspace(claw);
-      const abs = desktopFilesSafeJoin(workspace, relPath);
-      if (!abs || !existsSync(abs) || !statSync(abs).isFile()) return res.status(404).json({ error: "file not found" });
+      const abs = desktopFilesSafeExisting(workspace, relPath);
+      if (!abs || !statSync(abs).isFile()) return res.status(404).json({ error: "file not found" });
       const filename = path.basename(abs);
       res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
       res.setHeader("Content-Type", "application/octet-stream");
@@ -1850,6 +1891,8 @@ export function registerDesktopRoutes(app: express.Express) {
       if (!filenameRaw || !contentBase64) return res.status(400).json({ error: "filename and contentBase64 required" });
       const filename = filenameRaw.replace(/[\\/:*?"<>|]/g, "_").replace(/\.\.+/g, "_").replace(/^\.+/, "_").slice(0, 200);
       if (!filename) return res.status(400).json({ error: "invalid filename" });
+      // Block protected system files unconditionally — use dedicated endpoints for soul/memory
+      if (!subPath && DESKTOP_FILES_PROTECTED.has(filename)) return res.status(403).json({ error: "protected_file" });
       const ext = filename.includes(".") ? filename.slice(filename.lastIndexOf(".") + 1).toLowerCase() : "";
       if (!DESKTOP_FILES_ALLOWED_EXT.has(ext)) return res.status(400).json({ error: `file type .${ext} not allowed` });
       let buf: Buffer;
@@ -1860,9 +1903,11 @@ export function registerDesktopRoutes(app: express.Express) {
       if (!claw) return res.status(404).json({ error: "agent not found" });
       const workspace = resolveClawWorkspace(claw);
       const targetRel = subPath ? `${subPath}/${filename}` : filename;
-      const abs = desktopFilesSafeJoin(workspace, targetRel);
+      // desktopFilesSafeUpload creates parent dirs and verifies via realpathSync
+      const abs = desktopFilesSafeUpload(workspace, targetRel);
       if (!abs) return res.status(400).json({ error: "path_not_allowed" });
-      mkdirSync(path.dirname(abs), { recursive: true });
+      // Final protected-file check on the resolved basename (covers subPath tricks)
+      if (DESKTOP_FILES_PROTECTED.has(path.basename(abs))) return res.status(403).json({ error: "protected_file" });
       writeFileSync(abs, buf);
       res.json({ ok: true, path: targetRel, size: buf.length });
     } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
