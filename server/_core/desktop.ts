@@ -1523,6 +1523,34 @@ export function registerDesktopRoutes(app: express.Express) {
 
   app.post("/api/desktop/openclaw/v1/chat/completions", forwardOpenClawChat);
 
+  // ── Soul management for enterprise desktop mode ──────────────────────────
+
+  app.get("/api/desktop/soul/read", async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      const soulFile = desktopReadFile(`${workspace}/SOUL.md`);
+      res.json({ content: soulFile.content, exists: soulFile.exists });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/soul/write", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const content = String(req.body?.content || "");
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const workspace = resolveClawWorkspace(claw);
+      mkdirSync(workspace, { recursive: true });
+      writeFileSync(`${workspace}/SOUL.md`, content, "utf8");
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
   // ── Memory management for enterprise desktop mode ────────────────────────
 
   app.get("/api/desktop/memory/read", async (req, res) => {
