@@ -28,8 +28,11 @@ import {
   bumpSessionEpoch,
   INTERNAL_BASE_URL,
   openClawAgentDir,
+  resolveRuntimeAgentId,
   resolveRuntimeWorkspaceByIds,
 } from "./helpers";
+import { OpenClawCronProvider } from "./cron/openclaw-cron-provider";
+import type { CronProviderHandle } from "@shared/types/cron";
 import { normalizeWsEvent } from "./runtime";
 import { buildRuntimeUserMessage } from "./tool_schema";
 import { listMcpToolGroups } from "./claw-skills";
@@ -1134,6 +1137,55 @@ export function registerDesktopWSProxy(server: Server) {
   console.log("[DESKTOP-WS] registered at /api/desktop/openclaw/ws");
 }
 
+// ── Desktop Cron ────────────────────────────────────────────────────────────
+
+const desktopCronProvider = new OpenClawCronProvider();
+
+function desktopCronHandle(claw: any): CronProviderHandle {
+  const adoptId = String(claw.adoptId || "");
+  return {
+    adoptId,
+    agentId: resolveRuntimeAgentId(adoptId, claw.agentId),
+    userId: Number(claw.userId || 0),
+    runtime: "openclaw",
+  };
+}
+
+function parseDesktopScheduleStr(s: string): { kind: "interval" | "cron" | "once"; intervalMinutes?: number; cronExpr?: string; display: string } {
+  const mMatch = s.trim().match(/^(\d+)m$/);
+  if (mMatch) { const m = Number(mMatch[1]); return { kind: "interval", intervalMinutes: m, display: `每 ${m} 分钟` }; }
+  const hMatch = s.trim().match(/^(\d+)h$/);
+  if (hMatch) { const h = Number(hMatch[1]); return { kind: "interval", intervalMinutes: h * 60, display: `每 ${h} 小时` }; }
+  return { kind: "cron", cronExpr: s.trim(), display: s.trim() };
+}
+
+function sharedJobToDesktopFmt(j: any): object {
+  const stateMap: Record<string, "active" | "paused" | "completed"> = {
+    scheduled: "active", running: "active", completed: "completed", paused: "paused", failed: "active",
+  };
+  const targets: any[] = j.delivery?.targets || [];
+  const channelToDeliver: Record<string, string> = { wechat: "weixin", feishu: "feishu", wecom: "wecom" };
+  const deliver = targets.map((t: any) => channelToDeliver[t.channelId] || t.channelId).filter(Boolean);
+  return {
+    id: j.id,
+    name: j.name,
+    schedule: j.schedule?.display || "",
+    prompt: j.prompt || "",
+    state: stateMap[j.state?.status || ""] || "active",
+    enabled: Boolean(j.enabled),
+    next_run_at: j.state?.nextRunAt || null,
+    last_run_at: j.state?.lastRunAt || null,
+    last_status: j.state?.lastStatus || null,
+    last_error: null,
+    repeat: null,
+    deliver: deliver.length > 0 ? deliver : [],
+    skills: Array.isArray(j.meta?.skills) ? j.meta.skills : [],
+    script: (j.meta?.script as string) || null,
+  };
+}
+
+// ── Desktop Cron Route Registration ─────────────────────────────────────────
+
 export function registerDesktopRoutes(app: express.Express) {
   app.post("/api/desktop/login", express.json(), async (req, res) => {
     try {
@@ -1445,4 +1497,100 @@ export function registerDesktopRoutes(app: express.Express) {
   );
 
   app.post("/api/desktop/openclaw/v1/chat/completions", forwardOpenClawChat);
+
+  // ── Cron management for enterprise desktop mode ──────────────────────────
+
+  app.get("/api/desktop/cron/list", async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const result = await desktopCronProvider.listJobs(desktopCronHandle(claw));
+      if (!result.ok) return res.status(500).json({ error: result.error.detail });
+      res.json({ jobs: result.value.map(sharedJobToDesktopFmt) });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/cron/add", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const { schedule: schedStr, prompt, name, deliver } = req.body || {};
+      const schedule = parseDesktopScheduleStr(String(schedStr || "30m"));
+      const deliverKey = String(deliver || "").toLowerCase();
+      const channelMap: Record<string, string> = { weixin: "wechat", feishu: "feishu", wecom: "wecom" };
+      const channelId = (channelMap[deliverKey] || "wechat") as any;
+      const channelLabel = channelId === "wechat" ? "微信" : channelId === "feishu" ? "飞书" : deliverKey;
+      const input: any = {
+        name: String(name || "定时任务").trim() || "定时任务",
+        prompt: String(prompt || ""),
+        schedule,
+        delivery: { targets: [{ channelId, channelLabel }] },
+        enabled: true,
+        meta: { sessionTarget: "isolated" },
+      };
+      const result = await desktopCronProvider.addJob(desktopCronHandle(claw), input);
+      if (!result.ok) return res.status(400).json({ error: result.error.detail });
+      res.json({ job: sharedJobToDesktopFmt(result.value) });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/cron/remove", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const id = String(req.body?.id || "").trim();
+      if (!id) return res.status(400).json({ error: "id required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const result = await desktopCronProvider.removeJob(desktopCronHandle(claw), id);
+      if (!result.ok) return res.status(500).json({ error: result.error.detail });
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/cron/pause", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const id = String(req.body?.id || "").trim();
+      if (!id) return res.status(400).json({ error: "id required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const result = await desktopCronProvider.updateJob(desktopCronHandle(claw), id, { enabled: false });
+      if (!result.ok) return res.status(500).json({ error: result.error.detail });
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/cron/resume", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const id = String(req.body?.id || "").trim();
+      if (!id) return res.status(400).json({ error: "id required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const result = await desktopCronProvider.updateJob(desktopCronHandle(claw), id, { enabled: true });
+      if (!result.ok) return res.status(500).json({ error: result.error.detail });
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.post("/api/desktop/cron/trigger", express.json(), async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const id = String(req.body?.id || "").trim();
+      if (!id) return res.status(400).json({ error: "id required" });
+      const adoptId = defaultDesktopAdoptId();
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const result = await desktopCronProvider.runJobNow(desktopCronHandle(claw), id);
+      if (!result.ok) return res.status(500).json({ error: result.error.detail });
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
 }
