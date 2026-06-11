@@ -330,7 +330,7 @@ export async function forwardToJiuwenClaw(
   const serviceId = buildServiceId();
   const agentId = buildAgentId(claw);
   const sessionId = buildSessionId(claw, agentId, opts);
-  const channelId = jiuwenChannelFromOption(opts.channel);
+  const channelId = claw.adoptId;
   const workspaceDir = resolveRuntimeWorkspace(claw, claw.adoptId);
   const startedAt = Date.now();
   const requestId = `linggan-jiuwen-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;

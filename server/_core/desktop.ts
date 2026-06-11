@@ -13,11 +13,13 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "fs";
 import {
   getClawByAdoptId,
+  getCurrentClawByUserId,
   getSkillMarketItem,
   getUserByEmail,
   getUserById,
@@ -184,8 +186,21 @@ function defaultDesktopAdoptId(): string {
   return defaultDesktopAgentId().replace(/^trial_/, "");
 }
 
-function listDesktopChannels(): { channels: DesktopChannelStatus[] } {
-  const adoptId = defaultDesktopAdoptId();
+// Returns the claw record assigned to the desktop user.
+// For numeric user IDs, queries the DB for the user's active adoption.
+// Falls back to the global default agent for the MVP token user.
+async function getDesktopUserClaw(user: DesktopUser) {
+  if (user.id === "desktop-mvp-user") {
+    return getClawByAdoptId(defaultDesktopAdoptId());
+  }
+  const uid = Number(user.id);
+  if (!Number.isNaN(uid) && uid > 0) {
+    return getCurrentClawByUserId(uid);
+  }
+  return null;
+}
+
+function listDesktopChannels(adoptId: string): { channels: DesktopChannelStatus[] } {
   const weixin = getWeixinStatus(adoptId);
   const feishu = getFeishuStatus(adoptId);
 
@@ -329,11 +344,9 @@ function readSkillItemFromDir(skillId: string, dir: string): DesktopSkillItem {
   };
 }
 
-function listDesktopInstalledSkills(): DesktopSkillItem[] {
-  const runtimeAgentId = defaultDesktopAgentId();
-  const adoptId = defaultDesktopAdoptId();
+function listDesktopInstalledSkills(adoptId: string, agentId: string): DesktopSkillItem[] {
   const skillsDir = path.join(
-    resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId),
+    resolveRuntimeWorkspaceByIds(adoptId, agentId),
     "skills"
   );
   if (!existsSync(skillsDir)) return [];
@@ -351,11 +364,9 @@ function listDesktopInstalledSkills(): DesktopSkillItem[] {
   return items.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
 }
 
-function readDesktopSkillContent(skillId: string): string {
-  const runtimeAgentId = defaultDesktopAgentId();
-  const adoptId = defaultDesktopAdoptId();
+function readDesktopSkillContent(skillId: string, adoptId: string, agentId: string): string {
   const skillsDir = path.join(
-    resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId),
+    resolveRuntimeWorkspaceByIds(adoptId, agentId),
     "skills"
   );
   const safeId = String(skillId || "").trim();
@@ -403,12 +414,11 @@ function writeDesktopModelOverride(adoptId: string, modelId: string): void {
   writeFileSync(overridesPath, JSON.stringify(raw, null, 2), "utf8");
 }
 
-function listDesktopModels(): {
+function listDesktopModels(adoptId: string): {
   selected: string;
   defaultModel: string;
   models: DesktopModelItem[];
 } {
-  const adoptId = defaultDesktopAdoptId();
   const models = getAvailableClawModelsFromConfig();
   const defaultModel =
     models.find(model => model.isDefault)?.id || models[0]?.id || "";
@@ -418,8 +428,8 @@ function listDesktopModels(): {
   return { selected, defaultModel, models };
 }
 
-async function listDesktopMarketSkills(): Promise<DesktopSkillItem[]> {
-  const installed = new Set(listDesktopInstalledSkills().map(item => item.id));
+async function listDesktopMarketSkills(adoptId: string, agentId: string): Promise<DesktopSkillItem[]> {
+  const installed = new Set(listDesktopInstalledSkills(adoptId, agentId).map(item => item.id));
   const rows = await listApprovedSkillMarketItems();
   return rows.map((row: any) => {
     const id = String(row.skillId || row.id || "").trim();
@@ -435,13 +445,12 @@ async function listDesktopMarketSkills(): Promise<DesktopSkillItem[]> {
   });
 }
 
-async function installDesktopMarketSkill(marketId: number): Promise<{
+async function installDesktopMarketSkill(marketId: number, adoptId: string, agentId: string): Promise<{
   ok: boolean;
   skillId: string;
   name: string;
 }> {
-  const adoptId = defaultDesktopAdoptId();
-  const runtimeAgentId = defaultDesktopAgentId();
+  const runtimeAgentId = agentId;
   const item = await getSkillMarketItem(marketId);
   if (!item || item.status !== "approved") {
     throw new Error("技能不存在或未上架");
@@ -570,8 +579,8 @@ function readDesktopSessionMessagesFromFile(
   return items;
 }
 
-function readDesktopSessions(limit = 50): DesktopSessionSummary[] {
-  const runtimeAgentId = defaultDesktopAgentId();
+function readDesktopSessions(agentId: string, limit = 50): DesktopSessionSummary[] {
+  const runtimeAgentId = agentId;
   const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
   const sessionsPath = path.join(sessionsDir, "sessions.json");
   if (!existsSync(sessionsPath)) return [];
@@ -629,11 +638,11 @@ function readDesktopSessions(limit = 50): DesktopSessionSummary[] {
   return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
 }
 
-function findDesktopSession(sessionIdOrKey: string): {
+function findDesktopSession(sessionIdOrKey: string, agentId: string): {
   summary: DesktopSessionSummary;
   sessionFile: string;
 } | null {
-  const runtimeAgentId = defaultDesktopAgentId();
+  const runtimeAgentId = agentId;
   const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
   const sessionsPath = path.join(sessionsDir, "sessions.json");
   if (!existsSync(sessionsPath)) return null;
@@ -650,7 +659,7 @@ function findDesktopSession(sessionIdOrKey: string): {
     if (wanted !== sessionKey && wanted !== parsed.id) continue;
     const sessionFile = safeSessionFile(sessionsDir, raw);
     if (!sessionFile) return null;
-    const summary = readDesktopSessions(500).find(
+    const summary = readDesktopSessions(agentId, 500).find(
       entry => entry.sessionKey === sessionKey
     );
     if (!summary) return null;
@@ -688,14 +697,23 @@ async function forwardOpenClawChat(
     return;
   }
 
+  const claw = await getDesktopUserClaw(user);
+  if (!claw) {
+    res.status(404).json({ error: "no agent assigned" });
+    return;
+  }
   const body = JSON.stringify(req.body || {});
+  const requestedAgentId = String(req.headers["x-openclaw-agent-id"] || "").trim();
+  if (requestedAgentId && requestedAgentId !== claw.agentId) {
+    res.status(403).json({ error: "agent_not_allowed" });
+    return;
+  }
   const runtimeAgentId =
-    String(req.headers["x-openclaw-agent-id"] || "").trim() ||
-    defaultDesktopAgentId();
+    requestedAgentId || claw.agentId;
   const sessionKey =
     String(req.headers["x-openclaw-session-key"] || "").trim() ||
     `agent:${runtimeAgentId}:main:desktop`;
-  const models = listDesktopModels();
+  const models = listDesktopModels(claw.adoptId);
   const allowedModelIds = new Set(models.models.map(model => model.id));
   const requestedModel = String(req.headers["x-openclaw-model"] || "").trim();
   const backendModel =
@@ -758,19 +776,25 @@ export function registerDesktopWSProxy(server: Server) {
         return;
       }
 
-      const requestedAgentId = String(url.searchParams.get("agentId") || "")
-        .trim();
-      const agentId = requestedAgentId || defaultDesktopAgentId();
-      if (!agentId) {
-        socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) {
+        socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
         socket.destroy();
         return;
       }
+      const requestedAgentId = String(url.searchParams.get("agentId") || "").trim();
+      if (requestedAgentId && requestedAgentId !== claw.agentId) {
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      const agentId = requestedAgentId || claw.agentId;
 
       wss.handleUpgrade(req, socket, head, ws => {
         wss.emit("connection", ws, req, {
           user,
           agentId,
+          adoptId: claw.adoptId,
           sessionKey: String(url.searchParams.get("sessionKey") || "").trim(),
         });
       });
@@ -786,7 +810,7 @@ export function registerDesktopWSProxy(server: Server) {
     (
       client: WebSocket,
       _req: IncomingMessage,
-      meta: { user: DesktopUser; agentId: string; sessionKey?: string }
+      meta: { user: DesktopUser; agentId: string; adoptId: string; sessionKey?: string }
     ) => {
       const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
       if (!gatewayToken) {
@@ -812,6 +836,9 @@ export function registerDesktopWSProxy(server: Server) {
         `agent:${meta.agentId}:main:desktop_${Date.now().toString(36)}`;
       let sawAssistantDelta = false;
       let lastChatSnapshotText = "";
+      // After a tool result, block chat.delta echoes (which contain tool output)
+      // until the next agent.assistant stream event arrives.
+      let blockChatDeltaUntilAgentStream = false;
 
       const sendToClient = (payload: object) => {
         if (client.readyState === WebSocket.OPEN) {
@@ -900,12 +927,17 @@ export function registerDesktopWSProxy(server: Server) {
           }
 
           if (msg.type === "res" && msg.ok === true && !ready) {
+            const selectedModel = listDesktopModels(meta.adoptId).selected || undefined;
             gw.send(
               JSON.stringify({
                 type: "req",
                 id: "desktop-init-session",
                 method: "sessions.create",
-                params: { agentId: meta.agentId, key: sessionKey },
+                params: {
+                  agentId: meta.agentId,
+                  key: sessionKey,
+                  ...(selectedModel ? { model: selectedModel } : {}),
+                },
               })
             );
             return;
@@ -950,15 +982,12 @@ export function registerDesktopWSProxy(server: Server) {
           for (const event of normalized.events) {
             switch (event.type) {
               case "delta":
-                if (
-                  rawEvent === "chat" &&
-                  rawState === "delta" &&
-                  sawAssistantDelta
-                ) {
-                  break;
+                if (rawEvent === "chat" && rawState === "delta") {
+                  if (sawAssistantDelta || blockChatDeltaUntilAgentStream) break;
                 }
                 if (rawEvent === "agent" && rawStream === "assistant") {
                   sawAssistantDelta = true;
+                  blockChatDeltaUntilAgentStream = false;
                 }
                 emitAssistantDelta(event.content);
                 break;
@@ -1008,6 +1037,12 @@ export function registerDesktopWSProxy(server: Server) {
                       (typeof event.result === "string" ? event.result : ""),
                     is_error: Boolean(event.isError),
                   });
+                  // Reset so the agent's post-tool response text isn't suppressed.
+                  // Block chat.delta until agent.assistant stream resumes — the
+                  // gateway echoes tool output via chat.delta right after a tool
+                  // result, and we must not let that leak into the main text body.
+                  sawAssistantDelta = false;
+                  blockChatDeltaUntilAgentStream = true;
                 }
                 break;
 
@@ -1106,6 +1141,7 @@ export function registerDesktopWSProxy(server: Server) {
 
           sawAssistantDelta = false;
           lastChatSnapshotText = "";
+          blockChatDeltaUntilAgentStream = false;
           commandOutputBuffers.clear();
           sendToClient({
             __status: "已连接 OpenClaw，正在处理请求",
@@ -1263,7 +1299,8 @@ export function registerDesktopRoutes(app: express.Express) {
     if (!user) return;
     const base = publicBaseUrl(req);
     const wsBase = publicWsBaseUrl(req);
-    const agentId = defaultDesktopAgentId();
+    const claw = await getDesktopUserClaw(user);
+    const agentId = claw?.agentId || defaultDesktopAgentId();
     res.json({
       mode: "mvp",
       user,
@@ -1293,7 +1330,9 @@ export function registerDesktopRoutes(app: express.Express) {
     const user = await requireDesktopUser(req, res);
     if (!user) return;
     try {
-      res.json(listDesktopModels());
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
+      res.json(listDesktopModels(claw.adoptId));
     } catch (error) {
       res.status(500).json({
         error: error instanceof Error ? error.message : "Desktop models failed",
@@ -1305,13 +1344,15 @@ export function registerDesktopRoutes(app: express.Express) {
     const user = await requireDesktopUser(req, res);
     if (!user) return;
     try {
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const modelId = String(req.body?.modelId || "").trim();
-      const models = listDesktopModels();
+      const models = listDesktopModels(claw.adoptId);
       if (!modelId || !models.models.some(model => model.id === modelId)) {
         res.status(400).json({ error: "Unsupported model" });
         return;
       }
-      writeDesktopModelOverride(defaultDesktopAdoptId(), modelId);
+      writeDesktopModelOverride(claw.adoptId, modelId);
       res.json({ ok: true, modelId });
     } catch (error) {
       res.status(500).json({
@@ -1331,7 +1372,9 @@ export function registerDesktopRoutes(app: express.Express) {
       200
     );
     const query = normalizeText(req.query.q).toLowerCase();
-    const sessions = readDesktopSessions(query ? 200 : limit);
+    const claw = await getDesktopUserClaw(user);
+    if (!claw) return res.status(404).json({ error: "no agent assigned" });
+    const sessions = readDesktopSessions(claw.agentId, query ? 200 : limit);
     const filtered = query
       ? sessions.filter(session =>
           `${session.title} ${session.preview} ${session.searchText}`
@@ -1354,7 +1397,9 @@ export function registerDesktopRoutes(app: express.Express) {
       res.status(400).json({ error: "sessionId required" });
       return;
     }
-    const found = findDesktopSession(sessionId);
+    const claw = await getDesktopUserClaw(user);
+    if (!claw) return res.status(404).json({ error: "no agent assigned" });
+    const found = findDesktopSession(sessionId, claw.agentId);
     if (!found) {
       res.status(404).json({ error: "session_not_found" });
       return;
@@ -1369,9 +1414,11 @@ export function registerDesktopRoutes(app: express.Express) {
     const user = await requireDesktopUser(req, res);
     if (!user) return;
     try {
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const [market, installed] = await Promise.all([
-        listDesktopMarketSkills(),
-        Promise.resolve(listDesktopInstalledSkills()),
+        listDesktopMarketSkills(claw.adoptId, claw.agentId),
+        Promise.resolve(listDesktopInstalledSkills(claw.adoptId, claw.agentId)),
       ]);
       res.json({
         skills: {
@@ -1395,7 +1442,9 @@ export function registerDesktopRoutes(app: express.Express) {
     const user = await requireDesktopUser(req, res);
     if (!user) return;
     try {
-      res.json(listDesktopChannels());
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
+      res.json(listDesktopChannels(claw.adoptId));
     } catch (error) {
       res.status(500).json({
         error:
@@ -1410,7 +1459,9 @@ export function registerDesktopRoutes(app: express.Express) {
     const user = await requireDesktopUser(req, res);
     if (!user) return;
     try {
-      const result = await desktopStartWeixinBind(defaultDesktopAdoptId());
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
+      const result = await desktopStartWeixinBind(claw.adoptId);
       if (!result.ok) return res.status(502).json({ error: result.error });
       const qrDataUrl = await toQrDataUrl(result.qrCode);
       res.json({ qrCode: result.qrCode, pollToken: result.pollToken, qrDataUrl });
@@ -1425,10 +1476,9 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const pollToken = String(req.body?.pollToken || "").trim();
       if (!pollToken) return res.status(400).json({ error: "pollToken required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
-      const result = await desktopPollWeixinBind(adoptId, claw, pollToken);
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
+      const result = await desktopPollWeixinBind(claw.adoptId, claw, pollToken);
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: error instanceof Error ? error.message : "weixin poll failed" });
@@ -1454,10 +1504,9 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const pollToken = String(req.body?.pollToken || "").trim();
       if (!pollToken) return res.status(400).json({ error: "pollToken required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
-      const result = await pollFeishuBindStatus(adoptId, Number(claw.userId), pollToken);
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
+      const result = await pollFeishuBindStatus(claw.adoptId, Number(claw.userId), pollToken);
       if (!result.ok) return res.status(502).json({ error: result.error.detail });
       if (result.value.status === "confirmed") {
         return res.json({ status: "confirmed", targetLabel: result.value.bindHandle.targetLabel || "" });
@@ -1473,15 +1522,14 @@ export function registerDesktopRoutes(app: express.Express) {
     if (!user) return;
     const key = String(req.params.key || "").trim();
     try {
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       if (key === "weixin") {
-        if (!claw) return res.status(404).json({ error: "agent not found" });
-        cleanupOpenClawWeixinBindingForAdopt(adoptId, claw);
+        cleanupOpenClawWeixinBindingForAdopt(claw.adoptId, claw);
         return res.json({ ok: true });
       }
       if (key === "feishu") {
-        await unbindFeishu(adoptId);
+        await unbindFeishu(claw.adoptId);
         return res.json({ ok: true });
       }
       return res.status(400).json({ error: "unsupported channel" });
@@ -1498,7 +1546,9 @@ export function registerDesktopRoutes(app: express.Express) {
       res.status(400).json({ error: "skillId required" });
       return;
     }
-    res.type("text/plain").send(readDesktopSkillContent(skillId));
+    const claw = await getDesktopUserClaw(user);
+    if (!claw) return res.status(404).json({ error: "no agent assigned" });
+    res.type("text/plain").send(readDesktopSkillContent(skillId, claw.adoptId, claw.agentId));
   });
 
   app.post(
@@ -1513,7 +1563,9 @@ export function registerDesktopRoutes(app: express.Express) {
           res.status(400).json({ error: "marketId required" });
           return;
         }
-        res.json(await installDesktopMarketSkill(marketId));
+        const claw = await getDesktopUserClaw(user);
+        if (!claw) return res.status(404).json({ error: "no agent assigned" });
+        res.json(await installDesktopMarketSkill(marketId, claw.adoptId, claw.agentId));
       } catch (error) {
         res.status(500).json({
           error:
@@ -1530,9 +1582,8 @@ export function registerDesktopRoutes(app: express.Express) {
   app.get("/api/desktop/soul/read", async (req, res) => {
     const user = await requireDesktopUser(req, res); if (!user) return;
     try {
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       const soulFile = desktopReadFile(`${workspace}/SOUL.md`);
       res.json({ content: soulFile.content, exists: soulFile.exists });
@@ -1543,9 +1594,8 @@ export function registerDesktopRoutes(app: express.Express) {
     const user = await requireDesktopUser(req, res); if (!user) return;
     try {
       const content = String(req.body?.content || "");
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       mkdirSync(workspace, { recursive: true });
       writeFileSync(`${workspace}/SOUL.md`, content, "utf8");
@@ -1558,9 +1608,8 @@ export function registerDesktopRoutes(app: express.Express) {
   app.get("/api/desktop/memory/read", async (req, res) => {
     const user = await requireDesktopUser(req, res); if (!user) return;
     try {
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       const memFile = desktopReadFile(`${workspace}/MEMORY.md`);
       const userFile = desktopReadFile(`${workspace}/USER.md`);
@@ -1577,9 +1626,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const content = String(req.body?.content || "").trim();
       if (!content) return res.status(400).json({ error: "content required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       const memPath = `${workspace}/MEMORY.md`;
       const existing = desktopReadFile(memPath);
@@ -1598,9 +1646,8 @@ export function registerDesktopRoutes(app: express.Express) {
       const index = Number(req.body?.index ?? -1);
       const content = String(req.body?.content || "").trim();
       if (index < 0 || !content) return res.status(400).json({ error: "index and content required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       const memPath = `${workspace}/MEMORY.md`;
       const existing = desktopReadFile(memPath);
@@ -1619,9 +1666,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const index = Number(req.body?.index ?? -1);
       if (index < 0) return res.status(400).json({ error: "index required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       const memPath = `${workspace}/MEMORY.md`;
       const existing = desktopReadFile(memPath);
@@ -1638,9 +1684,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const content = String(req.body?.content || "");
       if (content.length > DESKTOP_USER_CHAR_LIMIT) return res.status(400).json({ error: `超出上限 (${content.length}/${DESKTOP_USER_CHAR_LIMIT} 字符)` });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       mkdirSync(workspace, { recursive: true });
       writeFileSync(`${workspace}/USER.md`, content, "utf8");
@@ -1653,9 +1698,8 @@ export function registerDesktopRoutes(app: express.Express) {
   app.get("/api/desktop/cron/list", async (req, res) => {
     const user = await requireDesktopUser(req, res); if (!user) return;
     try {
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const result = await desktopCronProvider.listJobs(desktopCronHandle(claw));
       if (!result.ok) return res.status(500).json({ error: result.error.detail });
       res.json({ jobs: result.value.map(sharedJobToDesktopFmt) });
@@ -1665,9 +1709,8 @@ export function registerDesktopRoutes(app: express.Express) {
   app.post("/api/desktop/cron/add", express.json(), async (req, res) => {
     const user = await requireDesktopUser(req, res); if (!user) return;
     try {
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const { schedule: schedStr, prompt, name, deliver } = req.body || {};
       const schedule = parseDesktopScheduleStr(String(schedStr || "30m"));
       const deliverKey = String(deliver || "").toLowerCase();
@@ -1693,9 +1736,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const id = String(req.body?.id || "").trim();
       if (!id) return res.status(400).json({ error: "id required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const result = await desktopCronProvider.removeJob(desktopCronHandle(claw), id);
       if (!result.ok) return res.status(500).json({ error: result.error.detail });
       res.json({ ok: true });
@@ -1707,9 +1749,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const id = String(req.body?.id || "").trim();
       if (!id) return res.status(400).json({ error: "id required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const result = await desktopCronProvider.updateJob(desktopCronHandle(claw), id, { enabled: false });
       if (!result.ok) return res.status(500).json({ error: result.error.detail });
       res.json({ ok: true });
@@ -1721,9 +1762,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const id = String(req.body?.id || "").trim();
       if (!id) return res.status(400).json({ error: "id required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const result = await desktopCronProvider.updateJob(desktopCronHandle(claw), id, { enabled: true });
       if (!result.ok) return res.status(500).json({ error: result.error.detail });
       res.json({ ok: true });
@@ -1735,9 +1775,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const id = String(req.body?.id || "").trim();
       if (!id) return res.status(400).json({ error: "id required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const result = await desktopCronProvider.runJobNow(desktopCronHandle(claw), id);
       if (!result.ok) return res.status(500).json({ error: result.error.detail });
       res.json({ ok: true });
@@ -1746,7 +1785,7 @@ export function registerDesktopRoutes(app: express.Express) {
 
   // Files
   const DESKTOP_FILES_MAX_LIST_DEPTH = 4;
-  const DESKTOP_FILES_MAX_ENTRIES = 500;
+  const DESKTOP_FILES_MAX_ENTRIES = 2000;
   const DESKTOP_FILES_MAX_READ_BYTES = 10 * 1024 * 1024;
   const DESKTOP_FILES_MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
   const DESKTOP_FILES_PROTECTED = new Set([
@@ -1833,9 +1872,8 @@ export function registerDesktopRoutes(app: express.Express) {
     const user = await requireDesktopUser(req, res); if (!user) return;
     try {
       const subPath = String(req.query.path || "").trim();
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       const files = desktopFilesListDir(workspace, subPath);
       res.json({ files, protectedFiles: Array.from(DESKTOP_FILES_PROTECTED) });
@@ -1847,9 +1885,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const relPath = String(req.query.path || "").trim();
       if (!relPath) return res.status(400).json({ error: "path required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       const abs = desktopFilesSafeExisting(workspace, relPath);
       if (!abs) return res.status(404).json({ error: "file not found" });
@@ -1866,9 +1903,8 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const relPath = String(req.query.path || "").trim();
       if (!relPath) return res.status(400).json({ error: "path required" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       const abs = desktopFilesSafeExisting(workspace, relPath);
       if (!abs || !statSync(abs).isFile()) return res.status(404).json({ error: "file not found" });
@@ -1896,9 +1932,8 @@ export function registerDesktopRoutes(app: express.Express) {
       let buf: Buffer;
       try { buf = Buffer.from(contentBase64, "base64"); } catch { return res.status(400).json({ error: "invalid base64" }); }
       if (buf.length > DESKTOP_FILES_MAX_UPLOAD_BYTES) return res.status(413).json({ error: "file too large" });
-      const adoptId = defaultDesktopAdoptId();
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return res.status(404).json({ error: "agent not found" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
       const workspace = resolveClawWorkspace(claw);
       const targetRel = subPath ? `${subPath}/${filename}` : filename;
       // desktopFilesSafeUpload creates parent dirs and verifies via realpathSync
@@ -1908,6 +1943,22 @@ export function registerDesktopRoutes(app: express.Express) {
       if (DESKTOP_FILES_PROTECTED.has(path.basename(abs))) return res.status(403).json({ error: "protected_file" });
       writeFileSync(abs, buf);
       res.json({ ok: true, path: targetRel, size: buf.length });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+  });
+
+  app.delete("/api/desktop/files/delete", async (req, res) => {
+    const user = await requireDesktopUser(req, res); if (!user) return;
+    try {
+      const relPath = String(req.query.path || "").trim();
+      if (!relPath) return res.status(400).json({ error: "path required" });
+      const claw = await getDesktopUserClaw(user);
+      if (!claw) return res.status(404).json({ error: "no agent assigned" });
+      const workspace = resolveClawWorkspace(claw);
+      const abs = desktopFilesSafeExisting(workspace, relPath);
+      if (!abs) return res.status(404).json({ error: "not found" });
+      if (DESKTOP_FILES_PROTECTED.has(path.basename(abs))) return res.status(403).json({ error: "protected_file" });
+      rmSync(abs, { recursive: true, force: true });
+      res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
   });
 }

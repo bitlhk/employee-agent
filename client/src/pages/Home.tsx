@@ -2957,7 +2957,7 @@ export default function Home() {
               sessionsLoading={webSessionsLoading && webSessions.length === 0}
               footer={(
                 <SidebarFooter
-                  version={isJiuwenRuntime ? "JiuwenClaw" : isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
+                  version={isJiuwenRuntime ? "JiuwenSwarm v0.2.0" : isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
                   expiryText={lingxiaExpiryInfo.text}
                   expiryColor={lingxiaExpiryInfo.color}
                   collapsed={sidebarCollapsed}

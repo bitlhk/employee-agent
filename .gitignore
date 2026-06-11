@@ -145,5 +145,8 @@ logs/
 # Agent runtime backup files
 server/_core/agent/data/*.bak-*
 
+# Internal runtime patch notes may contain deployment paths, IDs, and token formats.
+docs/JIUWENSWARM_PATCHES.md
+
 # Prevent accidental absolute-path sync payloads
 home/

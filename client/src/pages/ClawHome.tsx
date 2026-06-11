@@ -44,8 +44,8 @@ function getRuntimeCardMeta(adoptId: unknown) {
   const id = String(adoptId || "");
   if (id.startsWith("lgj-")) {
     return {
-      name: "JiuwenClaw",
-      icon: "/uploads/jiuwenclaw.png",
+      name: "JiuwenSwarm",
+      icon: "/uploads/jiuwenswarm.svg",
       badgeClass: "bg-emerald-100 text-emerald-700",
       buttonClass: "bg-emerald-600 hover:bg-emerald-700",
     };

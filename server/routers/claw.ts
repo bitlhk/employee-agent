@@ -80,13 +80,15 @@ const parseEnvValue = (raw: string, key: string): string => {
 };
 
 const getAvailableJiuwenModels = (): RuntimeModelOption[] => {
-  const envPath = process.env.JIUWENCLAW_ENV_PATH || "/root/.jiuwenclaw/.env";
+  const envPath = process.env.JIUWENCLAW_ENV_PATH || "/root/.jiuwenswarm/config/.env";
   let modelName = "";
   try {
     if (existsSync(envPath)) modelName = parseEnvValue(readFileSync(envPath, "utf8"), "MODEL_NAME");
   } catch {}
-  const id = modelName || process.env.JIUWENCLAW_DEFAULT_MODEL || "glm-5";
-  return [{ id, name: id.toUpperCase(), desc: "JiuwenClaw", isDefault: true }];
+  const rawId = modelName || process.env.JIUWENCLAW_DEFAULT_MODEL || "glm-5.1";
+  // Normalize to provider-prefixed format so MODEL_DISPLAY_NAMES in the frontend resolves correctly
+  const id = rawId.includes("/") ? rawId : `modelarts-maas/${rawId}`;
+  return [{ id, name: id, desc: "JiuwenSwarm", isDefault: true }];
 };
 
 const getAvailableModelsForRuntime = (adoptId?: unknown): RuntimeModelOption[] => {
