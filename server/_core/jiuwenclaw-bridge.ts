@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { execFile } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
 import path from "path";
 import { WebSocket, type RawData } from "ws";
@@ -273,6 +274,46 @@ function buildChatRequest(args: {
   };
 }
 
+// ── 静默失败自愈 ──────────────────────────────────────────────────────────────
+// jiuwenswarm 的中断状态（InterruptionState）持久化损坏后，同 session 所有请求会
+// 静默跳过 LLM 调用（0 token、无错误、瞬间返回）。检测到该特征时自动清除该
+// session 在 checkpoint.db 中的 agent state 并重试一次。
+// 详见 docs/JIUWENSWARM_PATCHES.md「问题记录 1」。
+const JIUWEN_SILENT_FAILURE_MS = Math.max(
+  500,
+  Number(process.env.JIUWENCLAW_SILENT_FAILURE_MS || 2000) || 2000,
+);
+const JIUWEN_CHECKPOINT_DB =
+  process.env.JIUWENCLAW_CHECKPOINT_DB || "/root/.jiuwenswarm/agent/.checkpoint/checkpoint.db";
+
+function clearJiuwenSessionCheckpoint(
+  sessionId: string,
+): Promise<{ ok: boolean; deleted: number; error?: string }> {
+  const script = [
+    "import sqlite3, sys",
+    "db, sid = sys.argv[1], sys.argv[2]",
+    "conn = sqlite3.connect(db, timeout=5)",
+    "cur = conn.execute(\"DELETE FROM kv_store WHERE key LIKE ? || ':%'\", (sid,))",
+    "conn.commit()",
+    "print(cur.rowcount)",
+    "conn.close()",
+  ].join("\n");
+  return new Promise((resolve) => {
+    execFile(
+      "python3",
+      ["-c", script, JIUWEN_CHECKPOINT_DB, sessionId],
+      { timeout: 10_000 },
+      (err, stdout) => {
+        if (err) {
+          resolve({ ok: false, deleted: 0, error: String(err.message || err).slice(0, 300) });
+        } else {
+          resolve({ ok: true, deleted: Number(String(stdout).trim()) || 0 });
+        }
+      },
+    );
+  });
+}
+
 export async function forwardToJiuwenClaw(
   claw: JiuwenClawRuntimeClaw,
   message: string,
@@ -332,6 +373,9 @@ export async function forwardToJiuwenClaw(
   const sessionId = buildSessionId(claw, agentId, opts);
   const channelId = claw.adoptId;
   const workspaceDir = resolveRuntimeWorkspace(claw, claw.adoptId);
+  const maxRunMs = Math.max(30_000, Number(process.env.JIUWENCLAW_CHAT_TIMEOUT_MS || 180_000) || 180_000);
+
+  const runAttempt = (attempt: number): Promise<"done" | "silent"> => {
   const startedAt = Date.now();
   const requestId = `linggan-jiuwen-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const requestPayload = buildChatRequest({
@@ -357,12 +401,11 @@ export async function forwardToJiuwenClaw(
     userId: claw.userId,
     clientRunId: opts.clientRunId || "",
     mode: requestPayload.params?.mode || "",
+    attempt,
     message: String(message || "").slice(0, 500),
   });
 
-  const maxRunMs = Math.max(30_000, Number(process.env.JIUWENCLAW_CHAT_TIMEOUT_MS || 180_000) || 180_000);
-
-  await new Promise<void>((resolve) => {
+  return new Promise<"done" | "silent">((resolve) => {
     let settled = false;
     let requestSent = false;
     let sawText = false;
@@ -384,6 +427,7 @@ export async function forwardToJiuwenClaw(
         clientRunId: opts.clientRunId || "",
         mode: requestPayload.params?.mode || "",
         requestId,
+        attempt,
         durationMs: Date.now() - startedAt,
         ...extra,
       });
@@ -406,11 +450,11 @@ export async function forwardToJiuwenClaw(
       if (timeoutTimer) clearTimeout(timeoutTimer);
       clearInterval(keepalive);
     };
-    const settle = () => {
+    const settle = (outcome: "done" | "silent" = "done") => {
       if (settled) return;
       settled = true;
       cleanup();
-      resolve();
+      resolve(outcome);
     };
     const fail = (error: string) => {
       logEnd("chat_stream_failed", { error: error.slice(0, 1000) });
@@ -419,6 +463,13 @@ export async function forwardToJiuwenClaw(
       settle();
     };
     const complete = () => {
+      // 静默失败特征：无任何文本输出且瞬间返回（正常 LLM 调用至少数秒）。
+      // 这是 jiuwenswarm 中断状态损坏的表现，交给外层清 checkpoint 后重试。
+      if (!sawText && Date.now() - startedAt < JIUWEN_SILENT_FAILURE_MS) {
+        logEnd("chat_stream_silent_failure", {});
+        settle("silent");
+        return;
+      }
       const recentFiles = collectRecentWorkspaceFiles(workspaceDir, startedAt)
         .filter((file) => !emittedWorkspaceFilePaths.has(file.path));
       if (recentFiles.length > 0) {
@@ -514,7 +565,10 @@ export async function forwardToJiuwenClaw(
             return;
           }
           if (eventType === "chat.final") {
-            if (text && !sawText) writeData({ choices: [{ delta: { content: text }, index: 0 }] });
+            if (text && !sawText) {
+              sawText = true;
+              writeData({ choices: [{ delta: { content: text }, index: 0 }] });
+            }
             complete();
             try { ws.close(1000, "complete"); } catch {}
             return;
@@ -542,7 +596,10 @@ export async function forwardToJiuwenClaw(
 
       if (frame?.is_final || kind === "e2a.complete") {
         const finalText = pickText(body?.result || body);
-        if (finalText && !sawText) writeData({ choices: [{ delta: { content: finalText }, index: 0 }] });
+        if (finalText && !sawText) {
+          sawText = true;
+          writeData({ choices: [{ delta: { content: finalText }, index: 0 }] });
+        }
         complete();
         try { ws.close(1000, "complete"); } catch {}
       }
@@ -563,4 +620,36 @@ export async function forwardToJiuwenClaw(
       fail("jiuwenclaw upstream closed before completion");
     });
   });
+  };
+
+  let outcome = await runAttempt(1);
+  if (outcome === "silent" && !res.writableEnded) {
+    // 静默失败自愈：清除该 session 的损坏 checkpoint state 后重试一次
+    const heal = await clearJiuwenSessionCheckpoint(sessionId);
+    appendLogAsync("jiuwenclaw-exec.log", {
+      ts: new Date().toISOString(),
+      event: "chat_stream_self_heal",
+      adoptId: claw.adoptId,
+      agentId,
+      sessionId,
+      userId: claw.userId,
+      healed: heal.ok,
+      deletedKeys: heal.deleted,
+      error: heal.error || "",
+    });
+    writeData({
+      __status: "检测到会话状态异常，已自动修复，正在重试...",
+      kind: "heartbeat",
+      tool: "jiuwenclaw",
+      elapsedMs: 0,
+    });
+    outcome = await runAttempt(2);
+    if (outcome === "silent") {
+      writeData({
+        __stream_error: true,
+        error: "JiuwenSwarm 会话状态异常，自动修复未生效。请发送 /new 开始新对话后重试。",
+      });
+    }
+  }
+  emitDone();
 }

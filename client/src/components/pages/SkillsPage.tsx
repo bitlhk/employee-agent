@@ -271,6 +271,18 @@ function mcpStatusLabel(status: McpServerStatus) {
   return "未接入";
 }
 
+function mcpScopeOf(item: McpToolGroup): "public" | "internal" | "platform" {
+  if (item.category === "公共金融数据" || item.id === "wind" || item.id === "qieman") return "public";
+  if (item.category === "内部业务 MCP" || ["wealth-assistant", "bond-quote-parse", "group-insurance-audit"].includes(item.id)) return "internal";
+  return "platform";
+}
+
+function mcpScopeLabel(scope: "public" | "internal" | "platform") {
+  if (scope === "public") return "public";
+  if (scope === "internal") return "internal";
+  return "platform";
+}
+
 function McpToolsPage({ adoptId }: { adoptId?: string }) {
   const [items, setItems] = useState<McpToolGroup[]>([]);
   const [loading, setLoading] = useState(false);
@@ -342,14 +354,14 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
         <div className="min-w-0">
           <div className="skills-market-hero__title">MCP工具</div>
           <div className="skills-market-hero__desc">
-            MCP 是平台统一接入的宿主机工具能力，只展示当前 OpenClaw 的注册和可用状态；安装、密钥和网络访问由管理员统一治理。
+            这里展示平台接入的数据源与业务 MCP。公共能力用 public 标记，内部系统和工作流用 internal 标记；安装、密钥、网络和权限由平台统一治理。
           </div>
         </div>
       </div>
 
       <div className="skills-header">
         <div className="skills-summary skills-muted-text text-xs">
-          共 {items.length} 类 MCP · {availableGroups} 类可用 · {availableServers}/{configuredServers} 个服务已启用
+          共 {items.length} 类能力 · {availableGroups} 类可用 · {availableServers}/{configuredServers} 个服务已启用
         </div>
         <button className="skills-btn" onClick={() => void loadMcpTools()} disabled={loading}>
           <RefreshCw size={14} /> 刷新
@@ -361,78 +373,108 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
 
       {!loading && items.length > 0 && (
         <div className="skills-mcp-groups">
-          {items.map((item) => {
-            const groupOpen = openGroupIds.has(item.id);
-            return (
-              <section key={item.id} className="settings-card skills-mcp-group" data-open={groupOpen ? "true" : "false"}>
-                <button
-                  className="skills-mcp-group__head"
-                  type="button"
-                  aria-expanded={groupOpen}
-                  onClick={() => toggleGroup(item.id)}
-                >
-                  <span className="skills-mcp-group__chevron">
-                    {groupOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                  </span>
-                  <span className="skills-mcp-group__title-wrap">
-                    <span className="skills-mcp-group__title">
-                      <Wrench size={16} />
-                      <span>{item.name}</span>
+            {items.map((item) => {
+              const groupOpen = openGroupIds.has(item.id);
+              const scope = mcpScopeOf(item);
+              const flatChild = item.children?.length === 1 ? item.children[0] : null;
+              const flatTools = flatChild?.tools && flatChild.tools.length > 0
+                ? flatChild.tools
+                : [{ name: "tool_list", description: "该 MCP 已接入，工具明细以管理员配置为准。" }];
+              return (
+                <section key={item.id} className="settings-card skills-mcp-group" data-open={groupOpen ? "true" : "false"}>
+                  <button
+                    className="skills-mcp-group__head"
+                    type="button"
+                    aria-expanded={groupOpen}
+                    onClick={() => toggleGroup(item.id)}
+                  >
+                    <span className="skills-mcp-group__chevron">
+                      {groupOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </span>
-                    <span className="skills-mcp-group__desc">{item.description}</span>
-                  </span>
-                  <span className="skills-mcp-group__status">
-                    <span className="skills-chip skills-chip--neutral">{item.category}</span>
-                    <span className={`skills-chip ${pillToneClass(mcpStatusTone(item.status))}`}>
-                      {mcpStatusLabel(item.status)} {item.availableCount}/{item.serverCount}
+                    <span className="skills-mcp-group__title-wrap">
+                      <span className="skills-mcp-group__title">
+                        <Wrench size={16} />
+                        <span>{item.name}</span>
+                      </span>
+                      <span className="skills-mcp-group__desc">{item.description}</span>
                     </span>
-                  </span>
-                </button>
+                    <span className="skills-mcp-group__status">
+                      <span className={`skills-chip skills-mcp-scope skills-mcp-scope--${scope}`}>{mcpScopeLabel(scope)}</span>
+                      <span className={`skills-chip ${pillToneClass(mcpStatusTone(item.status))}`}>
+                        {mcpStatusLabel(item.status)} {item.availableCount}/{item.serverCount}
+                      </span>
+                    </span>
+                  </button>
 
-                <div className="skills-mcp-group__body" aria-hidden={!groupOpen}>
-                  <div className="skills-mcp-children">
-                    {(item.children || []).map((child) => {
-                      const childTone = mcpStatusTone(child.status);
-                      const tools = child.tools && child.tools.length > 0
-                        ? child.tools
-                        : [{ name: "工具清单", description: "该 MCP 已接入，工具明细以管理员配置为准。" }];
-                      return (
-                        <div key={child.id} className="skills-mcp-child" data-open="true">
-                          <div className="skills-mcp-child__row">
-                            <span className="skills-mcp-child__main">
-                              <span className="skills-mcp-child__name">{child.name}</span>
-                              <span className="skills-mcp-child__desc">{child.description}</span>
-                            </span>
-                            <span className="skills-mcp-child__meta">
-                              <span className="skills-mcp-child__server">{child.serverId}</span>
-                              <span className={`skills-chip ${pillToneClass(childTone)}`}>{mcpStatusLabel(child.status)}</span>
-                            </span>
-                          </div>
-
-                          <div className="skills-mcp-child__panel" aria-hidden="false">
-                            <div className="skills-mcp-tools">
-                              {tools.map((tool) => (
-                                <div key={`${child.id}:${tool.name}`} className="skills-mcp-tool">
-                                  <div className="skills-mcp-tool__name">{tool.name}</div>
-                                  <div className="skills-mcp-tool__desc">{tool.description}</div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
+                  <div className="skills-mcp-group__body" aria-hidden={!groupOpen}>
+                    {flatChild ? (
+                      <div className="skills-mcp-flat">
+                        <div className="skills-mcp-flat__head">
+                          <span className="skills-mcp-child__main">
+                            <span className="skills-mcp-child__name">{flatChild.name}</span>
+                            <span className="skills-mcp-child__desc">{flatChild.description}</span>
+                          </span>
+                          <span className="skills-mcp-flat__meta">
+                            <span className="skills-mcp-child__server">{flatChild.serverId}</span>
+                            <span className={`skills-chip ${pillToneClass(mcpStatusTone(flatChild.status))}`}>{mcpStatusLabel(flatChild.status)}</span>
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
+                        <div className="skills-mcp-tools">
+                          {flatTools.map((tool) => (
+                            <div key={`${flatChild.id}:${tool.name}`} className="skills-mcp-tool">
+                              <div className="skills-mcp-tool__label">工具名</div>
+                              <div className="skills-mcp-tool__name">{tool.name}</div>
+                              <div className="skills-mcp-tool__desc">{tool.description}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="skills-mcp-children">
+                        {(item.children || []).map((child) => {
+                          const childTone = mcpStatusTone(child.status);
+                          const tools = child.tools && child.tools.length > 0
+                            ? child.tools
+                            : [{ name: "tool_list", description: "该 MCP 已接入，工具明细以管理员配置为准。" }];
+                          return (
+                            <div key={child.id} className="skills-mcp-child" data-open="true">
+                              <div className="skills-mcp-child__row">
+                                <span className="skills-mcp-child__main">
+                                  <span className="skills-mcp-child__name">{child.name}</span>
+                                  <span className="skills-mcp-child__desc">{child.description}</span>
+                                </span>
+                                <span className="skills-mcp-child__meta">
+                                  <span className="skills-mcp-child__server">{child.serverId}</span>
+                                  <span className={`skills-chip ${pillToneClass(childTone)}`}>{mcpStatusLabel(child.status)}</span>
+                                </span>
+                              </div>
 
-                  {item.recommendedSkills && item.recommendedSkills.length > 0 && (
-                    <div className="skills-mcp-related">
-                      关联技能：{item.recommendedSkills.join("、")}
-                    </div>
-                  )}
-                </div>
-              </section>
-            );
-          })}
+                              <div className="skills-mcp-child__panel" aria-hidden="false">
+                                <div className="skills-mcp-tools">
+                                  {tools.map((tool) => (
+                                    <div key={`${child.id}:${tool.name}`} className="skills-mcp-tool">
+                                      <div className="skills-mcp-tool__label">工具名</div>
+                                      <div className="skills-mcp-tool__name">{tool.name}</div>
+                                      <div className="skills-mcp-tool__desc">{tool.description}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {item.recommendedSkills && item.recommendedSkills.length > 0 && (
+                      <div className="skills-mcp-related">
+                        关联技能：{item.recommendedSkills.join("、")}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
         </div>
       )}
     </div>

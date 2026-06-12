@@ -2977,6 +2977,41 @@ input.session-searchbar__input:focus-visible,
   gap: 6px;
   flex-shrink: 0;
 }
+.skills-mcp-scope {
+  font-size: 10px;
+  letter-spacing: .02em;
+  text-transform: lowercase;
+}
+.skills-mcp-scope--public {
+  color: color-mix(in oklab, var(--oc-success) 72%, var(--oc-text-primary));
+  background: color-mix(in oklab, var(--oc-success) 12%, transparent);
+  border-color: color-mix(in oklab, var(--oc-success) 22%, var(--oc-border-subtle));
+}
+.skills-mcp-scope--internal {
+  color: color-mix(in oklab, var(--oc-accent) 78%, var(--oc-text-primary));
+  background: color-mix(in oklab, var(--oc-accent) 11%, transparent);
+  border-color: color-mix(in oklab, var(--oc-accent) 22%, var(--oc-border-subtle));
+}
+.skills-mcp-scope--platform {
+  color: var(--oc-text-secondary);
+}
+.skills-mcp-flat {
+  padding-top: 10px;
+}
+.skills-mcp-flat__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px 10px;
+}
+.skills-mcp-flat__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
 .skills-mcp-children {
   display: flex;
   flex-direction: column;
@@ -3044,8 +3079,8 @@ input.session-searchbar__input:focus-visible,
   opacity: 1;
 }
 .skills-mcp-tools {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   padding: 0 12px 12px;
 }
@@ -3053,11 +3088,18 @@ input.session-searchbar__input:focus-visible,
   min-width: 0;
   border: 1px solid var(--oc-border-subtle);
   border-radius: 7px;
-  padding: 9px 10px;
+  padding: 9px 10px 10px;
   background: color-mix(in oklab, var(--oc-bg-soft) 70%, transparent);
+}
+.skills-mcp-tool__label {
+  color: var(--oc-text-muted);
+  font-size: 10px;
+  line-height: 1;
+  margin-bottom: 5px;
 }
 .skills-mcp-tool__name {
   color: var(--oc-text-primary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace);
   font-size: 12px;
   font-weight: var(--oc-weight-medium);
 }
@@ -3082,6 +3124,9 @@ input.session-searchbar__input:focus-visible,
     justify-content: flex-start;
   }
   .skills-mcp-child__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .skills-mcp-flat__head {
     grid-template-columns: minmax(0, 1fr);
   }
   .skills-mcp-child__meta {

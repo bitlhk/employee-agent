@@ -30,6 +30,27 @@ const autoBlockedIps = new Set<string>();
 import { getClientIp } from "./ip-utils";
 
 /**
+ * Some authenticated platform endpoints are allowed to return 4xx during normal
+ * UI polling or cache warm-up. Counting those responses as abuse can lock out
+ * every user behind the same office/NAT IP.
+ */
+function isErrorTrackingExemptPath(req: Request): boolean {
+  const path = (req.path || "").toLowerCase();
+  if (path === "/api/claw/chat-history/messages") return true;
+  if (path === "/api/claw/chat-history/sessions") return true;
+  if (path === "/api/claw/files/capabilities") return true;
+  if (path === "/api/claw/files/list") return true;
+  if (path === "/api/claw/health-summary") return true;
+  if (path === "/api/claw/mcp-tools/status") return true;
+  if (path === "/api/claw/skills/registry") return true;
+  if (path === "/api/embed/auth-check") return true;
+  if (path === "/api/trpc/coop.iswhitelisted") return true;
+  if (path === "/api/trpc/ipaccesslogs.getmytodaycount") return true;
+  if (path.startsWith("/claw/")) return true;
+  return false;
+}
+
+/**
  * 记录 4xx 错误
  */
 export async function track4xxError(
@@ -39,6 +60,12 @@ export async function track4xxError(
 ) {
   if (statusCode < 400 || statusCode >= 500) {
     return; // 只追踪 4xx 错误
+  }
+
+  // Do not count the limiter's own 429 responses; otherwise one temporary block
+  // keeps feeding itself and quickly escalates into a persistent blacklist row.
+  if (statusCode === 429 || isErrorTrackingExemptPath(req)) {
+    return;
   }
 
   // 排除静态资源路径的 404 错误（这些是正常的，不应该计入错误计数）
@@ -237,6 +264,10 @@ export function block4xxAbuse(req: Request, res: Response, next: NextFunction) {
     return next();
   }
 
+  if (isErrorTrackingExemptPath(req)) {
+    return next();
+  }
+
   const clientIP = getClientIp(req);
 
   if (shouldBlockIp(clientIP)) {
@@ -309,5 +340,4 @@ setInterval(() => {
     autoBlockedIps.delete(ip);
   });
 }, CLEANUP_INTERVAL);
-
 

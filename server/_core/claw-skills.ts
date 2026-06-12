@@ -54,13 +54,56 @@ function skillSourceCacheDir(adoptId: string, skillId: string): string {
   return path.join(APP_ROOT, "data", "generated-skills", adoptId, skillId);
 }
 
+function skillPackageIndexPath(): string {
+  return path.join(APP_ROOT, "data", "skill-packages", "index.json");
+}
+
+function readSkillPackageIndex(): any[] {
+  const idxPath = skillPackageIndexPath();
+  if (!existsSync(idxPath)) return [];
+  try {
+    const raw = String(readFileSync(idxPath, "utf-8") || "[]").trim();
+    const rows = raw ? JSON.parse(raw) : [];
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSkillPackageIndex(rows: any[]): void {
+  writeFileSync(skillPackageIndexPath(), JSON.stringify(rows, null, 2), "utf-8");
+}
+
+function removeSkillPackageIndexRows(adoptId: string, params: { skillId?: string; sourcePath?: string; sha256?: string; filename?: string }): any[] {
+  const skillId = String(params.skillId || "").trim();
+  const sourcePath = String(params.sourcePath || "").trim();
+  const sha256 = String(params.sha256 || "").trim();
+  const filename = String(params.filename || "").trim();
+  const rows = readSkillPackageIndex();
+  const removed: any[] = [];
+  const next = rows.filter((row: any) => {
+    if (String(row?.adoptId || "") !== adoptId) return true;
+    const match = (!!skillId && String(row?.installedSkillId || "") === skillId)
+      || (!!sourcePath && String(row?.path || "") === sourcePath)
+      || (!!sha256 && String(row?.sha256 || "") === sha256)
+      || (!!filename && String(row?.filename || "") === filename);
+    if (match) {
+      removed.push(row);
+      return false;
+    }
+    return true;
+  });
+  if (removed.length > 0) writeSkillPackageIndex(next);
+  return removed;
+}
+
 const MCP_TOOL_CATALOG = [
   {
     id: "wind",
     name: "Wind 金融数据",
-    category: "专业投研",
+    category: "公共金融数据",
     description:
-      "覆盖行情、财务、公告新闻、指数和市场分析等 Wind 数据能力，供金融类技能和主对话按需调用。",
+      "公共授权金融数据源，覆盖行情、财务、公告新闻、指数、基金、债券、宏观和市场分析，供投研、投顾、风控等岗位复用。",
     children: [
       {
         id: "wind-financial-docs",
@@ -69,12 +112,12 @@ const MCP_TOOL_CATALOG = [
         serverIds: ["wind_financial_docs"],
         tools: [
           {
-            name: "公告与新闻检索",
-            description: "按公司、关键词和时间范围查找公告新闻。",
+            name: "get_company_announcements",
+            description: "公告数据：按公司、关键词和时间范围查找上市公司公告。",
           },
           {
-            name: "研报资料查询",
-            description: "检索研究报告、摘要和相关金融文档。",
+            name: "get_financial_news",
+            description: "资讯数据：检索财经新闻、市场动态和相关金融资料。",
           },
         ],
       },
@@ -85,16 +128,16 @@ const MCP_TOOL_CATALOG = [
         serverIds: ["wind_stock_data"],
         tools: [
           {
-            name: "股票行情查询",
-            description: "查询最新价、涨跌幅、成交量和行情快照。",
+            name: "get_stock_quote",
+            description: "股票快照：查询最新价、涨跌幅、成交量和行情快照。",
           },
           {
-            name: "K线与分钟数据",
-            description: "获取日线、分钟线和历史走势。",
+            name: "get_stock_kline",
+            description: "股票走势：获取日线、分钟线和历史 K 线。",
           },
           {
-            name: "财务与事件数据",
-            description: "查询财报、股本、分红、风险和公司事件。",
+            name: "get_stock_fundamentals",
+            description: "股票基本面：查询财报、股本、分红、公司事件和风险指标。",
           },
         ],
       },
@@ -105,12 +148,12 @@ const MCP_TOOL_CATALOG = [
         serverIds: ["wind_index_data"],
         tools: [
           {
-            name: "指数行情查询",
-            description: "查询指数最新行情、K 线和估值指标。",
+            name: "get_index_quote",
+            description: "指数快照：查询指数最新行情、涨跌幅和成交信息。",
           },
           {
-            name: "成分与板块分析",
-            description: "查看指数成分、行业板块和权重变化。",
+            name: "get_index_fundamentals",
+            description: "指数基本面：查看指数估值、成分、行业板块和权重变化。",
           },
         ],
       },
@@ -121,12 +164,12 @@ const MCP_TOOL_CATALOG = [
         serverIds: ["wind_fund_data"],
         tools: [
           {
-            name: "基金行情与净值",
-            description: "查询基金净值、涨跌、业绩和风险指标。",
+            name: "get_fund_quote",
+            description: "基金行情：查询 ETF、公募基金净值、涨跌和行情快照。",
           },
           {
-            name: "持仓与管理人",
-            description: "查询基金持仓、持有人和管理公司信息。",
+            name: "get_fund_portfolio",
+            description: "基金画像：查询基金持仓、持有人、业绩、风险和管理公司信息。",
           },
         ],
       },
@@ -137,12 +180,12 @@ const MCP_TOOL_CATALOG = [
         serverIds: ["wind_bond_data"],
         tools: [
           {
-            name: "债券档案查询",
-            description: "查询债券基础信息、期限、票息和发行条款。",
+            name: "get_bond_basicinfo",
+            description: "债券档案：查询债券基础信息、期限、票息和发行条款。",
           },
           {
-            name: "估值与主体数据",
-            description: "查询债券估值、成交、主体财务和评级信息。",
+            name: "get_bond_valuation",
+            description: "债券估值：查询债券估值、成交、主体财务和评级信息。",
           },
         ],
       },
@@ -153,12 +196,12 @@ const MCP_TOOL_CATALOG = [
         serverIds: ["wind_economic_data"],
         tools: [
           {
-            name: "宏观指标查询",
-            description: "查询 GDP、CPI、PMI、社融等宏观指标。",
+            name: "get_macro_indicator",
+            description: "宏观指标：查询 GDP、CPI、PMI、社融等经济指标。",
           },
           {
-            name: "行业指标查询",
-            description: "查询行业景气、价格、产量和库存数据。",
+            name: "get_industry_indicator",
+            description: "行业指标：查询行业景气、价格、产量和库存数据。",
           },
         ],
       },
@@ -168,10 +211,10 @@ const MCP_TOOL_CATALOG = [
         description: "提供技术指标、风险指标和组合分析相关的数据能力。",
         serverIds: ["wind_analytics_data"],
         tools: [
-          { name: "技术指标计算", description: "查询或计算常用技术分析指标。" },
+          { name: "get_technical_indicators", description: "技术指标：查询或计算常用技术分析指标。" },
           {
-            name: "风险与组合分析",
-            description: "支持风险指标、收益分析和组合诊断。",
+            name: "get_risk_metrics",
+            description: "风险指标：支持风险指标、收益分析和组合诊断。",
           },
         ],
       },
@@ -180,10 +223,10 @@ const MCP_TOOL_CATALOG = [
   },
   {
     id: "qieman",
-    name: "且慢财富工具",
-    category: "个人财富",
+    name: "且慢财富数据",
+    category: "公共金融数据",
     description:
-      "面向财富规划、组合诊断、基金分析和目标测算场景，由财富类技能统一调度。",
+      "公共财富管理数据源，面向基金分析、组合诊断、资产配置和目标测算场景，由财富类技能统一调度。",
     children: [
       {
         id: "qieman-wealth",
@@ -192,20 +235,20 @@ const MCP_TOOL_CATALOG = [
         serverIds: ["qieman"],
         tools: [
           {
-            name: "基金分析",
-            description: "查询基金资料、业绩、风险和持仓特征。",
+            name: "qieman_fund_search",
+            description: "基金检索：查询基金资料、业绩、风险和持仓特征。",
           },
           {
-            name: "组合诊断",
-            description: "分析组合配置、波动、收益和集中度。",
+            name: "qieman_portfolio_analyze",
+            description: "组合诊断：分析组合配置、波动、收益和集中度。",
           },
           {
-            name: "目标测算",
-            description: "按目标金额、期限和风险偏好做规划测算。",
+            name: "qieman_goal_calculate",
+            description: "目标测算：按目标金额、期限和风险偏好做规划测算。",
           },
           {
-            name: "财富健康检查",
-            description: "评估资产结构、现金流和风险暴露。",
+            name: "qieman_wealth_healthcheck",
+            description: "财富体检：评估资产结构、现金流和风险暴露。",
           },
         ],
       },
@@ -220,10 +263,10 @@ const MCP_TOOL_CATALOG = [
   },
   {
     id: "bond-quote-parse",
-    name: "债券群聊报价解析",
-    category: "债券承销",
+    name: "债券报价解析 MCP",
+    category: "内部业务 MCP",
     description:
-      "解析债券申购群聊、报价语料和 CSV 表格，提取机构、利率、投标量和错误项。",
+      "内部业务 MCP，解析债券申购群聊、报价语料和 CSV 表格，提取机构、利率、投标量和错误项。",
     children: [
       {
         id: "bond-quote-parse",
@@ -233,12 +276,16 @@ const MCP_TOOL_CATALOG = [
         displayServerId: "bond-quote-parse",
         tools: [
           {
-            name: "报价文本解析",
-            description: "从群聊文本中抽取债券简称、期限、收益率、量和机构。",
+            name: "bond_parse_validate",
+            description: "报价解析：从群聊文本中抽取债券简称、期限、收益率、量和机构，并返回校验结果。",
           },
           {
-            name: "报价表格校验",
-            description: "校验 CSV 或表格中的缺失项、格式错误和重复记录。",
+            name: "bond_parse_batch",
+            description: "批量校验：校验 CSV 或表格中的缺失项、格式错误和重复记录。",
+          },
+          {
+            name: "bond_parse_schema",
+            description: "字段说明：返回债券报价解析的标准字段、类型和枚举约束。",
           },
         ],
       },
@@ -247,10 +294,10 @@ const MCP_TOOL_CATALOG = [
   },
   {
     id: "wealth-assistant",
-    name: "客户经理财富助手",
-    category: "财富管理",
+    name: "财富经理业务数据 MCP",
+    category: "内部业务 MCP",
     description:
-      "面向客户经理的财富助手能力，支持获取自己负责的客户数据，并结合推荐产品数据辅助客户经营和产品推荐。",
+      "内部业务 MCP，面向客户经理获取本人授权范围内的客户数据、产品数据和推荐上下文，辅助客户经营和产品推荐。",
     children: [
       {
         id: "wealth-assistant",
@@ -258,36 +305,92 @@ const MCP_TOOL_CATALOG = [
         description:
           "聚合客户数据与推荐产品数据，可查询客户列表、客户详情、基金/理财产品、净值历史和市场新闻。",
         serverIds: ["wealth_assistant"],
+        displayServerId: "wealth-assistant-context",
         tools: [
           {
-            name: "客户数据查询",
+            name: "wealth_assistant_customer_list",
             description:
-              "查询客户列表、搜索客户，并获取客户完整画像和资产信息。",
+              "客户列表：查询客户列表、搜索客户，并获取客户画像和资产信息。",
           },
           {
-            name: "推荐产品数据",
+            name: "wealth_assistant_product_search",
             description:
-              "查询基金、理财产品、净值历史和市场新闻，辅助客户经理做产品匹配。",
+              "产品检索：查询基金、理财产品、净值历史和市场新闻，辅助客户经理做产品匹配。",
+          },
+          {
+            name: "wealth_assistant_context_probe",
+            description:
+              "上下文探测：检查调用方 agentId、权限上下文和财富助手服务连通性。",
           },
         ],
       },
     ],
     recommendedSkills: [],
   },
+  {
+    id: "group-insurance-audit",
+    name: "团险审核工作流 MCP",
+    category: "内部业务 MCP",
+    description:
+      "内部业务 MCP，面向团险运营审核材料完整性、责任配置、费率风险和审核摘要，当前为内部演示接入。",
+    children: [
+      {
+        id: "group-insurance-audit",
+        name: "团险审核工作流",
+        description:
+          "围绕团单材料理解、配置校验、责任审核和风险摘要输出结构化审核结果。",
+        serverIds: ["group_insurance_audit"],
+        tools: [
+          {
+            name: "group_insurance_audit_workflow",
+            description:
+              "团险审核：执行材料解析、完整性检查、责任配置审核、风险识别和建议摘要。",
+          },
+        ],
+      },
+    ],
+    recommendedSkills: [
+      "group-policy-document-understanding",
+      "group-insurance-material-check",
+      "group-insurance-liability-review",
+      "group-insurance-risk-summary",
+    ],
+  },
 ];
 
-function readOpenClawMcpServers(): Record<string, any> {
+function readOpenClawConfig(): Record<string, any> {
   try {
     if (!existsSync(OPENCLAW_JSON_PATH)) return {};
     const cfg = JSON.parse(
       String(readFileSync(OPENCLAW_JSON_PATH, "utf-8") || "{}")
     );
-    return cfg?.mcp?.servers && typeof cfg.mcp.servers === "object"
-      ? cfg.mcp.servers
-      : {};
+    return cfg && typeof cfg === "object" ? cfg : {};
   } catch {
     return {};
   }
+}
+
+function readOpenClawMcpServers(config = readOpenClawConfig()): Record<string, any> {
+  return config?.mcp?.servers && typeof config.mcp.servers === "object"
+    ? config.mcp.servers
+    : {};
+}
+
+function readAllowedToolNames(config: Record<string, any>): Set<string> {
+  const names = new Set<string>();
+  const add = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    for (const item of value) {
+      const name = String(item || "").trim();
+      if (name) names.add(name);
+    }
+  };
+  add(config?.tools?.alsoAllow);
+  add(config?.tools?.sandbox?.tools?.alsoAllow);
+  for (const agent of Array.isArray(config?.agents?.list) ? config.agents.list : []) {
+    add(agent?.tools?.alsoAllow);
+  }
+  return names;
 }
 
 function readSkillMarkdownCandidate(
@@ -340,7 +443,9 @@ function mcpServerExistsOnDisk(serverId: string, raw: any): boolean {
 }
 
 export function listMcpToolGroups() {
-  const servers = readOpenClawMcpServers();
+  const config = readOpenClawConfig();
+  const servers = readOpenClawMcpServers(config);
+  const allowedToolNames = readAllowedToolNames(config);
   const serverRows = Object.entries(servers).map(([serverId, raw]) => {
     const disabled = Boolean((raw as any)?.disabled);
     return {
@@ -369,10 +474,15 @@ export function listMcpToolGroups() {
       );
       const activeServer =
         aliasServers.find(server => server.configured) || aliasServers[0];
-      const configured = aliasServers.some(server => server.configured);
+      const toolNames = Array.isArray(child.tools)
+        ? child.tools.map(tool => String(tool?.name || "").trim()).filter(Boolean)
+        : [];
+      const pluginToolsConfigured =
+        toolNames.length > 0 && toolNames.every(toolName => allowedToolNames.has(toolName));
+      const configured = aliasServers.some(server => server.configured) || pluginToolsConfigured;
       const enabled = aliasServers.some(
         server => server.configured && server.enabled
-      );
+      ) || pluginToolsConfigured;
       const status = enabled
         ? "available"
         : configured
@@ -386,7 +496,7 @@ export function listMcpToolGroups() {
         configured,
         enabled,
         status,
-        existsOnDisk: aliasServers.some(server => server.existsOnDisk),
+        existsOnDisk: aliasServers.some(server => server.existsOnDisk) || pluginToolsConfigured,
         tools: child.tools,
       };
     });
@@ -413,43 +523,10 @@ export function listMcpToolGroups() {
     };
   });
 
-  const extraGroups = serverRows
-    .filter(server => !knownServerIds.has(server.serverId))
-    .map(server => ({
-      id: server.serverId,
-      name: server.serverId,
-      category: "平台工具",
-      description: "OpenClaw 配置中已注册的 MCP Server。",
-      serverIds: [server.serverId],
-      recommendedSkills: [],
-      status: server.enabled ? "available" : "disabled",
-      availableCount: server.enabled ? 1 : 0,
-      configuredCount: 1,
-      serverCount: 1,
-      children: [
-        {
-          id: server.serverId,
-          name: server.serverId,
-          description: "OpenClaw 配置中已注册的 MCP Server。",
-          serverId: server.serverId,
-          configured: true,
-          enabled: server.enabled,
-          status: server.status,
-          existsOnDisk: server.existsOnDisk,
-          tools: [
-            {
-              name: "工具清单",
-              description: "该 MCP 未纳入平台目录，具体能力以管理员配置为准。",
-            },
-          ],
-        },
-      ],
-    }));
-
   return {
-    items: [...groups, ...extraGroups],
+    items: groups,
     totals: {
-      groups: groups.length + extraGroups.length,
+      groups: groups.length,
       configuredServers: serverRows.length,
       availableServers: serverRows.filter(row => row.enabled).length,
     },
@@ -802,12 +879,20 @@ export function registerSkillRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
+      const listed = await skillRegistry.listSkills(adoptId);
+      const skill = listed.ok ? listed.value.find((item) => item.id === skillId) : undefined;
       const result = await skillRegistry.destroy(adoptId, skillId);
       if (!result.ok) {
         res
           .status(registryErrorStatus(result.error.kind))
           .json({ error: result.error.detail, kind: result.error.kind });
         return;
+      }
+      if (skill?.source.kind === "uploaded") {
+        removeSkillPackageIndexRows(adoptId, {
+          skillId,
+          sourcePath: skill.source.sourcePath,
+        });
       }
       res.json({ ok: true });
     } catch (e) {
@@ -1095,13 +1180,7 @@ export function registerSkillRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      const idxPath = `${APP_ROOT}/data/skill-packages/index.json`;
-      let rows: any[] = [];
-      if (existsSync(idxPath)) {
-        const raw = String(readFileSync(idxPath, "utf-8") || "[]").trim();
-        if (raw) rows = JSON.parse(raw);
-      }
-      rows = (Array.isArray(rows) ? rows : []).filter(
+      const rows = readSkillPackageIndex().filter(
         (x: any) => String(x?.adoptId || "") === adoptId
       );
       res.json({ items: rows });
@@ -1125,16 +1204,7 @@ export function registerSkillRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      const idxPath = `${APP_ROOT}/data/skill-packages/index.json`;
-      let rows: any[] = [];
-      if (existsSync(idxPath)) {
-        const raw = String(readFileSync(idxPath, "utf-8") || "[]");
-        try {
-          rows = JSON.parse(raw);
-        } catch {
-          rows = [];
-        }
-      }
+      const rows = readSkillPackageIndex();
 
       const found = rows.find(
         (x: any) =>
@@ -1149,14 +1219,27 @@ export function registerSkillRoutes(app: express.Express) {
         return;
       }
 
-      const nextRows = rows.filter((x: any) => !(x === found));
-      writeFileSync(idxPath, JSON.stringify(nextRows, null, 2), "utf-8");
+      removeSkillPackageIndexRows(adoptId, {
+        filename,
+        skillId: skillId || String(found?.installedSkillId || ""),
+        sha256,
+        sourcePath: String(found?.path || ""),
+      });
 
-      const path = String(found?.path || "").trim();
-      if (path && existsSync(path)) rmSync(path, { force: true });
+      const packagePath = String(found?.path || "").trim();
+      const sid = String(found?.installedSkillId || "").trim();
+      if (sid) {
+        const destroyed = await skillRegistry.destroy(adoptId, sid);
+        if (!destroyed.ok && destroyed.error.kind !== "not_found") {
+          res
+            .status(registryErrorStatus(destroyed.error.kind))
+            .json({ error: destroyed.error.detail, kind: destroyed.error.kind });
+          return;
+        }
+      }
+      if (packagePath && existsSync(packagePath)) rmSync(packagePath, { force: true });
 
       // best-effort clean installed dir
-      const sid = String(found?.installedSkillId || "").trim();
       if (sid) {
         const { getClawByAdoptId } = await import("../db");
         const claw = await getClawByAdoptId(adoptId).catch(() => null);
