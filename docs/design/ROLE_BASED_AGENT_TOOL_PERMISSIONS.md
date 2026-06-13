@@ -129,6 +129,61 @@ Frontend display
 -> OpenClaw/MCP runtime exposure
 ```
 
+
+## Skill Metadata For Role Matching
+
+Do not use the existing `skill_marketplace.category` column as the fine-grained
+business scenario field.
+
+Current database state:
+
+- `skill_marketplace.origin` is a source/display grouping, such as
+  `opensource`, `finance`, or `squad`. It answers where the Skill came from.
+- `skill_marketplace.category` is a coarse enum limited to
+  `finance | dev | data | writing | general | office | design`. It is useful
+  for broad marketplace filtering, but it cannot safely store values such as
+  `auto_insurance_sales` or `group_insurance_audit`; MySQL will coerce unknown
+  enum values to an empty string.
+- The marketplace card's top-right chip should display a business scenario
+  label, not the source label. For example, squad Skills should show
+  `债券交易`, `凭证审核`, `车险外呼`, `团险审核`, or `销售陪练`, rather than all showing
+  `中队专区`.
+
+Short-term implementation:
+
+- Keep `origin=squad` for internally reviewed squad Skills.
+- Keep `category=finance` for finance/insurance squad Skills until the schema is
+  extended.
+- In the marketplace frontend, map known `skillId` values to scenario labels for
+  display only:
+
+```text
+bond-quote-parse                 -> 债券交易
+credential-prompt-generator      -> 凭证审核
+insurance-telesales-recommend    -> 车险外呼
+group-insurance-audit            -> 团险审核
+goldencoach-stage-evaluation     -> 销售陪练
+```
+
+Target schema:
+
+Add explicit role-matching metadata instead of overloading `category`:
+
+```ts
+type SkillBusinessMetadata = {
+  scenarioKey: string;       // e.g. "auto_insurance_sales"
+  scenarioLabel: string;     // e.g. "车险外呼"
+  businessDomain: string;    // e.g. "insurance" | "banking" | "securities"
+  roleTags: string[];        // e.g. ["telesales", "customer_manager"]
+  mcpServers: string[];      // MCP dependencies used by this Skill
+  toolNames: string[];       // Optional sub-tool dependencies
+};
+```
+
+Role templates should match on `scenarioKey`, `businessDomain`, and `roleTags`.
+The UI chip can render `scenarioLabel`; authorization must be server-side and
+must not rely on frontend display tags.
+
 ## Frontend Display Layer
 
 The UI must not display tools outside the selected role.
@@ -219,6 +274,70 @@ For bank-facing usage, audit should capture:
 - Result status, duration, and error code.
 
 This makes it possible to answer: who used which role, which Agent used which MCP, whether the call was allowed, and what data domain was involved.
+
+
+
+## OpenClaw Upgrade Posture
+
+The current OpenClaw upgrade risk is materially lower than the earlier phase,
+because two previously risky areas have been reduced:
+
+- Codex streaming patches are no longer treated as a permanent local fork
+  requirement. Employee Agent now owns stream normalization, timeout handling,
+  recovery, and frontend reconciliation on its side.
+- Stdio MCP has been removed from the primary business MCP path. Wind, Qieman,
+  bond quote parsing, credential tools, wealth assistant, and group insurance
+  audit are now modeled as HTTP/streamable-http MCP or platform tools. This
+  avoids the old per-call stdio process/resource pressure.
+
+Upgrade still needs validation around the interfaces we actively depend on:
+
+- `openclaw.json` path and schema compatibility, especially `agents.list`,
+  `workspace`, `skills`, `tools.alsoAllow`, `tools.sandbox.tools.alsoAllow`, and
+  `mcp.servers`.
+- Trusted runtime context propagation to MCP handlers, especially
+  `_meta.openclaw.agentId`, `sessionKey`, `sessionId`, and `workspaceDir`.
+  Data-sensitive MCP services must not depend on user-supplied ids.
+- Per-agent MCP projection behavior. Codex app-server projection through
+  `mcp.servers.*.codex.agents` existed in the previously reviewed OpenClaw path;
+  newer versions should be rechecked before role-based MCP filtering is enabled.
+- Gateway streaming events used by Employee Agent desktop/web paths, including
+  assistant deltas, tool start/result events, terminal done/error events, and
+  idle timeout behavior.
+- Skill runtime loading: whether changes to `agents.list[].skills` and workspace
+  skill folders require gateway restart or can be hot reloaded.
+- MCP server transport compatibility for `streamable-http` and any OpenAI-style
+  HTTP/SSE fallback paths.
+
+Recommended sequence for the three environments:
+
+1. First synchronize Employee Agent code and configuration across local,
+   Shanghai, and Singapore experiment environments. Do not upgrade OpenClaw while
+   EA code/config are divergent; otherwise failures cannot be attributed cleanly.
+2. Freeze and back up current `openclaw.json`, `.env`, workspace directories,
+   PM2 process list, and approved Skill/MCP catalog in each environment.
+3. Upgrade Singapore experiment first. It is the right place to validate latest
+   OpenClaw against a real server without risking Shanghai production users.
+4. Run a fixed smoke suite in Singapore:
+   - plain chat streaming
+   - tool-call card rendering
+   - web search / browser tool if enabled
+   - Wind/Qieman public data MCP
+   - bond quote parse MCP
+   - credential MCP
+   - group insurance audit MCP
+   - wealth assistant MCP, including agentId/context propagation
+   - Skill install/uninstall and marketplace install
+   - file list/download if enabled
+   - desktop connection if the desktop build points at the environment
+5. Only after Singapore passes, upgrade local for developer parity and debugging.
+6. Upgrade Shanghai last, during a planned maintenance window, with a rollback
+   bundle ready: previous OpenClaw package/version, previous `openclaw.json`, and
+   PM2 restart commands.
+
+Do not upgrade Shanghai first. The expected remaining risks are not the old
+Codex streaming patch or stdio MCP resource issue; they are schema/event drift,
+trusted-context drift, and role/MCP permission semantics.
 
 ## Implementation Plan
 

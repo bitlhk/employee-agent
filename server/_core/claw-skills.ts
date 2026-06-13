@@ -356,6 +356,76 @@ const MCP_TOOL_CATALOG = [
       "group-insurance-risk-summary",
     ],
   },
+  {
+    id: "credential-skills",
+    name: "凭证智能审核 MCP",
+    category: "内部业务 MCP",
+    description:
+      "内部业务 MCP，提供凭证分类、要素提取、图像质量分析与字段定位能力，面向凭证审核与进件合规检查场景。",
+    children: [
+      {
+        id: "credential-classification",
+        name: "凭证分类",
+        description: "将凭证图片自动分类到 60 种预定义凭证类型。",
+        serverIds: ["credential_skills"],
+        tools: [
+          {
+            name: "classification",
+            description: "凭证分类：输入凭证图片，返回凭证类型、置信度与页数。",
+          },
+        ],
+      },
+      {
+        id: "credential-extraction",
+        name: "凭证要素提取",
+        description: "从凭证图像提取关键要素，支持 20 种凭证类型与提取 Prompt 版本管理。",
+        serverIds: ["credential_skills"],
+        tools: [
+          {
+            name: "credential-extractor",
+            description: "要素提取：按凭证类型从图像中提取收款人、金额、日期等关键信息。",
+          },
+          {
+            name: "list-credential-types",
+            description: "类型清单：列出当前支持的全部凭证类型。",
+          },
+          {
+            name: "sync-prompt",
+            description: "Prompt 管理：保存自定义提取 Prompt 配置。",
+          },
+          {
+            name: "query-prompt",
+            description: "Prompt 管理：查询提取 Prompt 配置及版本。",
+          },
+          {
+            name: "activate-prompt",
+            description: "Prompt 管理：激活指定版本的提取 Prompt。",
+          },
+        ],
+      },
+      {
+        id: "credential-image-analysis",
+        name: "凭证图像分析",
+        description: "图像质量分级与字段坐标定位，辅助审核划重点。",
+        serverIds: ["credential_skills"],
+        tools: [
+          {
+            name: "image-analyzer",
+            description: "质量分析：图像特征维度分析与元素等级判断（L1-L4）。",
+          },
+          {
+            name: "locate-field",
+            description: "字段定位：在图像中定位单个字段的 bbox 坐标。",
+          },
+          {
+            name: "locate-all-fields",
+            description: "批量定位：一次定位图像中全部字段的 bbox 坐标。",
+          },
+        ],
+      },
+    ],
+    recommendedSkills: ["credential-review"],
+  },
 ];
 
 function readOpenClawConfig(): Record<string, any> {

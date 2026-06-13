@@ -27,9 +27,15 @@ const CATEGORY_MAP: Record<string, { label: string; Icon: ComponentType<{ size?:
   writing: { label: "办公效率", Icon: FileText },
   office: { label: "办公效率", Icon: FileText },
   finance: { label: "金融专业", Icon: BarChart3 },
+  insurance: { label: "保险业务", Icon: ShieldCheck },
   dev: { label: "开发工具", Icon: Wrench },
   general: { label: "通用", Icon: Sparkles },
   data: { label: "数据分析", Icon: Database },
+  bond_trading: { label: "债券交易", Icon: BarChart3 },
+  credential_audit: { label: "凭证审核", Icon: FileText },
+  auto_insurance_sales: { label: "车险外呼", Icon: ShieldCheck },
+  group_insurance_audit: { label: "团险审核", Icon: ShieldCheck },
+  sales_coaching: { label: "销售陪练", Icon: BriefcaseBusiness },
 };
 
 const ORIGIN_META: Record<OriginKey, { label: string; Icon: ComponentType<{ size?: number; className?: string }> }> = {
@@ -85,13 +91,21 @@ function marketOriginOf(skill: { origin?: string; category?: string; author?: st
   return "squad";
 }
 
-function financeTagOf(item: MarketSkill): string {
+function scenarioTagOf(item: MarketSkill): string {
   const license = item.license.toLowerCase();
   const author = item.author.toLowerCase();
   const skillId = item.skillId.toLowerCase();
-  if (skillId === "bond-quote-parse") {
-    return "债券承销";
-  }
+  const category = item.category.toLowerCase();
+  const scenarioBySkillId: Record<string, string> = {
+    "bond-quote-parse": "债券交易",
+    "credential-prompt-generator": "凭证审核",
+    "insurance-telesales-recommend": "车险外呼",
+    "group-insurance-audit": "团险审核",
+    "goldencoach-stage-evaluation": "销售陪练",
+  };
+  if (scenarioBySkillId[skillId]) return scenarioBySkillId[skillId];
+  const meta = categoryMeta(category);
+  if (meta.label && meta.label !== "通用") return meta.label;
   if (license.includes("yingmi") || license.includes("qieman") || author.includes("盈米") || skillId.includes("wealth")) {
     return "个人财富";
   }
@@ -381,7 +395,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                     </div>
                     <div className="skills-market-card__meta">{item.author} · v{item.version}</div>
                   </div>
-                  <span className="skills-chip skills-chip--neutral">{financeTagOf(item)}</span>
+                  <span className="skills-chip skills-chip--neutral">{scenarioTagOf(item)}</span>
                 </div>
 
                 <div className="skills-market-card__desc">{item.description}</div>
