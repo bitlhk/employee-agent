@@ -140,15 +140,6 @@ bash /tmp/bootstrap-install.sh \
 | `--overwrite-env` | 已存在 `.env` 时强制重建 |
 | `--dry-run` | 只打印将执行的动作 |
 
-## 相关文档
-
-- [部署说明](docs/DEPLOY.md)
-- [系统架构](docs/ARCHITECTURE-SYSTEM.md)
-- [智能体架构](docs/ARCHITECTURE-AGENTS.md)
-- [企业审计设计](docs/enterprise-audit-ledger.md)
-- [JiuwenSwarm Patch 记录](docs/JIUWENSWARM_PATCHES.md)
-- [OpenClaw Runtime Patch 记录](docs/OPENCLAW_RUNTIME_PATCHES.md)
-
 ## 许可证
 
 [MIT](LICENSE)
