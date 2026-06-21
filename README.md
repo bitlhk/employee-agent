@@ -1,6 +1,6 @@
 # 员工智能体
 
-面向企业办公场景的 Agent Client / Agent Platform。它把每个员工自己的智能体、OpenClaw 运行时、技能和工具、协作任务、文件工作区、渠道通知、审计治理放到一个统一入口里。
+面向企业办公场景的 Agent Client / Agent Platform。它把每个员工自己的智能体、多个 Agent Runtime、技能和工具、协作任务、文件工作区、渠道通知、审计治理放到一个统一入口里。
 
 <p align="center">
   <img src="client/public/images/lingxia.svg" width="120" alt="员工智能体 Logo" />
@@ -9,7 +9,7 @@
 ## 适合做什么
 
 - 给每位员工申请一个隔离的智能体实例，用于日常对话、资料处理、文件生成和任务执行。
-- 统一接入 OpenClaw 或自定义 HTTP Agent，前端和管理后台不需要随运行时重写。
+- 统一接入 JiuwenSwarm、OpenClaw 或自定义 HTTP Agent，前端和管理后台不需要随运行时重写。
 - 把企业内部工具、MCP 服务、专业技能、岗位权限和审计记录接入一个可管理的平台。
 - 做企业岗位助手、金融投研工具、客户经理助手、办公自动化和团队协作类原型。
 
@@ -18,7 +18,7 @@
 ```text
 浏览器 / iOS 壳
   -> 员工智能体 Web 服务 (React + Node.js)
-  -> 本机 OpenClaw Gateway
+  -> JiuwenSwarm / OpenClaw / HTTP Runtime Adapter
   -> 本机 workspace / sandbox / tools
   -> MySQL
 ```
@@ -29,9 +29,9 @@
 
 每个用户可以申请自己的员工智能体实例。实例有独立身份、工作区、技能配置、工具权限和会话历史，适合企业内按人、岗位或团队逐步放开。
 
-**OpenClaw 优先的运行时接入**
+**多 Agent Runtime 接入**
 
-默认对接本机 OpenClaw Gateway，同时保留自定义 HTTP runtime 接入能力。平台侧负责用户、权限、技能市场、审计和协作；运行时侧负责模型推理、工具调用和文件执行。
+平台支持 JiuwenSwarm、OpenClaw 和自定义 HTTP runtime。平台侧负责用户、岗位、技能市场、MCP 授权、审计和协作；运行时侧负责模型推理、工具调用和文件执行。当前企业岗位智能体推荐优先使用 JiuwenSwarm，OpenClaw 保留为兼容运行时。
 
 **更顺滑的主对话体验**
 
@@ -39,7 +39,7 @@
 
 **工具和技能可治理**
 
-支持技能市场、私有技能、平台工具和 MCP 工具展示。工具能力可以逐步按岗位、用户或智能体授权，适合企业从“先跑通能力”过渡到“可审计、可管控”。
+支持技能市场、私有技能、平台工具和 MCP 工具展示。工具能力可以逐步按岗位、用户或智能体授权，并同步到不同 runtime 的注册和 allowlist，适合企业从“先跑通能力”过渡到“可审计、可管控”。
 
 **协作和办公工作区**
 
@@ -65,7 +65,7 @@
 | 前端 | React 19, Vite, TailwindCSS 4, Radix UI, tRPC |
 | 后端 | Node.js 22, Express, tRPC, tsx |
 | 数据库 | MySQL 8.0, Drizzle ORM |
-| 运行时 | OpenClaw Gateway；HTTP Adapter 可选 |
+| 运行时 | JiuwenSwarm；OpenClaw Gateway；HTTP Adapter 可选 |
 | 进程管理 | PM2 |
 | 移动端 | `apps/ios` 提供 Capacitor iOS 壳，可连接线上 Web 服务 |
 
@@ -73,7 +73,7 @@
 
 推荐系统：Ubuntu 22.04+ / 24.04。
 
-先在同一台机器准备并启动 OpenClaw Gateway，然后执行：
+先在同一台机器准备至少一个 Agent Runtime。推荐准备 JiuwenSwarm；如需兼容旧智能体，也可以同时启动 OpenClaw Gateway。然后执行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bitlhk/employee-agent/main/scripts/bootstrap-install.sh | bash
@@ -146,7 +146,8 @@ bash /tmp/bootstrap-install.sh \
 - [系统架构](docs/ARCHITECTURE-SYSTEM.md)
 - [智能体架构](docs/ARCHITECTURE-AGENTS.md)
 - [企业审计设计](docs/enterprise-audit-ledger.md)
-- [OpenClaw Patch 记录](docs/OPENCLAW_PATCHES.md)
+- [JiuwenSwarm Patch 记录](docs/JIUWENSWARM_PATCHES.md)
+- [OpenClaw Runtime Patch 记录](docs/OPENCLAW_RUNTIME_PATCHES.md)
 
 ## 许可证
 
