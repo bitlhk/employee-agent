@@ -173,6 +173,9 @@ export async function listClawAdoptionsAdmin(params?: {
         agentId: clawAdoptions.agentId,
         status: clawAdoptions.status,
         permissionProfile: clawAdoptions.permissionProfile,
+        roleTemplate: clawAdoptions.roleTemplate,
+        industry: clawAdoptions.industry,
+        runtime: clawAdoptions.runtime,
         ttlDays: clawAdoptions.ttlDays,
         entryUrl: clawAdoptions.entryUrl,
         expiresAt: clawAdoptions.expiresAt,
@@ -220,6 +223,9 @@ export async function updateClawAdoptionAdmin(
   id: number,
   patch: {
     permissionProfile?: ClawPermissionProfile;
+    roleTemplate?: string;
+    industry?: string;
+    runtime?: string;
     ttlDays?: number;
     status?: ClawAdoptionStatus;
     expiresAt?: Date | null;
@@ -230,6 +236,9 @@ export async function updateClawAdoptionAdmin(
 
   const nextPatch: Partial<InsertClawAdoption> = {};
   if (patch.permissionProfile) nextPatch.permissionProfile = patch.permissionProfile;
+  if (patch.roleTemplate) nextPatch.roleTemplate = patch.roleTemplate;
+  if (patch.industry) nextPatch.industry = patch.industry;
+  if (patch.runtime) nextPatch.runtime = patch.runtime;
   if (typeof patch.ttlDays === "number") {
     nextPatch.ttlDays = patch.ttlDays;
     nextPatch.expiresAt = patch.ttlDays > 0
@@ -246,6 +255,9 @@ export async function batchUpdateClawAdoptionAdmin(
   ids: number[],
   patch: {
     permissionProfile?: ClawPermissionProfile;
+    roleTemplate?: string;
+    industry?: string;
+    runtime?: string;
     ttlDays?: number;
     status?: ClawAdoptionStatus;
   }
@@ -256,6 +268,9 @@ export async function batchUpdateClawAdoptionAdmin(
 
   const nextPatch: Partial<InsertClawAdoption> = {};
   if (patch.permissionProfile) nextPatch.permissionProfile = patch.permissionProfile;
+  if (patch.roleTemplate) nextPatch.roleTemplate = patch.roleTemplate;
+  if (patch.industry) nextPatch.industry = patch.industry;
+  if (patch.runtime) nextPatch.runtime = patch.runtime;
   if (typeof patch.ttlDays === "number") {
     nextPatch.ttlDays = patch.ttlDays;
     nextPatch.expiresAt = patch.ttlDays > 0

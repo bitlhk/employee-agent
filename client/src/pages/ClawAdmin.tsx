@@ -57,6 +57,13 @@ const PERMISSION_OPTIONS = [
   { value: "internal", label: "管理员" },
 ] as const;
 
+const INDUSTRY_LABELS: Record<string, string> = {
+  general: "通用",
+  banking: "银行",
+  insurance: "保险",
+  securities: "证券",
+};
+
 const formatStatus = (status?: string) =>
   STATUS_OPTIONS.find((s) => s.value === status)?.label || status || "-";
 
@@ -401,6 +408,8 @@ export default function ClawAdmin() {
   const [passwordTarget, setPasswordTarget] = useState<any | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [selectedAuditEvent, setSelectedAuditEvent] = useState<any | null>(null);
+  const [assetGrantTarget, setAssetGrantTarget] = useState<any | null>(null);
+  const [assetGrantDraft, setAssetGrantDraft] = useState<Record<string, "default" | "optional">>({});
   const [auditPage, setAuditPage] = useState(1);
   const [auditFilters, setAuditFilters] = useState({
     q: "",
@@ -430,6 +439,15 @@ export default function ClawAdmin() {
     { keyword: keyword || undefined, status: statusFilter as any },
     { retry: false }
   );
+  const { data: roleTemplates } = trpc.claw.roleTemplates.useQuery(undefined, {
+    staleTime: 60_000,
+    retry: false,
+  });
+  const roleOptions: any[] = ((roleTemplates as any)?.roles || [])
+    .filter((role: any) => role?.status !== "disabled")
+    .sort((a: any, b: any) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0));
+  const roleLabelById = new Map<string, string>(roleOptions.map((role: any) => [String(role.id), String(role.name || role.id)]));
+  const formatRole = (roleId?: string): string => roleLabelById.get(String(roleId || "")) || roleId || "普通助手";
 
   const updateMutation = trpc.claw.adminUpdate.useMutation({
     retry: false,
@@ -464,6 +482,69 @@ export default function ClawAdmin() {
     enabled: activeTab === "skills",
     retry: false,
   });
+  const { data: roleAssetCatalog, refetch: refetchRoleAssetCatalog } = trpc.claw.adminRoleAssetCatalog.useQuery(undefined, {
+    enabled: activeTab === "skills",
+    retry: false,
+  });
+  const roleAssetGrants: any[] = Array.isArray((roleAssetCatalog as any)?.grants) ? (roleAssetCatalog as any).grants : [];
+  const mcpRoleAssets: any[] = Array.isArray((roleAssetCatalog as any)?.mcpServers) ? (roleAssetCatalog as any).mcpServers : [];
+  const roleGrantOptions = [
+    { id: "*", name: "所有岗位", industry: "general", status: "mvp" },
+    ...roleOptions,
+  ];
+  const grantRoleLabel = (roleKey: string) => roleKey === "*" ? "所有岗位" : formatRole(roleKey);
+  const assetGrantMutation = trpc.claw.adminSetRoleAssetGrants.useMutation({
+    onSuccess: () => {
+      refetchRoleAssetCatalog();
+      toast.success("岗位授权已更新");
+      setAssetGrantTarget(null);
+      setAssetGrantDraft({});
+    },
+    onError: (e: any) => toast.error(e?.message || "岗位授权更新失败"),
+  });
+  const grantsForAsset = (assetType: "skill" | "mcp_server", assetId: string) =>
+    roleAssetGrants.filter((grant: any) => grant.assetType === assetType && grant.assetId === assetId && grant.enabled);
+  const openGrantEditor = (assetType: "skill" | "mcp_server", assetId: string, name: string) => {
+    const adminGrants = grantsForAsset(assetType, assetId).filter((grant: any) => grant.source === "admin");
+    setAssetGrantTarget({ assetType, assetId, name });
+    setAssetGrantDraft(Object.fromEntries(adminGrants.map((grant: any) => [grant.roleKey, grant.grantMode === "default" ? "default" : "optional"])));
+  };
+  const toggleGrantRole = (roleKey: string, checked: boolean) => {
+    setAssetGrantDraft((prev) => {
+      const next = { ...prev };
+      if (checked) next[roleKey] = next[roleKey] || "optional";
+      else delete next[roleKey];
+      return next;
+    });
+  };
+  const setGrantMode = (roleKey: string, grantMode: "default" | "optional") => {
+    setAssetGrantDraft((prev) => ({ ...prev, [roleKey]: grantMode }));
+  };
+  const saveGrantDraft = () => {
+    if (!assetGrantTarget) return;
+    assetGrantMutation.mutate({
+      assetType: assetGrantTarget.assetType,
+      assetId: assetGrantTarget.assetId,
+      grants: Object.entries(assetGrantDraft).map(([roleKey, grantMode]) => ({ roleKey, grantMode })),
+    });
+  };
+  const renderGrantSummary = (assetType: "skill" | "mcp_server", assetId: string) => {
+    const grants = grantsForAsset(assetType, assetId);
+    const visible = grants.slice(0, 4);
+    if (!grants.length) return <span className="text-[10px] text-muted-foreground">未配置岗位授权</span>;
+    return (
+      <span className="inline-flex flex-wrap gap-1">
+        {visible.map((grant: any) => (
+          <span key={`${grant.source}-${grant.roleKey}`} className={`rounded border px-1.5 py-0.5 text-[10px] ${
+            grant.source === "seed" ? "border-blue-200 bg-blue-50 text-blue-700" : "border-amber-200 bg-amber-50 text-amber-700"
+          }`}>
+            {grantRoleLabel(grant.roleKey)} · {grant.grantMode === "default" ? "默认" : "可选"} · {grant.source}
+          </span>
+        ))}
+        {grants.length > visible.length && <span className="text-[10px] text-muted-foreground">+{grants.length - visible.length}</span>}
+      </span>
+    );
+  };
   const publishSkillMutation = trpc.claw.adminPublishSkill.useMutation({
     onSuccess: () => { refetchMarket(); toast.success("发布成功"); },
     onError: (e: any) => toast.error(e?.message || "发布失败"),
@@ -787,11 +868,23 @@ export default function ClawAdmin() {
                 </Select>
                 <Select onValueChange={(v) => batchUpdateMutation.mutate({ ids: selectedIds, permissionProfile: v as any })}>
                   <SelectTrigger className="w-28 h-8 text-xs">
-                    <SelectValue placeholder="改角色" />
+                    <SelectValue placeholder="改权限" />
                   </SelectTrigger>
                   <SelectContent>
                     {PERMISSION_OPTIONS.map((p) => (
                       <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select onValueChange={(v) => batchUpdateMutation.mutate({ ids: selectedIds, roleTemplate: v })}>
+                  <SelectTrigger className="w-40 h-8 text-xs">
+                    <SelectValue placeholder="改岗位" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roleOptions.map((role: any) => (
+                      <SelectItem key={role.id} value={role.id}>
+                        {role.name}{role.status === "planned" ? "（规划）" : ""}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -819,7 +912,8 @@ export default function ClawAdmin() {
                       <th className="p-3 text-left font-medium text-muted-foreground">Organization</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">Group</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">状态</th>
-                      <th className="p-3 text-left font-medium text-muted-foreground">角色</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">权限档</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">岗位</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">有效期</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">操作</th>
                     </tr>
@@ -862,6 +956,26 @@ export default function ClawAdmin() {
                               ))}
                             </SelectContent>
                           </Select>
+                        </td>
+                        <td className="p-3">
+                          <Select
+                            value={String(row.roleTemplate || "general-assistant")}
+                            onValueChange={(v) => updateMutation.mutate({ id: row.id, roleTemplate: v })}
+                          >
+                            <SelectTrigger className="h-7 w-40 text-xs">
+                              <SelectValue placeholder={formatRole(row.roleTemplate)} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {roleOptions.map((role: any) => (
+                                <SelectItem key={role.id} value={role.id}>
+                                  {role.name}{role.status === "planned" ? "（规划）" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <div className="mt-1 text-[10px] text-muted-foreground">
+                            {INDUSTRY_LABELS[String(row.industry || "general")] || "通用"}
+                          </div>
                         </td>
                         <td className="p-3 text-xs text-muted-foreground">{formatExpiry(row)}</td>
                         <td className="p-3">
@@ -1041,17 +1155,9 @@ export default function ClawAdmin() {
                   {(marketSkills || []).map((item: any) => {
                     const catLabels: any = { finance: "金融", dev: "开发", data: "数据", writing: "写作", general: "通用" };
                     const originLabels: any = { opensource: "开源技能", finance: "金融专业", squad: "中队专区" };
-                    const itemAuthor = String(item.author || "").toLowerCase();
-                    const itemLicense = String(item.license || "").toLowerCase();
-                    const itemSkillId = String(item.skillId || "").toLowerCase();
-                    const originLabel = item.origin === "finance" || (item.origin === "opensource" && item.category === "finance") ? "金融专业" : item.origin === "squad" && item.category === "finance" && (
-                      itemLicense.includes("wind") ||
-                      itemLicense.includes("yingmi") ||
-                      itemLicense.includes("qieman") ||
-                      itemAuthor.includes("wind") ||
-                      itemAuthor.includes("盈米") ||
-                      itemSkillId.includes("wealth")
-                    ) ? "金融专业" : (originLabels[item.origin || "opensource"] || item.origin || "开源技能");
+                    const originLabel = item.origin === "finance" || (item.origin === "opensource" && item.category === "finance")
+                      ? "金融专业"
+                      : (originLabels[item.origin || "opensource"] || item.origin || "开源技能");
                     const stLabels: any = { pending: "待审核", approved: "已上架", rejected: "已拒绝", offline: "已下架" };
                     const stColors: any = { pending: "bg-yellow-50 text-yellow-700 border-yellow-200", approved: "bg-green-50 text-green-700 border-green-200", rejected: "bg-red-50 text-red-700 border-red-200", offline: "bg-gray-50 text-gray-500 border-gray-200" };
                     return (
@@ -1066,12 +1172,16 @@ export default function ClawAdmin() {
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600">{catLabels[item.category] || item.category}</span>
                             </div>
                             <div className="text-xs text-muted-foreground mt-1">{item.description || "—"}</div>
+                            <div className="mt-2">{renderGrantSummary("skill", item.skillId)}</div>
                             <div className="text-[10px] text-muted-foreground mt-1">
                               v{item.version} · {item.author} · {item.license} · 安装 {item.downloadCount} 次
                               {item.reviewNote && <span className="ml-2 text-yellow-600">审核备注: {item.reviewNote}</span>}
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
+                            <Button size="sm" variant="outline" className="admin-secondary-action h-7 text-xs" onClick={() => openGrantEditor("skill", item.skillId, item.name)}>
+                              岗位授权
+                            </Button>
                             <Button size="sm" variant="outline" className="admin-secondary-action h-7 text-xs" onClick={() => {
                               setViewingSkillId(item.id);
                               setAiReviewResult(null);
@@ -1107,6 +1217,113 @@ export default function ClawAdmin() {
                 </div>
               )}
             </Card>
+
+            {/* MCP 岗位授权 */}
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">MCP 岗位授权</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">按 server 级别给岗位授权；可见即时生效，默认装配随新建或岗位重置生效</p>
+                </div>
+                <Button size="sm" variant="outline" className="admin-secondary-action" onClick={() => refetchRoleAssetCatalog()}>
+                  <RefreshCw className="w-3.5 h-3.5 mr-1.5" />刷新
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {mcpRoleAssets.map((server: any) => (
+                  <div key={server.serverId} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-gray-900">{server.name || server.serverId}</span>
+                        <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-600">{server.serverId}</span>
+                        <span className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                          server.enabled ? "border-green-200 bg-green-50 text-green-700" : "border-gray-200 bg-gray-50 text-gray-500"
+                        }`}>{server.enabled ? "可用" : server.status || "未启用"}</span>
+                      </div>
+                      <div className="mt-1 text-[10px] text-muted-foreground">{server.groupName || "MCP"}</div>
+                      <div className="mt-2">{renderGrantSummary("mcp_server", server.serverId)}</div>
+                    </div>
+                    <Button size="sm" variant="outline" className="admin-secondary-action h-7 text-xs" onClick={() => openGrantEditor("mcp_server", server.serverId, server.name || server.serverId)}>
+                      岗位授权
+                    </Button>
+                  </div>
+                ))}
+                {mcpRoleAssets.length === 0 && (
+                  <div className="py-6 text-center text-xs text-muted-foreground">暂无 MCP server 可授权</div>
+                )}
+              </div>
+            </Card>
+
+            <Dialog open={!!assetGrantTarget} onOpenChange={(open) => {
+              if (!open) {
+                setAssetGrantTarget(null);
+                setAssetGrantDraft({});
+              }
+            }}>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>岗位授权</DialogTitle>
+                  <DialogDescription>
+                    {assetGrantTarget?.name || assetGrantTarget?.assetId} · {assetGrantTarget?.assetId}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-3">
+                    <div className="text-xs font-medium text-blue-900">基线授权</div>
+                    <div className="mt-2">
+                      {assetGrantTarget ? renderGrantSummary(assetGrantTarget.assetType, assetGrantTarget.assetId) : null}
+                    </div>
+                    <div className="mt-1 text-[11px] text-blue-700">seed 行来自基线，只能通过文档/配置变更调整；这里保存的是 admin 动态授权。</div>
+                  </div>
+                  <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                    {roleGrantOptions.map((role: any) => {
+                      const roleKey = String(role.id);
+                      const checked = Boolean(assetGrantDraft[roleKey]);
+                      return (
+                        <div key={roleKey} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                          <label className="flex min-w-0 flex-1 items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => toggleGrantRole(roleKey, e.target.checked)}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-sm font-medium text-gray-900">{role.name || roleKey}</span>
+                              <span className="block text-[10px] text-muted-foreground">
+                                {roleKey} · {INDUSTRY_LABELS[String(role.industry || "general")] || role.industry || "通用"}
+                                {role.status === "planned" ? " · 规划" : ""}
+                              </span>
+                            </span>
+                          </label>
+                          <Select
+                            value={assetGrantDraft[roleKey] || "optional"}
+                            disabled={!checked}
+                            onValueChange={(value) => setGrantMode(roleKey, value === "default" ? "default" : "optional")}
+                          >
+                            <SelectTrigger className="h-8 w-24 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="optional">可选</SelectItem>
+                              <SelectItem value="default">默认</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => {
+                    setAssetGrantTarget(null);
+                    setAssetGrantDraft({});
+                  }}>取消</Button>
+                  <Button onClick={saveGrantDraft} disabled={assetGrantMutation.isPending}>
+                    {assetGrantMutation.isPending ? "保存中…" : "保存动态授权"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             {/* 源码查看弹窗 */}
             {viewingSkillId && (

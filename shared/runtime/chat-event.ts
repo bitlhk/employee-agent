@@ -56,6 +56,16 @@ export type ChatBusinessEvent =
     }
   | { type: "agent.complete"; taskId?: string; result?: string; durationMs?: number }
   | { type: "workspace.files"; adoptId?: string; files: WorkspaceFileEvent[] }
+  | {
+      type: "workflow.updated";
+      phase?: string;
+      status?: string;
+      agentId?: string;
+      workflowId?: string;
+      runId?: string;
+      message?: string;
+      data?: Record<string, unknown>;
+    }
   | { type: "perf"; data: Record<string, unknown> };
 
 export type ChatEvent = ChatRuntimeEvent | ChatTransportEvent | ChatBusinessEvent;

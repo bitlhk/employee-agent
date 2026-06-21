@@ -90,6 +90,37 @@ describe("chat event parser", () => {
     ]);
   });
 
+  it("promotes jiuwenswarm workflow updates to first-class chat events", () => {
+    expect(parseWirePayloadToChatEvents({
+      _event: "jiuwen_event",
+      event_type: "workflow.updated",
+      delta: {
+        phase: "research",
+        status: "running",
+        agent_id: "analyst",
+        workflow_id: "wf-1",
+        run_id: "run-1",
+        message: "reading filings",
+      },
+    })).toEqual([{
+      type: "workflow.updated",
+      phase: "research",
+      status: "running",
+      agentId: "analyst",
+      workflowId: "wf-1",
+      runId: "run-1",
+      message: "reading filings",
+      data: {
+        phase: "research",
+        status: "running",
+        agent_id: "analyst",
+        workflow_id: "wf-1",
+        run_id: "run-1",
+        message: "reading filings",
+      },
+    }]);
+  });
+
   it("filters mismatched sessionKey when expectedSessionKey is provided", () => {
     expect(parseWirePayloadToChatEvents(
       { sessionKey: "agent:other:main", choices: [{ delta: { content: "leak" } }] },

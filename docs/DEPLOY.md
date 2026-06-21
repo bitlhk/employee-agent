@@ -152,6 +152,21 @@ pm2 start ecosystem.config.cjs
 
 然后重启 gateway：`openclaw gateway restart`
 
+### OpenClaw 运行时补丁
+
+部分环境对 OpenClaw / Codex runtime 做了下游补丁，当前包括：
+
+- WSS assistant delta 流式输出补丁；
+- `openclaw.json` 中配置的 MCP servers 注入 Codex runtime 的补丁。
+
+安装、升级或重建 OpenClaw 前，必须先阅读并核对：
+
+```text
+docs/OPENCLAW_RUNTIME_PATCHES.md
+```
+
+否则可能出现 WSS 能连接但输出不流式，或 MCP 工具页面可见但 Codex agent 实际不可调用的问题。
+
 ### 场景 B: 全新安装
 
 ```bash

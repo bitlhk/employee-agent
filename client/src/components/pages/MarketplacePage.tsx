@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, type ComponentType } from "react";
+﻿import { useEffect, useMemo, useState, type ComponentType } from "react";
 import {
   BarChart3,
   BriefcaseBusiness,
@@ -44,6 +44,23 @@ const ORIGIN_META: Record<OriginKey, { label: string; Icon: ComponentType<{ size
   squad: { label: "中队专区", Icon: Sparkles },
 };
 
+const ROLE_LABELS: Record<string, string> = {
+  "investment-researcher": "投顾分析",
+  "wealth-manager":        "财富经理",
+  "post-loan-risk-control":"风控经理",
+  "credential-compliance": "审核专员",
+  "insurance-advisor":     "保险顾问",
+  "general-assistant":     "通用助手",
+  "insurance-underwriting":"保险核保",
+  "insurance-claims":      "保险理赔",
+  "insurance-telesales":   "保险外呼",
+  "insurance-ops":         "保险审核",
+  "credit-risk":           "信贷风控",
+  "compliance":            "合规专员",
+  "bond-trading":          "债券交易",
+  "sales-coaching":        "销售陪练",
+};
+
 interface MarketSkill {
   id: number;
   skillId: string;
@@ -55,10 +72,16 @@ interface MarketSkill {
   category: string;
   origin: OriginKey;
   license: string;
+  roleTag: string;
+  provider: string;
 }
 
-const MARKET_CACHE_KEY = "employee-agent:skill-market:v3";
+const MARKET_CACHE_PREFIX = "employee-agent:skill-market:v9:";
 const MARKET_INSTALLED_CACHE_PREFIX = "employee-agent:skill-market-installed:";
+
+function marketCacheKey(adoptId?: string) {
+  return `${MARKET_CACHE_PREFIX}${adoptId || "none"}`;
+}
 
 function marketInstalledCacheKey(adoptId?: string) {
   return `${MARKET_INSTALLED_CACHE_PREFIX}${adoptId || "none"}`;
@@ -70,25 +93,13 @@ function categoryMeta(category: string) {
 
 function marketOriginOf(skill: { origin?: string; category?: string; author?: string; license?: string; skillId?: string }): OriginKey {
   if (skill.origin === "finance") return "finance";
-  if (skill.origin !== "squad") {
-    if (skill.category === "finance") return "finance";
-    return "opensource";
-  }
-  const license = String(skill.license || "").toLowerCase();
-  const author = String(skill.author || "").toLowerCase();
-  const skillId = String(skill.skillId || "").toLowerCase();
-  if (
-    skill.category === "finance" &&
-    (license.includes("wind") ||
-      license.includes("yingmi") ||
-      license.includes("qieman") ||
-      author.includes("wind") ||
-      author.includes("盈米") ||
-      skillId.includes("wealth"))
-  ) {
-    return "finance";
-  }
-  return "squad";
+  if (skill.origin === "squad") return "squad";
+  if (skill.category === "finance") return "finance";
+  return "opensource";
+}
+
+function roleChipLabel(item: MarketSkill): string {
+  return ROLE_LABELS[item.roleTag] || scenarioTagOf(item);
 }
 
 function scenarioTagOf(item: MarketSkill): string {
@@ -138,6 +149,8 @@ function normalizeMarketSkills(list: any[]): MarketSkill[] {
       skillId: s.skillId || s.skill_id,
     }),
     license: String(s.license || "MIT"),
+    roleTag: String(s.roleTag || s.role_tag || ""),
+    provider: String(s.provider || ""),
   }));
 }
 
@@ -148,8 +161,32 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
   const [installing, setInstalling] = useState<number | null>(null);
   const [q, setQ] = useState("");
   const [activeOrigin, setActiveOrigin] = useState<OriginKey>("opensource");
+  const [activeProviders, setActiveProviders] = useState<Set<string>>(new Set());
+  const [activeRoleTags, setActiveRoleTags] = useState<Set<string>>(new Set());
   const [installedMarket, setInstalledMarket] = useState<Record<string, { skillId: string; version?: string }>>({});
   const [selectedSkill, setSelectedSkill] = useState<MarketSkill | null>(null);
+
+  const filterableOrigin = activeOrigin === "finance" || activeOrigin === "squad";
+  const originProviders = useMemo(() =>
+    [...new Set(items.filter(x => x.origin === activeOrigin).map(x => x.provider).filter(Boolean))].sort()
+  , [activeOrigin, items]);
+
+  const originRoleTags = useMemo(() => {
+    const keys = [...new Set(items.filter(x => x.origin === activeOrigin && x.roleTag).map(x => x.roleTag))];
+    return keys.sort((a, b) => (ROLE_LABELS[a] || a).localeCompare(ROLE_LABELS[b] || b));
+  }, [activeOrigin, items]);
+
+  const selectOrigin = (origin: OriginKey) => {
+    setActiveOrigin(origin);
+    setActiveProviders(new Set());
+    setActiveRoleTags(new Set());
+  };
+  const toggleProvider = (p: string) => setActiveProviders(prev => {
+    const next = new Set(prev); next.has(p) ? next.delete(p) : next.add(p); return next;
+  });
+  const toggleRoleTag = (r: string) => setActiveRoleTags(prev => {
+    const next = new Set(prev); next.has(r) ? next.delete(r) : next.add(r); return next;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -158,7 +195,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
     let hasCachedItems = false;
 
     try {
-      const cached = window.localStorage.getItem(MARKET_CACHE_KEY);
+      const cached = window.localStorage.getItem(marketCacheKey(adoptId));
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -170,14 +207,17 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
     } catch {}
 
     if (!hasCachedItems) setLoading(true);
-    fetch("/api/trpc/claw.marketList", { signal: controller.signal })
+    fetch(`/api/claw/skill-market/list?adoptId=${encodeURIComponent(adoptId || "")}`, {
+      credentials: "include",
+      signal: controller.signal,
+    })
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
-        const list = d?.result?.data?.json || d?.result?.data || [];
+        const list = d?.items || d?.result?.data?.json || d?.result?.data || [];
         const normalized = normalizeMarketSkills(Array.isArray(list) ? list : []);
         setItems(normalized);
-        try { window.localStorage.setItem(MARKET_CACHE_KEY, JSON.stringify(normalized)); } catch {}
+        try { window.localStorage.setItem(marketCacheKey(adoptId), JSON.stringify(normalized)); } catch {}
       })
       .catch(() => {
         if (!cancelled) setItems((prev) => prev);
@@ -192,7 +232,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, []);
+  }, [adoptId]);
 
   useEffect(() => {
     if (!adoptId) {
@@ -309,7 +349,9 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
   const filtered = items.filter((x) => {
     const matchOrigin = x.origin === activeOrigin;
     const matchQ = !q.trim() || `${x.title} ${x.description} ${x.skillId}`.toLowerCase().includes(q.toLowerCase());
-    return matchOrigin && matchQ;
+    const matchProvider = activeProviders.size === 0 || activeProviders.has(x.provider);
+    const matchRole = activeRoleTags.size === 0 || activeRoleTags.has(x.roleTag);
+    return matchOrigin && matchQ && matchProvider && matchRole;
   });
   const originCounts = items.reduce<Record<string, number>>((acc, x) => {
     acc[x.origin] = (acc[x.origin] || 0) + 1;
@@ -341,7 +383,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
             const active = activeOrigin === origin;
             const count = originCounts[origin] || 0;
             return (
-              <button key={origin} className={`skills-tab ${active ? "active" : ""}`} onClick={() => setActiveOrigin(origin)}>
+              <button key={origin} className={`skills-tab ${active ? "active" : ""}`} onClick={() => selectOrigin(origin)}>
                 <Icon size={13} />
                 {meta.label}
                 <span className="skills-market-count">{count}</span>
@@ -350,6 +392,45 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
           })}
         </div>
       </div>
+
+      {filterableOrigin && (originProviders.length > 0 || originRoleTags.length > 0) && (
+        <div className="skills-market-filters settings-card">
+          {originProviders.length > 0 && (
+            <div className="skills-market-filter-row">
+              <span className="skills-market-filter-label">提供方</span>
+              <div className="skills-market-filter-chips">
+                {originProviders.map(p => (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`skills-filter-chip ${activeProviders.has(p) ? "skills-filter-chip--active" : ""}`}
+                    onClick={() => toggleProvider(p)}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {originRoleTags.length > 0 && (
+            <div className="skills-market-filter-row">
+              <span className="skills-market-filter-label">岗位</span>
+              <div className="skills-market-filter-chips">
+                {originRoleTags.map(r => (
+                  <button
+                    key={r}
+                    type="button"
+                    className={`skills-filter-chip ${activeRoleTags.has(r) ? "skills-filter-chip--active" : ""}`}
+                    onClick={() => toggleRoleTag(r)}
+                  >
+                    {ROLE_LABELS[r] || r}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {loading && (
         <div className="settings-card skills-market-empty">
@@ -395,7 +476,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                     </div>
                     <div className="skills-market-card__meta">{item.author} · v{item.version}</div>
                   </div>
-                  <span className="skills-chip skills-chip--neutral">{scenarioTagOf(item)}</span>
+                  <span className="skills-chip skills-chip--neutral">{roleChipLabel(item)}</span>
                 </div>
 
                 <div className="skills-market-card__desc">{item.description}</div>
@@ -450,7 +531,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                   </div>
 
                   <div className="skills-market-detail__chips">
-                    <span className="skills-chip skills-chip--neutral">{financeTagOf(selectedSkill)}</span>
+                    <span className="skills-chip skills-chip--neutral">{roleChipLabel(selectedSkill)}</span>
                     <span className="skills-chip skills-chip--neutral">{meta.label}</span>
                     <span className="skills-chip skills-chip--neutral">{selectedSkill.license}</span>
                     {installed ? (

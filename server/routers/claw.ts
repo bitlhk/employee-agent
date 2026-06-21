@@ -32,6 +32,12 @@ import {
   listBusinessAgentAudit,
   reverseTenantToken,
   getTenantAuditStats,
+  resolveEffectiveRoleAssets,
+  previewRoleAssetSeedSync,
+  syncRoleAssetSeed,
+  listRoleAssetGrants,
+  replaceAdminRoleAssetGrantsForAsset,
+  syncGlobalOpenSourceSkillGrants,
   getDb,
 } from "../db";
 import {
@@ -55,8 +61,17 @@ import { onboardBuiltinSkillsForAdopt } from "../_core/skills/skill-onboarding";
 import { skillRegistry } from "../_core/skills/skill-registry";
 import { parseSkillSourceDirectory } from "../_core/skills/skill-source";
 import { cleanupOpenClawWeixinBindingForAdopt } from "../_core/claw-weixin";
-import type { SkillSource } from "../../shared/types/skill";
+import type { Skill, SkillSource } from "../../shared/types/skill";
 import { restoreDeletedProtectedCoreFiles, snapshotProtectedCoreFiles } from "../_core/core-file-guard";
+import {
+  getRoleSkillMcpBaseline,
+  listAgentRoleTemplates,
+  resolveAgentRoleTemplate,
+} from "../_core/role-templates";
+import type { AgentRoleTemplate, AgentRuntime } from "../_core/role-templates";
+import { resolveRoleRuntimeProvisionPlan } from "../_core/role-runtime-adapter";
+import { getRoleRuntimeAdapter, isJiuwenSwarmProvisionEnabled } from "./role-runtime-adapters";
+import { listConfiguredMcpServers, listMcpToolGroups } from "../_core/claw-skills";
 
 const resolveClawRuntime = (adoptId: unknown): "openclaw" | "hermes" | "jiuwenclaw" => {
   const id = String(adoptId || "");
@@ -64,6 +79,180 @@ const resolveClawRuntime = (adoptId: unknown): "openclaw" | "hermes" | "jiuwencl
   if (id.startsWith("lgh-")) return "hermes";
   return "openclaw";
 };
+
+type AdminClawAdoption = NonNullable<Awaited<ReturnType<typeof getClawAdoptionAdminById>>>;
+
+const roleResettableStatuses = new Set(["creating", "active", "expiring"]);
+
+type EffectiveRoleAssets = Awaited<ReturnType<typeof resolveEffectiveRoleAssets>>;
+
+const diffSorted = (before: readonly string[] = [], after: readonly string[] = []) => {
+  const beforeSet = new Set(before.map((item) => String(item || "").trim()).filter(Boolean));
+  const afterSet = new Set(after.map((item) => String(item || "").trim()).filter(Boolean));
+  return {
+    added: [...afterSet].filter((item) => !beforeSet.has(item)).sort(),
+    removed: [...beforeSet].filter((item) => !afterSet.has(item)).sort(),
+  };
+};
+
+const diffEffectiveRoleAssets = (before: EffectiveRoleAssets, after: EffectiveRoleAssets) => ({
+  skills: {
+    default: diffSorted(before.skills.default, after.skills.default),
+    optional: diffSorted(before.skills.optional, after.skills.optional),
+  },
+  mcpServers: {
+    default: diffSorted(before.mcpServers.default, after.mcpServers.default),
+    optional: diffSorted(before.mcpServers.optional, after.mcpServers.optional),
+  },
+});
+
+const resolveRoleResetRuntime = (row: AdminClawAdoption): AgentRuntime => {
+  const runtime = String(row.runtime || "").trim();
+  if (runtime === "jiuwenswarm" || String(row.adoptId || "").startsWith("lgj-")) return "jiuwenswarm";
+  return "openclaw";
+};
+
+const applyAdminRoleReset = async (input: {
+  before: AdminClawAdoption;
+  role: AgentRoleTemplate;
+  operatorId: number | null;
+  targetStatus?: string | null;
+}) => {
+  const adoptId = String(input.before.adoptId || "");
+  const agentId = String(input.before.agentId || "");
+  const runtime = resolveRoleResetRuntime(input.before);
+  const status = String(input.targetStatus || input.before.status || "");
+
+  if (!adoptId || !agentId) {
+    return {
+      applied: false,
+      runtime,
+      reason: "missing runtime agent identifiers",
+    };
+  }
+  if (!roleResettableStatuses.has(status)) {
+    return {
+      applied: false,
+      runtime,
+      reason: `status ${status || "unknown"} is not resettable`,
+    };
+  }
+
+  const previousRoleTemplate = String(input.before.roleTemplate || "general-assistant");
+  const previousEffectiveAssets = await resolveEffectiveRoleAssets(previousRoleTemplate);
+  const effectiveAssets = await resolveEffectiveRoleAssets(input.role.id);
+  const effectiveAssetDiff = diffEffectiveRoleAssets(previousEffectiveAssets, effectiveAssets);
+  const activeSkillIds = await resolveActiveSkillIdsAfterRoleReset(adoptId, effectiveAssets);
+  const runtimeAdapter = getRoleRuntimeAdapter(runtime);
+  const skillReconcile = await runtimeAdapter.reconcileSkills({
+    adoptId,
+    agentId,
+    role: input.role,
+    effectiveAssets,
+    activeSkillIds,
+  });
+  const mcpReconcile = await runtimeAdapter.reconcileMcp({
+    adoptId,
+    agentId,
+    role: input.role,
+    effectiveAssets,
+  });
+  const sessionEpoch = await runtimeAdapter.bumpSessionEpoch(adoptId, agentId);
+
+  await appendClawAdoptionEvent({
+    adoptionId: Number(input.before.id),
+    eventType: "profile_updated",
+    operatorType: "admin",
+    operatorId: input.operatorId,
+    detail: JSON.stringify({
+      action: "role_reset",
+      previousRoleTemplate,
+      roleTemplate: input.role.id,
+      industry: input.role.industry,
+      runtime,
+      previousEffectiveAssets,
+      effectiveAssets,
+      effectiveAssetDiff,
+      activeSkillIds,
+      skillReconcile,
+      mcpReconcile,
+      sessionEpoch,
+    }),
+  });
+
+  return {
+    applied: true,
+    runtime,
+    previousRoleTemplate,
+    previousEffectiveAssets,
+    effectiveAssets,
+    effectiveAssetDiff,
+    skillReconcile,
+    mcpReconcile,
+    sessionEpoch,
+  };
+};
+
+const resolveSelectableAdoptRoleTemplate = (roleId?: string | null): AgentRoleTemplate => {
+  const role = resolveAgentRoleTemplate(roleId);
+  if (role.status !== "mvp") {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `岗位暂未开放申请: ${role.name}`,
+    });
+  }
+  return role;
+};
+
+const resolveRoleSkillAccessForAdoption = async (adoptId: string) => {
+  const claw = await getClawByAdoptId(adoptId);
+  const roleTemplate = String((claw as any)?.roleTemplate || "general-assistant");
+  const effectiveAssets = await resolveEffectiveRoleAssets(roleTemplate);
+  const allowedSkillIds = new Set([
+    ...effectiveAssets.skills.default,
+    ...effectiveAssets.skills.optional,
+  ].map((skillId) => String(skillId || "").trim()).filter(Boolean));
+  return {
+    claw,
+    roleTemplate,
+    effectiveAssets,
+    allowedSkillIds,
+  };
+};
+
+const personalSkillSourceKinds = new Set(["uploaded", "generated"]);
+
+const resolveActiveSkillIdsAfterRoleReset = async (
+  adoptId: string,
+  effectiveAssets: Awaited<ReturnType<typeof resolveEffectiveRoleAssets>>,
+): Promise<string[]> => {
+  const allowedSkillIds = new Set([
+    ...effectiveAssets.skills.default,
+    ...effectiveAssets.skills.optional,
+  ].map((skillId) => String(skillId || "").trim()).filter(Boolean));
+  const listed = await skillRegistry.listSkills(adoptId);
+  if (!listed.ok) {
+    console.warn("[ROLE-RESET][SKILLS] failed to list installed skills; using role defaults only", {
+      adoptId,
+      kind: listed.error.kind,
+      detail: listed.error.detail,
+    });
+    return [];
+  }
+  return listed.value
+    .filter((skill: Skill) => skill.enabled && skill.state === "ready")
+    .filter((skill: Skill) => {
+      const sourceKind = String(skill.source?.kind || "");
+      if (personalSkillSourceKinds.has(sourceKind)) return true;
+      return allowedSkillIds.has(String(skill.id || "").trim()) ||
+        allowedSkillIds.has(String(skill.source?.skillId || "").trim());
+    })
+    .map((skill: Skill) => String(skill.id || skill.source?.skillId || "").trim())
+    .filter(Boolean)
+    .sort();
+};
+
+const randomRuntimeSuffix = () => nanoid(10).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10);
 
 type RuntimeModelOption = { id: string; name: string; desc?: string; isDefault?: boolean };
 const iosLoadDebugEnabled = process.env.IOS_LOAD_DEBUG === "1";
@@ -85,7 +274,7 @@ const getAvailableJiuwenModels = (): RuntimeModelOption[] => {
   try {
     if (existsSync(envPath)) modelName = parseEnvValue(readFileSync(envPath, "utf8"), "MODEL_NAME");
   } catch {}
-  const rawId = modelName || process.env.JIUWENCLAW_DEFAULT_MODEL || "glm-5.1";
+  const rawId = modelName || process.env.JIUWENCLAW_DEFAULT_MODEL || "glm-5.2";
   // Normalize to provider-prefixed format so MODEL_DISPLAY_NAMES in the frontend resolves correctly
   const id = rawId.includes("/") ? rawId : `modelarts-maas/${rawId}`;
   return [{ id, name: id, desc: "JiuwenSwarm", isDefault: true }];
@@ -201,7 +390,10 @@ export const clawRouter = router({
         entryUrl: String(c?.entryUrl || "")
           .replace("http://", "https://")
           .replace(".demo.linggantest.top", ".demo.linggan.top"),
-        runtime: resolveClawRuntime(c?.adoptId),
+        roleTemplate: String(c?.roleTemplate || "general-assistant"),
+        industry: String(c?.industry || "general"),
+        runtime: String(c?.runtime || resolveClawRuntime(c?.adoptId)),
+        actualRuntime: resolveClawRuntime(c?.adoptId),
       });
 
       const adoptions = all.map(normalizeEntry);
@@ -245,12 +437,69 @@ export const clawRouter = router({
           expiresAt: claw.expiresAt,
           displayName: String((profile as any)?.displayName || "员工智能体"),
           permissionProfile: String(claw.permissionProfile || "starter"),
+          roleTemplate: String((claw as any).roleTemplate || "general-assistant"),
+          industry: String((claw as any).industry || "general"),
+          runtime: String((claw as any).runtime || resolveClawRuntime(claw.adoptId)),
+          actualRuntime: resolveClawRuntime(claw.adoptId),
         };
       }),
 
     publicConfig: publicProcedure.query(async () => {
       const visibility = (await getSystemConfigValue("claw_visibility", "internal")).trim() || "internal";
       return { visibility: visibility === "internal" ? "internal" : "public" };
+    }),
+
+    roleTemplates: publicProcedure.query(() => {
+      const baseline = getRoleSkillMcpBaseline();
+      const roles = listAgentRoleTemplates().map((role) => ({
+        id: role.id,
+        name: role.name,
+        description: role.description,
+        industry: role.industry,
+        industryName: role.industryName,
+        status: role.status,
+        mvp: role.status === "mvp",
+        displayOrder: role.displayOrder,
+        permissionProfile: role.permissionProfile,
+        runtime: role.runtime,
+        defaultVisibleZones: role.defaultVisibleZones,
+        defaultSkills: role.defaultSkills,
+        optionalSkills: role.optionalSkills,
+        mcpServers: role.mcpServers,
+        mcpTools: role.mcpTools,
+        defaultModel: role.defaultModel,
+      }));
+      return {
+        version: baseline.version,
+        defaultRole: baseline.schema.defaultRole,
+        runtimePolicy: baseline.runtimePolicy,
+        industries: Object.fromEntries(Object.entries(baseline.industries).map(([id, block]) => [id, { name: block.name }])),
+        roles,
+      };
+    }),
+
+    roleAssetSeedPreview: adminProcedure.query(async () => {
+      const plan = await previewRoleAssetSeedSync();
+      return {
+        desiredCount: plan.desired.length,
+        upsertCount: plan.upsert.length,
+        pruneCount: plan.prune.length,
+        untouchedDynamicCount: plan.untouchedDynamic.length,
+        upsert: plan.upsert.slice(0, 100),
+        prune: plan.prune.slice(0, 100),
+      };
+    }),
+
+    roleAssetSeedSync: adminProcedure.mutation(async () => {
+      const plan = await syncRoleAssetSeed();
+      const openSourcePlan = await syncGlobalOpenSourceSkillGrants({ actor: "role-seed-sync" });
+      return {
+        desiredCount: plan.desired.length,
+        upsertCount: plan.upsert.length,
+        pruneCount: plan.prune.length,
+        untouchedDynamicCount: plan.untouchedDynamic.length,
+        openSourceSkillGrants: openSourcePlan,
+      };
     }),
 
     getAvailableModels: publicProcedure
@@ -388,47 +637,210 @@ export const clawRouter = router({
       .input(z.object({
         id: z.number().int().positive(),
         permissionProfile: z.enum(["starter", "plus", "internal"]).optional(),
+        roleTemplate: z.string().min(1).max(64).optional(),
         ttlDays: z.number().int().min(0).max(365).optional(),
         status: z.enum(["creating", "active", "expiring", "recycled", "failed"]).optional(),
         expiresAt: z.string().datetime().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const before = await getClawAdoptionAdminById(input.id);
+        if (!before) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "智能体不存在" });
+        }
+        const role = input.roleTemplate ? resolveAgentRoleTemplate(input.roleTemplate) : null;
         await updateClawAdoptionAdmin(input.id, {
           permissionProfile: input.permissionProfile as any,
+          roleTemplate: role?.id,
+          industry: role?.industry,
           ttlDays: input.ttlDays,
           status: input.status as any,
           expiresAt: input.expiresAt ? new Date(input.expiresAt) : undefined,
         });
+        let roleReset: Awaited<ReturnType<typeof applyAdminRoleReset>> | null = null;
+        if (role) {
+          try {
+            roleReset = await applyAdminRoleReset({
+              before,
+              role,
+              operatorId: ctx.user?.id ?? null,
+              targetStatus: input.status || null,
+            });
+          } catch (error: any) {
+            await recordAuditBestEffort({
+              action: "agent.role.reset_failed",
+              ...auditActor(ctx.user),
+              ...auditRequest(ctx.req),
+              targetType: "agent",
+              targetId: String(before.adoptId),
+              targetName: before.agentId ? String(before.agentId) : null,
+              agentInstanceId: String(before.adoptId),
+              runtimeType: resolveClawRuntime(before.adoptId),
+              runtimeAgentId: before.agentId ? String(before.agentId) : null,
+              metadata: {
+                id: input.id,
+                previousRoleTemplate: before.roleTemplate || null,
+                roleTemplate: role.id,
+                industry: role.industry,
+                roleRuntimeTarget: role.runtime,
+                error: auditErrorMetadata(error),
+              },
+            });
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: `岗位重置失败: ${error?.message || String(error)}`,
+            });
+          }
+        }
+        if (role && roleReset?.applied && "activeSkillIds" in roleReset) {
+          await recordAuditBestEffort({
+            action: "agent.role.changed",
+            ...auditActor(ctx.user),
+            ...auditRequest(ctx.req),
+            targetType: "agent",
+            targetId: String(before.adoptId || input.id),
+            targetName: before.agentId ? String(before.agentId) : null,
+            agentInstanceId: before.adoptId ? String(before.adoptId) : null,
+            runtimeType: resolveClawRuntime(before.adoptId),
+            runtimeAgentId: before.agentId ? String(before.agentId) : null,
+            metadata: {
+              id: input.id,
+              previousRoleTemplate: roleReset.previousRoleTemplate,
+              roleTemplate: role.id,
+              industry: role.industry,
+              runtime: roleReset.runtime,
+              previousEffectiveAssets: roleReset.previousEffectiveAssets,
+              effectiveAssets: roleReset.effectiveAssets,
+              effectiveAssetDiff: roleReset.effectiveAssetDiff,
+              activeSkillIds: roleReset.activeSkillIds,
+              skillReconcile: roleReset.skillReconcile,
+              mcpReconcile: roleReset.mcpReconcile,
+              sessionEpoch: roleReset.sessionEpoch,
+              changed: roleReset.previousRoleTemplate !== role.id,
+            },
+          });
+        }
         await recordAuditBestEffort({
           action: "agent.lifecycle.admin_updated",
           ...auditActor(ctx.user),
           ...auditRequest(ctx.req),
           targetType: "agent",
-          targetId: before?.adoptId ? String(before.adoptId) : String(input.id),
-          targetName: before?.agentId ? String(before.agentId) : null,
-          agentInstanceId: before?.adoptId ? String(before.adoptId) : null,
-          runtimeType: resolveClawRuntime(before?.adoptId),
-          runtimeAgentId: before?.agentId ? String(before.agentId) : null,
+          targetId: before.adoptId ? String(before.adoptId) : String(input.id),
+          targetName: before.agentId ? String(before.agentId) : null,
+          agentInstanceId: before.adoptId ? String(before.adoptId) : null,
+          runtimeType: resolveClawRuntime(before.adoptId),
+          runtimeAgentId: before.agentId ? String(before.agentId) : null,
           metadata: {
             id: input.id,
             permissionProfile: input.permissionProfile || null,
+            previousRoleTemplate: before.roleTemplate || null,
+            roleTemplate: role?.id || null,
+            industry: role?.industry || null,
+            roleRuntimeTarget: role?.runtime || null,
+            reconcileApplied: Boolean(roleReset?.applied),
+            roleReset,
             ttlDays: input.ttlDays ?? null,
             status: input.status || null,
             expiresAt: input.expiresAt || null,
           },
         });
-        return { ok: true };
+        return { ok: true, roleReset };
       }),
 
     adminBatchUpdate: adminProcedure
       .input(z.object({
         ids: z.array(z.number().int().positive()).min(1),
         permissionProfile: z.enum(["starter", "plus", "internal"]).optional(),
+        roleTemplate: z.string().min(1).max(64).optional(),
         ttlDays: z.number().int().min(0).max(365).optional(),
         status: z.enum(["creating", "active", "expiring", "recycled", "failed"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
+        const role = input.roleTemplate ? resolveAgentRoleTemplate(input.roleTemplate) : null;
+        const beforeRows = role
+          ? (await Promise.all(input.ids.map((id) => getClawAdoptionAdminById(id)))).filter((row): row is AdminClawAdoption => Boolean(row))
+          : [];
+        if (role && beforeRows.length !== input.ids.length) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "部分智能体不存在" });
+        }
+        await batchUpdateClawAdoptionAdmin(input.ids, {
+          permissionProfile: input.permissionProfile as any,
+          roleTemplate: role?.id,
+          industry: role?.industry,
+          ttlDays: input.ttlDays,
+          status: input.status as any,
+        });
+        const roleResetResults: Array<Awaited<ReturnType<typeof applyAdminRoleReset>> & { id: number; adoptId: string }> = [];
+        if (role) {
+          for (const before of beforeRows) {
+            try {
+              const roleReset = await applyAdminRoleReset({
+                before,
+                role,
+                operatorId: ctx.user?.id ?? null,
+                targetStatus: input.status || null,
+              });
+              roleResetResults.push({
+                id: Number(before.id),
+                adoptId: String(before.adoptId || ""),
+                ...roleReset,
+              });
+              if (roleReset.applied && "activeSkillIds" in roleReset) {
+                await recordAuditBestEffort({
+                  action: "agent.role.changed",
+                  ...auditActor(ctx.user),
+                  ...auditRequest(ctx.req),
+                  targetType: "agent",
+                  targetId: String(before.adoptId || before.id),
+                  targetName: before.agentId ? String(before.agentId) : null,
+                  agentInstanceId: before.adoptId ? String(before.adoptId) : null,
+                  runtimeType: resolveClawRuntime(before.adoptId),
+                  runtimeAgentId: before.agentId ? String(before.agentId) : null,
+                  metadata: {
+                    id: before.id,
+                    previousRoleTemplate: roleReset.previousRoleTemplate,
+                    roleTemplate: role.id,
+                    industry: role.industry,
+                    runtime: roleReset.runtime,
+                    previousEffectiveAssets: roleReset.previousEffectiveAssets,
+                    effectiveAssets: roleReset.effectiveAssets,
+                    effectiveAssetDiff: roleReset.effectiveAssetDiff,
+                    activeSkillIds: roleReset.activeSkillIds,
+                    skillReconcile: roleReset.skillReconcile,
+                    mcpReconcile: roleReset.mcpReconcile,
+                    sessionEpoch: roleReset.sessionEpoch,
+                    changed: roleReset.previousRoleTemplate !== role.id,
+                    source: "batch_admin_update",
+                  },
+                });
+              }
+            } catch (error: any) {
+              await recordAuditBestEffort({
+                action: "agent.role.reset_failed",
+                ...auditActor(ctx.user),
+                ...auditRequest(ctx.req),
+                targetType: "agent",
+                targetId: String(before.adoptId || before.id),
+                targetName: before.agentId ? String(before.agentId) : null,
+                agentInstanceId: before.adoptId ? String(before.adoptId) : null,
+                runtimeType: resolveClawRuntime(before.adoptId),
+                runtimeAgentId: before.agentId ? String(before.agentId) : null,
+                metadata: {
+                  id: before.id,
+                  previousRoleTemplate: before.roleTemplate || null,
+                  roleTemplate: role.id,
+                  industry: role.industry,
+                  roleRuntimeTarget: role.runtime,
+                  error: auditErrorMetadata(error),
+                  source: "batch_admin_update",
+                },
+              });
+              throw new TRPCError({
+                code: "INTERNAL_SERVER_ERROR",
+                message: `批量岗位重置失败: ${String(before.adoptId || before.id)} ${error?.message || String(error)}`,
+              });
+            }
+          }
+        }
         await recordAuditBestEffort({
           action: "agent.lifecycle.batch_admin_updated",
           ...auditActor(ctx.user),
@@ -438,16 +850,17 @@ export const clawRouter = router({
           metadata: {
             count: input.ids.length,
             permissionProfile: input.permissionProfile || null,
+            roleTemplate: role?.id || null,
+            industry: role?.industry || null,
+            roleRuntimeTarget: role?.runtime || null,
+            reconcileApplied: roleResetResults.some((item) => item.applied),
+            roleResetCount: roleResetResults.filter((item) => item.applied).length,
+            roleResetResults,
             ttlDays: input.ttlDays ?? null,
             status: input.status || null,
           },
         });
-        await batchUpdateClawAdoptionAdmin(input.ids, {
-          permissionProfile: input.permissionProfile as any,
-          ttlDays: input.ttlDays,
-          status: input.status as any,
-        });
-        return { ok: true, count: input.ids.length };
+        return { ok: true, count: input.ids.length, roleResetResults };
       }),
 
     adminDelete: adminProcedure
@@ -589,6 +1002,117 @@ export const clawRouter = router({
         return listSkillMarketItems(input?.status);
       }),
 
+    adminRoleAssetCatalog: adminProcedure.query(async () => {
+      await syncGlobalOpenSourceSkillGrants({ actor: "admin-role-asset-catalog" });
+      const roles = listAgentRoleTemplates()
+        .filter((role) => role.status !== "disabled")
+        .map((role) => ({
+          id: role.id,
+          name: role.name,
+          industry: role.industry,
+          status: role.status,
+          displayOrder: role.displayOrder,
+        }));
+      const skills = await listSkillMarketItems("approved");
+      const mcpGroups = listMcpToolGroups();
+      const mcpServersById = new Map<string, any>();
+      for (const server of listConfiguredMcpServers()) {
+        mcpServersById.set(server.serverId, {
+          ...server,
+          name: server.serverId,
+          groupId: "",
+          groupName: "OpenClaw MCP",
+        });
+      }
+      for (const group of Array.isArray(mcpGroups.items) ? mcpGroups.items : []) {
+        for (const child of Array.isArray((group as any).children) ? (group as any).children : []) {
+          const serverId = String((child as any).serverId || "").trim();
+          if (!serverId) continue;
+          const existing = mcpServersById.get(serverId) || {};
+          mcpServersById.set(serverId, {
+            ...existing,
+            serverId,
+            name: (child as any).name || serverId,
+            groupId: (group as any).id || "",
+            groupName: (group as any).name || "",
+            status: (child as any).status || existing.status || "unknown",
+            configured: Boolean((child as any).configured || existing.configured),
+            enabled: Boolean((child as any).enabled || existing.enabled),
+          });
+        }
+      }
+      const grants = await listRoleAssetGrants();
+      return {
+        roles,
+        skills,
+        mcpServers: Array.from(mcpServersById.values()).sort((a, b) => a.serverId.localeCompare(b.serverId)),
+        grants,
+      };
+    }),
+
+    adminSetRoleAssetGrants: adminProcedure
+      .input(z.object({
+        assetType: z.enum(["skill", "mcp_server"]),
+        assetId: z.string().min(1).max(128),
+        grants: z.array(z.object({
+          roleKey: z.string().min(1).max(64),
+          grantMode: z.enum(["default", "optional"]),
+        })).max(100),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const validRoleKeys = new Set(["*", ...listAgentRoleTemplates().map((role) => role.id)]);
+        const grants = input.grants.map((grant) => ({
+          roleKey: grant.roleKey.trim(),
+          grantMode: grant.grantMode,
+        }));
+        for (const grant of grants) {
+          if (!validRoleKeys.has(grant.roleKey)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: `未知岗位: ${grant.roleKey}` });
+          }
+        }
+
+        const assetId = input.assetId.trim();
+        if (input.assetType === "skill") {
+          const skills = await listSkillMarketItems("approved");
+          if (!skills.some((skill: any) => String(skill.skillId) === assetId)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: `未上架技能不存在: ${assetId}` });
+          }
+        } else {
+          const mcpGroups = listMcpToolGroups();
+          const serverIds = new Set<string>();
+          for (const group of Array.isArray(mcpGroups.items) ? mcpGroups.items : []) {
+            for (const child of Array.isArray((group as any).children) ? (group as any).children : []) {
+              const serverId = String((child as any).serverId || "").trim();
+              if (serverId) serverIds.add(serverId);
+            }
+          }
+          if (!serverIds.has(assetId)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: `未知 MCP server: ${assetId}` });
+          }
+        }
+
+        const rows = await replaceAdminRoleAssetGrantsForAsset({
+          assetType: input.assetType,
+          assetId,
+          grants,
+          actor: ctx.user?.email || `user:${ctx.user?.id || "admin"}`,
+        });
+        await recordAuditBestEffort({
+          action: "role_asset_grants.admin_set",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: input.assetType,
+          targetId: assetId,
+          metadata: {
+            assetType: input.assetType,
+            assetId,
+            grants,
+            adminGrantCount: grants.length,
+          },
+        });
+        return { ok: true, rows };
+      }),
+
     adminSystemHealth: adminProcedure.query(async () => {
       const checkedAt = new Date().toISOString();
       const openclawCli = resolveOpenClawCli();
@@ -726,6 +1250,9 @@ export const clawRouter = router({
           license: input.license || "MIT",
           packagePath: `${marketDir}/${status}/${input.skillId}`,
         });
+        if (status === "approved" && (input.origin || "opensource") === "opensource") {
+          await syncGlobalOpenSourceSkillGrants({ actor: ctx.user?.email || `user:${ctx.user?.id || "admin"}` });
+        }
         await recordAuditBestEffort({
           action: "skill.market.created",
           ...auditActor(ctx.user),
@@ -794,6 +1321,9 @@ export const clawRouter = router({
             reviewNote: input.reviewNote || null,
             packagePath: newDir,
           });
+          if (String((item as any).origin || "opensource") === "opensource") {
+            await syncGlobalOpenSourceSkillGrants({ actor: ctx.user?.email || `user:${ctx.user?.id || "admin"}` });
+          }
           if (input.status === "approved") {
             await recordAuditRequired({
               action: "skill.market.approved.completed",
@@ -962,10 +1492,17 @@ export const clawRouter = router({
         return { ok: true };
       }),
 
-    // 用户端浏览已上架技能
-    marketList: publicProcedure.query(async () => {
-      return listApprovedSkillMarketItems();
-    }),
+    // 用户端浏览已上架技能。技能市场全量开放；岗位只决定默认预装 skill 和 MCP 权限。
+    marketList: protectedProcedure
+      .input(z.object({ adoptId: z.string().min(1).max(64).optional() }).optional())
+      .query(async ({ input, ctx }) => {
+        await syncGlobalOpenSourceSkillGrants({ actor: "market-list" });
+        const rows = await listApprovedSkillMarketItems();
+        const adoptId = String(input?.adoptId || "").trim();
+        if (!adoptId) return rows;
+        await assertClawOwnerOrThrow(ctx, adoptId);
+        return rows;
+      }),
 
     // 用户安装（复制到 workspace/skills/）
     marketInstall: protectedProcedure
@@ -983,17 +1520,29 @@ export const clawRouter = router({
         if (!item || item.status !== "approved") throw new TRPCError({ code: "NOT_FOUND", message: "技能不存在或未上架" });
         await assertClawOwnerOrThrow(ctx, input.adoptId);
         const claw = await getClawByAdoptId(input.adoptId);
-        if (!item.packagePath || !existsSync(item.packagePath)) {
+        // Resolve package path: DB stores absolute path from the server that approved the skill
+        // (e.g. /root/.openclaw/...). On a different machine, remap to local OPENCLAW_HOME.
+        let resolvedPackagePath = item.packagePath || "";
+        if (resolvedPackagePath && !existsSync(resolvedPackagePath)) {
+          const marker = "/.openclaw/";
+          const idx = resolvedPackagePath.indexOf(marker);
+          if (idx !== -1) {
+            const rel = resolvedPackagePath.slice(idx + marker.length);
+            const candidate = OPENCLAW_HOME + "/" + rel;
+            if (existsSync(candidate)) resolvedPackagePath = candidate;
+          }
+        }
+        if (!resolvedPackagePath || !existsSync(resolvedPackagePath)) {
           throw new TRPCError({ code: "NOT_FOUND", message: "技能包源不存在" });
         }
 
-        const parsed = parseSkillSourceDirectory(item.packagePath, item.skillId || item.name || "market-skill");
+        const parsed = parseSkillSourceDirectory(resolvedPackagePath, item.skillId || item.name || "market-skill");
         const source: SkillSource = {
           kind: "marketplace",
           skillId: parsed.skillId || item.skillId,
           displayName: item.name || parsed.displayName || item.skillId,
           description: item.description || parsed.description || "",
-          sourcePath: item.packagePath,
+          sourcePath: resolvedPackagePath,
           marketplaceId: String(item.id),
           version: String(item.version || parsed.manifest?.version || "1.0.0"),
         };
@@ -1016,12 +1565,13 @@ export const clawRouter = router({
           resourceType: "agent",
           resourceId: input.adoptId,
           agentInstanceId: input.adoptId,
-          runtimeType: "openclaw",
+          runtimeType: resolveClawRuntime(input.adoptId),
           runtimeAgentId: String(claw?.agentId || ""),
           metadata: {
             marketplaceId: input.marketId,
             version: source.version,
             warningCount: parsed.warnings.length,
+            roleTemplate: String((claw as any)?.roleTemplate || "general-assistant"),
           },
         });
         return { ok: true, skillId: source.skillId, name: source.displayName, item: installed.value, warnings: parsed.warnings };
@@ -1198,7 +1748,9 @@ export const clawRouter = router({
         z
           .object({
             permissionProfile: z.enum(["plus", "internal"]).optional(),
+            roleTemplate: z.string().min(1).max(64).optional(),
             ttlDays: z.number().int().min(0).max(365).optional(),
+            preferRuntime: z.enum(["jiuwenswarm", "openclaw"]).optional(),
           })
           .optional()
       )
@@ -1212,8 +1764,14 @@ export const clawRouter = router({
           throw new Error("当前员工智能体为内部访问，仅内部权限用户可创建");
         }
 
-        // 幂等：已有活跃/创建中实例则直接返回
-        const existing = await getCurrentClawByUserId(userId);
+        // 幂等：普通申请沿用历史行为；迁移申请只复用同 runtime，避免老 lgc-* 阻止创建 lgj-*。
+        const preferRuntime = input?.preferRuntime;
+        const existing = preferRuntime
+          ? (await listClawsByUserId(userId)).find((claw) => {
+              const runtime = String((claw as any).runtime || resolveClawRuntime(claw.adoptId));
+              return runtime === preferRuntime || (preferRuntime === "jiuwenswarm" && claw.adoptId.startsWith("lgj-"));
+            }) || null
+          : await getCurrentClawByUserId(userId);
         if (existing) {
           const normalizedExisting = {
             ...existing,
@@ -1230,14 +1788,28 @@ export const clawRouter = router({
 
         const defaultProfile = (await getSystemConfigValue("claw_default_profile", "plus")).trim() || "plus";
         const profile = input?.permissionProfile || (defaultProfile === "internal" ? "internal" : "plus");
+        const role = resolveSelectableAdoptRoleTemplate(input?.roleTemplate);
+        const effectiveAssets = await resolveEffectiveRoleAssets(role.id);
+        const provisionPlan = resolveRoleRuntimeProvisionPlan(role, {
+          jiuwenswarmProvisionEnabled: isJiuwenSwarmProvisionEnabled(),
+        });
+        if (preferRuntime && provisionPlan.runtime !== preferRuntime) {
+          throw new Error(
+            preferRuntime === "jiuwenswarm"
+              ? "JiuwenSwarm 当前不可用，请稍后重试"
+              : "OpenClaw 当前不可用，请稍后重试",
+          );
+        }
+        const runtimeAdapter = getRoleRuntimeAdapter(provisionPlan.runtime);
         const defaultTtl = await getSystemConfigNumber("claw_default_ttl_days", 0);
         const ttlDays = input?.ttlDays ?? defaultTtl;
         // 测试主页统一直达生产 demo 域名，避免落到 linggantest 域
         const baseDomain = process.env.DEMO_ROUTE_DOMAIN || "demo.linggan.top";
         const entryScheme = (await getSystemConfigValue("claw_demo_entry_scheme", "https")).trim() || "https";
 
-        const adoptId = `lgc-${nanoid(10).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10)}`;
-        const agentId = `trial_${adoptId}`;
+        const suffix = randomRuntimeSuffix();
+        const adoptId = provisionPlan.runtime === "jiuwenswarm" ? `lgj-${suffix}` : `lgc-${suffix}`;
+        const agentId = provisionPlan.runtime === "jiuwenswarm" ? `jiuwen_${adoptId}` : `trial_${adoptId}`;
         const entryUrl = `${entryScheme}://${adoptId}.${baseDomain}`;
         const expiresAt = ttlDays > 0 ? new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000) : null;
 
@@ -1247,6 +1819,9 @@ export const clawRouter = router({
           agentId,
           status: "creating",
           permissionProfile: profile as "starter" | "plus" | "internal",
+          roleTemplate: role.id,
+          industry: role.industry,
+          runtime: provisionPlan.runtime,
           ttlDays,
           entryUrl,
           expiresAt,
@@ -1259,9 +1834,23 @@ export const clawRouter = router({
           targetId: adoptId,
           targetName: agentId,
           agentInstanceId: adoptId,
-          runtimeType: "openclaw",
+          runtimeType: provisionPlan.runtime,
           runtimeAgentId: agentId,
-          metadata: { profile, ttlDays, lifecycle: ttlDays > 0 ? "temporary" : "long_lived", source: "web" },
+          metadata: {
+            profile,
+            roleTemplate: role.id,
+            industry: role.industry,
+            roleRuntimeTarget: role.runtime,
+            requestedRuntime: provisionPlan.requestedRuntime,
+            actualRuntime: provisionPlan.runtime,
+            runtimeFallbackApplied: provisionPlan.fallbackApplied,
+            runtimeFallbackReason: provisionPlan.fallbackReason || null,
+            effectiveAssets,
+            reconcileApplied: false,
+            ttlDays,
+            lifecycle: ttlDays > 0 ? "temporary" : "long_lived",
+            source: "web",
+          },
         });
 
         await appendClawAdoptionEvent({
@@ -1269,18 +1858,36 @@ export const clawRouter = router({
           eventType: "create_requested",
           operatorType: "user",
           operatorId: userId,
-          detail: JSON.stringify({ profile, ttlDays, lifecycle: ttlDays > 0 ? "temporary" : "long_lived", source: "web" }),
+          detail: JSON.stringify({
+            profile,
+            roleTemplate: role.id,
+            industry: role.industry,
+            roleRuntimeTarget: role.runtime,
+            requestedRuntime: provisionPlan.requestedRuntime,
+            actualRuntime: provisionPlan.runtime,
+            runtimeFallbackApplied: provisionPlan.fallbackApplied,
+            runtimeFallbackReason: provisionPlan.fallbackReason || null,
+            effectiveAssets,
+            reconcileApplied: false,
+            ttlDays,
+            lifecycle: ttlDays > 0 ? "temporary" : "long_lived",
+            source: "web",
+          }),
         });
 
         try {
-          // 编排创建实例（mock/local-script）
-          const provision = provisionEmployeeAgentInstance({
+          // 编排创建实例（mock/local-script 或 runtime adapter）
+          const provision = await runtimeAdapter.provision({
             adoptId,
             agentId,
             userId,
             permissionProfile: profile as "starter" | "plus" | "internal",
             ttlDays,
+            role,
+            effectiveAssets,
           });
+          const skillReconcile = await runtimeAdapter.reconcileSkills({ adoptId, agentId, role, effectiveAssets });
+          const mcpReconcile = await runtimeAdapter.reconcileMcp({ adoptId, agentId, role, effectiveAssets });
 
           await updateClawAdoptionStatus(adoptionId, "active");
 
@@ -1299,11 +1906,22 @@ export const clawRouter = router({
             targetId: adoptId,
             targetName: agentId,
             agentInstanceId: adoptId,
-            runtimeType: "openclaw",
+            runtimeType: provisionPlan.runtime,
             runtimeAgentId: agentId,
             metadata: {
               adoptionId,
               profile,
+              roleTemplate: role.id,
+              industry: role.industry,
+              roleRuntimeTarget: role.runtime,
+              requestedRuntime: provisionPlan.requestedRuntime,
+              actualRuntime: provisionPlan.runtime,
+              runtimeFallbackApplied: provisionPlan.fallbackApplied,
+              runtimeFallbackReason: provisionPlan.fallbackReason || null,
+              effectiveAssets,
+              skillReconcile,
+              mcpReconcile,
+              reconcileApplied: Boolean(skillReconcile.applied || mcpReconcile.applied),
               ttlDays,
               entryUrl,
             },
@@ -1342,7 +1960,7 @@ export const clawRouter = router({
             targetId: adoptId,
             targetName: agentId,
             agentInstanceId: adoptId,
-            runtimeType: "openclaw",
+            runtimeType: provisionPlan.runtime,
             runtimeAgentId: agentId,
             errorCode: "AGENT_CREATE_FAILED",
             metadata: auditErrorMetadata(error),

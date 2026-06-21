@@ -4,11 +4,12 @@
  * 功能：Hero + 功能介绍 + 创建/进入
  */
 
-import { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { BrandIcon } from "@/components/BrandIcon";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import {
@@ -160,12 +161,21 @@ const features = [
   },
 ];
 
+const industryLabel: Record<string, string> = {
+  general: "通用",
+  banking: "银行",
+  insurance: "保险",
+  securities: "证券",
+};
+
 export default function ClawHome() {
   const brand = useBrand();
   const [, setLocation] = useLocation();
   const { user, logout } = useAuth();
   const [provisioning, setProvisioning] = useState(false);
   const [provisionStep, setProvisionStep] = useState("");
+  const [selectedRoleId, setSelectedRoleId] = useState("general-assistant");
+  const [migrationOpenFor, setMigrationOpenFor] = useState("");
 
   useEffect(() => {
     const previous = document.body.getAttribute("data-home-light");
@@ -180,6 +190,22 @@ export default function ClawHome() {
     enabled: !!user,
     retry: false,
   });
+  const { data: roleTemplates } = trpc.claw.roleTemplates.useQuery(undefined, {
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  const selectableRoles = useMemo(() => {
+    const roles = Array.isArray((roleTemplates as any)?.roles) ? (roleTemplates as any).roles : [];
+    return roles
+      .filter((role: any) => role?.status === "mvp")
+      .sort((a: any, b: any) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0));
+  }, [roleTemplates]);
+
+  const selectedRole = useMemo(
+    () => selectableRoles.find((role: any) => role.id === selectedRoleId) || selectableRoles[0],
+    [selectableRoles, selectedRoleId],
+  );
 
   const trpcUtils = trpc.useUtils();
 
@@ -188,7 +214,7 @@ export default function ClawHome() {
     onError: (e: any) => toast.error(e?.message || "创建失败，请稍后重试"),
   });
 
-  const handleAdopt = async () => {
+  const handleAdopt = async (options: { preferRuntime?: "jiuwenswarm" | "openclaw" } = {}) => {
     if (!user) {
       setLocation("/login?redirect=/");
       return;
@@ -197,7 +223,10 @@ export default function ClawHome() {
       setProvisioning(true);
       setProvisionStep("正在初始化专属实例…");
 
-      const result = await adoptMutation.mutateAsync();
+      const result = await adoptMutation.mutateAsync({
+        roleTemplate: selectedRole?.id || selectedRoleId,
+        preferRuntime: options.preferRuntime,
+      });
       const adoptId = result?.adoption?.adoptId;
       if (!adoptId) throw new Error("未获取到实例信息");
 
@@ -223,6 +252,7 @@ export default function ClawHome() {
 
       toast.success(result.reused ? "已为你打开智能体工作台" : "申请成功！");
       await refetchClawMe();
+      setMigrationOpenFor("");
       setLocation(`/claw/${adoptId}`);
     } catch (error: any) {
       toast.error(error?.message || "创建失败，请稍后重试");
@@ -244,6 +274,33 @@ export default function ClawHome() {
       ? [(clawMe as any).adoption]
       : [];
   const hasAnyClaw = adoptions.length > 0;
+  const jiuwenAdoption = adoptions.find((a: any) => String(a?.adoptId || "").startsWith("lgj-"));
+
+  const rolePicker = (
+    <div className="rounded-xl border border-border/60 bg-white/85 p-3 text-left shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-xs font-medium text-muted-foreground">岗位身份</span>
+        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+          {industryLabel[String(selectedRole?.industry || "general")] || "通用"}
+        </span>
+      </div>
+      <Select value={selectedRole?.id || selectedRoleId} onValueChange={setSelectedRoleId} disabled={provisioning || selectableRoles.length === 0}>
+        <SelectTrigger className="h-10 bg-white text-sm">
+          <SelectValue placeholder="选择岗位" />
+        </SelectTrigger>
+        <SelectContent>
+          {selectableRoles.map((role: any) => (
+            <SelectItem key={role.id} value={role.id}>
+              {role.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {selectedRole?.description ? (
+        <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{selectedRole.description}</p>
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="claw-home-shell min-h-screen bg-gradient-to-b from-white to-gray-50/80">
@@ -343,6 +400,9 @@ export default function ClawHome() {
                 <div className="space-y-3">
                   {adoptions.map((a: any) => {
                     const runtime = getRuntimeCardMeta(a.adoptId);
+                    const adoptId = String(a.adoptId || "");
+                    const isOpenClaw = adoptId.startsWith("lgc-");
+                    const isMigrationOpen = migrationOpenFor === adoptId;
                     return (
                       <Card key={a.adoptId} className="border-border/50 bg-white/80 backdrop-blur-sm overflow-hidden">
                         <div className="p-5">
@@ -368,13 +428,55 @@ export default function ClawHome() {
                               </span>
                             </div>
                           </div>
+                          {isOpenClaw ? (
+                            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-left">
+                              <p className="text-sm font-medium text-amber-900">OpenClaw 已切换到 JiuwenSwarm</p>
+                              <p className="mt-1 text-xs leading-5 text-amber-800">
+                                旧 OpenClaw 实例会保留，但新工作台请按岗位职责重新申请 JiuwenSwarm 智能体。
+                              </p>
+                            </div>
+                          ) : null}
                           <Button
                             className={`w-full text-white ${runtime.buttonClass}`}
-                            onClick={() => setLocation(`/claw/${a.adoptId}`)}
+                            onClick={() => {
+                              if (!isOpenClaw) {
+                                setLocation(`/claw/${a.adoptId}`);
+                                return;
+                              }
+                              if (jiuwenAdoption?.adoptId) {
+                                toast.info("已为你打开 JiuwenSwarm 智能体");
+                                setLocation(`/claw/${jiuwenAdoption.adoptId}`);
+                                return;
+                              }
+                              setSelectedRoleId(String(a.roleTemplate || "general-assistant"));
+                              setMigrationOpenFor(isMigrationOpen ? "" : adoptId);
+                            }}
                           >
-                            进入工作台
+                            {isOpenClaw ? (jiuwenAdoption ? "进入 JiuwenSwarm" : "申请 JiuwenSwarm") : "进入工作台"}
                             <ArrowRight className="w-4 h-4 ml-2" />
                           </Button>
+                          {isOpenClaw && isMigrationOpen && !jiuwenAdoption ? (
+                            <div className="mt-3 space-y-3">
+                              {rolePicker}
+                              <Button
+                                className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+                                onClick={() => handleAdopt({ preferRuntime: "jiuwenswarm" })}
+                                disabled={provisioning}
+                              >
+                                {provisioning ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    {provisionStep}
+                                  </>
+                                ) : (
+                                  <>
+                                    按岗位申请 JiuwenSwarm
+                                    <ArrowRight className="ml-2 h-4 w-4" />
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          ) : null}
                         </div>
                       </Card>
                     );
@@ -382,26 +484,29 @@ export default function ClawHome() {
                 </div>
               )}
 
-              {/* 没有智能体 → 创建（默认走 OpenClaw） */}
+              {/* 没有智能体 → 按岗位创建 */}
               {user && !isLoading && !hasAnyClaw && (
-                <Button
-                  size="lg"
-                  className="w-full bg-primary hover:bg-primary/90 text-white h-12 text-base"
-                  onClick={handleAdopt}
-                  disabled={provisioning}
-                >
-                  {provisioning ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      {provisionStep}
-                    </>
-                  ) : (
-                    <>
-                      申请员工智能体
-                      <ArrowRight className="w-4 h-4 ml-2" />
-                    </>
-                  )}
-                </Button>
+                <div className="space-y-3">
+                  {rolePicker}
+                  <Button
+                    size="lg"
+                    className="w-full bg-primary hover:bg-primary/90 text-white h-12 text-base"
+                    onClick={() => handleAdopt()}
+                    disabled={provisioning}
+                  >
+                    {provisioning ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        {provisionStep}
+                      </>
+                    ) : (
+                      <>
+                        申请员工智能体
+                        <ArrowRight className="w-4 h-4 ml-2" />
+                      </>
+                    )}
+                  </Button>
+                </div>
               )}
 
               {/* 未登录 */}

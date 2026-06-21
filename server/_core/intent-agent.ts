@@ -15,6 +15,10 @@ import { internalApiUrl } from "./helpers";
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || "";
 const DEEPSEEK_BASE = "https://api.deepseek.com";
 
+function isMainChatProjectManagerEnabled(): boolean {
+  return process.env.EA_MAIN_CHAT_PM_ENABLED === "1";
+}
+
 // ── 短消息快速过滤（不调 LLM）──
 const DISPATCH_KEYWORDS = /定时|每天|每隔|提醒|发到|微信|飞书|企微|任务|渠道|技能|插件|工具包|帮我做个|帮我生成|信贷|债券|理财|保险|PPT|幻灯片|股票|分析|评估|报告|代码|协作/;
 
@@ -407,6 +411,16 @@ export async function routeMessage(
   message: string,
   writer: StreamWriter,
 ): Promise<boolean> {
+  // Main chat no longer runs the EA-side project-manager router.
+  // Platform cron/channel management remains available through explicit UI/API
+  // surfaces, while natural-language scheduling is left to the runtime agent.
+  if (!isMainChatProjectManagerEnabled()) {
+    void adoptId;
+    void message;
+    void writer;
+    return false;
+  }
+
   // Phase 1 强制路由：特定 adoptId + 正则命中 → 跳过所有门禁直接 dispatch
   let forcedActions: { tool: string; args: any }[] | null = null;
   if (FORCE_ROUTE_ADOPT_IDS.has(adoptId)) {

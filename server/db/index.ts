@@ -8,5 +8,6 @@ export * from "./config";
 export * from "./ipAccess";
 export * from "./scenarios";
 export * from "./claw";
+export * from "./role-assets";
 export * from "./collab";
 export * from "./agents";

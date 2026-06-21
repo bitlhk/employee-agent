@@ -38,45 +38,9 @@ import { Bot, History } from "lucide-react";
 const ENABLE_OPENCLAW_WS_CHAT = true;
 
 
-// ── 2026-04-27: reasoning_content (DeepSeek-V4-Flash 等 reasoning 模型) 累积成虚拟 thinking toolCall ──
-// 渲染上完全复用 ChatMessage 现有的 GATEWAY_TOOL_META.thinking + lingxia-toolcard，零 UI 改动。
-// 设计要点（防三个真坑）：
-//   1) thinking 没显式 end 信号 → 收到 content delta 或 finish_reason=stop 时强制 mark done
-//   2) ID 用 ts+index 防同毫秒撞 ID
-//   3) 后端不发 tool_call event，纯前端制造，不会被 routeTool 拦截
-function applyReasoningDelta(msgs: any[], reasoningDelta: string): any[] {
-  if (msgs.length === 0) return msgs;
-  const lastIdx = msgs.length - 1;
-  const last = msgs[lastIdx];
-  if (last.role !== "assistant") return msgs;
-  const tcs = (last.toolCalls || []) as any[];
-  const running = tcs.find((tc: any) => tc.name === "thinking" && tc.status === "running");
-  let newTcs;
-  if (running) {
-    newTcs = tcs.map((tc: any) => tc === running ? { ...tc, result: (tc.result || "") + reasoningDelta } : tc);
-  } else {
-    const id = "thinking-" + Date.now() + "-" + tcs.length;
-    newTcs = [...tcs, { id, name: "thinking", arguments: "{}", result: reasoningDelta, status: "running" as const, ts: Date.now(), executor: "gateway" as const, _gateway: true }];
-  }
-  const next = [...msgs];
-  next[lastIdx] = { ...last, toolCalls: newTcs };
-  return next;
-}
-
+// reasoning_content 是模型内部推理流。当前产品不直接展示原始推理内容，避免和真实工具调用卡片混淆。
 function markThinkingDone(msgs: any[]): any[] {
-  if (msgs.length === 0) return msgs;
-  const lastIdx = msgs.length - 1;
-  const last = msgs[lastIdx];
-  if (last.role !== "assistant") return msgs;
-  const tcs = (last.toolCalls || []) as any[];
-  const hasRunning = tcs.some((tc: any) => tc.name === "thinking" && tc.status === "running");
-  if (!hasRunning) return msgs;
-  const newTcs = tcs.map((tc: any) => (tc.name === "thinking" && tc.status === "running")
-    ? { ...tc, status: "done" as const, durationMs: Date.now() - tc.ts }
-    : tc);
-  const next = [...msgs];
-  next[lastIdx] = { ...last, toolCalls: newTcs };
-  return next;
+  return msgs;
 }
 
 function toolCallsSignature(toolCalls?: ToolCallEntry[]) {
@@ -569,7 +533,7 @@ export default function Home() {
     });
   }, []);
   const [lingxiaInput, setLingxiaInput] = useState("");
-  const chatRuntimeMode = "fast" as const;
+  const chatRuntimeMode: "fast" = "fast";
   const [lingxiaMsgs, setLingxiaMsgs] = useState<LxMsg[]>([]);
   // 2026-04-29 批次 2 A3：mirror ref 用于 SSE 异步 handler 拿稳定 snapshot
   // React 18 concurrent 下 setState updater 不保证同步执行，不能在 updater 里抓 id 给外层用
@@ -586,6 +550,7 @@ export default function Home() {
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768);
   const [openclawVersion, setOpenclawVersion] = useState("OpenClaw 2026.5.7");
+  const [jiuwenswarmVersion, setJiuwenswarmVersion] = useState("JiuwenSwarm");
   const [runtimeAgentId, setRuntimeAgentId] = useState("");
   const prettyRuntimeAgentName = (agentId: string) => {
     const s = String(agentId || "").trim();
@@ -1996,10 +1961,10 @@ export default function Home() {
                 return;
               }
 
-              // reasoning_content delta（DeepSeek 等 reasoning 模型）→ 虚拟 thinking toolCall
+              // reasoning_content delta：不展示原始推理内容，避免伪装成工具调用。
               const reasoningDelta = chunk?.choices?.[0]?.delta?.reasoning_content;
               if (typeof reasoningDelta === "string" && reasoningDelta) {
-                setLingxiaMsgs((prev) => applyReasoningDelta(prev, reasoningDelta));
+                return;
               }
               // 文本 delta
               const delta = chunk?.choices?.[0]?.delta?.content;
@@ -2360,10 +2325,10 @@ export default function Home() {
               });
               continue;
             }
-            // reasoning_content delta（DeepSeek 等 reasoning 模型）→ 虚拟 thinking toolCall
+            // reasoning_content delta：不展示原始推理内容，避免伪装成工具调用。
             const httpReasoningDelta = chunk?.choices?.[0]?.delta?.reasoning_content;
             if (typeof httpReasoningDelta === "string" && httpReasoningDelta) {
-              setLingxiaMsgs((prev) => applyReasoningDelta(prev, httpReasoningDelta));
+              continue;
             }
             const deltaRaw = chunk?.choices?.[0]?.delta?.content;
             // content 有时是对象数组（MiniMax/GLM 等模型），需提取文本
@@ -2506,14 +2471,25 @@ export default function Home() {
 
     let cancelled = false;
 
-    fetchWithTimeout("/api/meta/openclaw-version", {}, 3000)
+    fetchWithTimeout("/api/meta/runtime-versions", {}, 3000)
       .then(r => r.json())
       .then(d => {
         if (cancelled) return;
-        const v = (d?.version || "").toString().trim();
-        if (v) setOpenclawVersion(v);
+        const openclaw = (d?.openclaw || "").toString().trim();
+        const jiuwenswarm = (d?.jiuwenswarm || "").toString().trim();
+        if (openclaw) setOpenclawVersion(openclaw);
+        if (jiuwenswarm && jiuwenswarm !== "unknown") setJiuwenswarmVersion(`JiuwenSwarm v${jiuwenswarm}`);
       })
-      .catch(() => {});
+      .catch(() => {
+        fetchWithTimeout("/api/meta/openclaw-version", {}, 3000)
+          .then(r => r.json())
+          .then(d => {
+            if (cancelled) return;
+            const v = (d?.version || "").toString().trim();
+            if (v) setOpenclawVersion(v);
+          })
+          .catch(() => {});
+      });
 
     if (resolvedAdoptId && user) {
       const requestStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -2588,16 +2564,18 @@ export default function Home() {
   const sidebarClawStatus = String((clawByAdoptId as any)?.status || cachedClawStatus || "");
   const sidebarClawOnline = sidebarClawStatus === "active";
   const clientLoadMetricList = useMemo(() => (
-    Object.values(clientLoadMetrics).sort((a, b) => a.elapsedMs - b.elapsedMs)
+    Object.values(clientLoadMetrics).sort((a, b) => (a.requestMs ?? a.elapsedMs) - (b.requestMs ?? b.elapsedMs))
   ), [clientLoadMetrics]);
   const clientLoadTotalMs = useMemo(() => {
-    const current = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const elapsed = Math.round(current - clientLoadStartedAtRef.current);
-    const maxMetric = clientLoadMetricList.reduce((max, metric) => Math.max(max, metric.elapsedMs), 0);
-    return Math.max(elapsed, maxMetric);
+    // 优先统计各探针的真实请求往返耗时(requestMs)，没有 requestMs 的早期 TRPC/auth 探针
+    // 使用首次完成时相对页面加载的 elapsedMs 作为首屏耗时近似值。
+    // 旧实现用 (now - 页面加载时刻)，但探针每 30s 定时重测、切回标签页(focus)也重测，
+    // 每次重测都把 elapsedMs 刷成"自页面打开以来的时长"，导致数值随页面停留时间无限增长，
+    // 首屏之后就退化成"页面开了多久"，表现为忽高忽低（刚打开~200ms，开一会儿跳到几千ms）。
+    return clientLoadMetricList.reduce((max, metric) => Math.max(max, metric.requestMs ?? metric.elapsedMs), 0);
   }, [clientLoadMetricList]);
   const slowestClientMetric = useMemo(() => (
-    clientLoadMetricList.slice().sort((a, b) => b.elapsedMs - a.elapsedMs)[0]
+    clientLoadMetricList.slice().sort((a, b) => (b.requestMs ?? b.elapsedMs) - (a.requestMs ?? a.elapsedMs))[0]
   ), [clientLoadMetricList]);
   const reportClientLoadMetrics = useCallback(async (reason: string) => {
     if (!resolvedAdoptId || !user || clientLoadReportedRef.current || clientLoadMetricList.length === 0) return;
@@ -2722,6 +2700,8 @@ export default function Home() {
           title: selectedModel || selectedLingxiaModelName || "模型已同步",
           detail: `${modelCount} 个可用模型${clawHealthSummary?.model?.defaultModel ? ` · 默认 ${clawHealthSummary.model.defaultModel}` : ""}`,
         }
+      : selectedModel
+      ? { status: "ok" as const, title: selectedModel, detail: "当前模型已读取；可选模型列表暂未返回。" }
       : { status: "warning" as const, title: "暂无可用模型", detail: "前端没有读取到 OpenClaw 可用模型，请检查 provider 配置。" };
 
     const openclaw = isDirectHttpRuntime
@@ -2957,7 +2937,7 @@ export default function Home() {
               sessionsLoading={webSessionsLoading && webSessions.length === 0}
               footer={(
                 <SidebarFooter
-                  version={isJiuwenRuntime ? "JiuwenSwarm v0.2.0" : isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
+                  version={isJiuwenRuntime ? jiuwenswarmVersion : isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
                   expiryText={lingxiaExpiryInfo.text}
                   expiryColor={lingxiaExpiryInfo.color}
                   collapsed={sidebarCollapsed}

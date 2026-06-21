@@ -83,7 +83,7 @@ function isRoutineEnglishToolPreamble(text: string) {
 }
 
 function normalizeRuntimeMode(value: unknown): "fast" | "plan" {
-  return "fast";
+  return String(value || "").trim().toLowerCase() === "plan" ? "plan" : "fast";
 }
 
 function signPayload(nonce: string) {

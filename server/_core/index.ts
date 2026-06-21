@@ -46,10 +46,12 @@ import { registerWSProxy } from "./claw-ws-proxy";
 import { registerIframeRoutes } from "./claw-iframe";
 import { registerMiscRoutes } from "./claw-misc";
 import { registerAuditExportRoutes } from "./audit-export-routes";
+import { registerAuditIngestRoutes } from "./claw-audit-ingest";
 import { registerDesktopRoutes, registerDesktopWSProxy } from "./desktop";
 import { registerAgentClusterLabRoutes } from "../_routes/agent-cluster-lab";
 import { registerOfficeTaskWorkbenchRoutes, registerTaskWorkbenchLabRoutes } from "../_routes/task-workbench-lab";
 import { APP_ROOT } from "./helpers";
+import { getRoleSkillMcpBaseline, listAgentRoleTemplates } from "./role-templates";
 import { sdk } from "./sdk";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -59,11 +61,54 @@ import { getClientIp } from "./ip-utils";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 let openClawVersionCache: { value: string; expiresAt: number } | null = null;
+let runtimeVersionsCache: {
+  value: {
+    openclaw: string;
+    jiuwenswarm: string;
+  };
+  expiresAt: number;
+} | null = null;
 const iosLoadDebugEnabled = process.env.IOS_LOAD_DEBUG === "1";
+
+const roleBaseline = getRoleSkillMcpBaseline();
+console.log("[ROLE-TEMPLATE] baseline loaded", {
+  version: roleBaseline.version,
+  defaultRole: roleBaseline.schema.defaultRole,
+  roles: listAgentRoleTemplates().length,
+});
 
 function logIosLoadDebug(message: string, fields: Record<string, unknown> = {}): void {
   if (!iosLoadDebugEnabled) return;
   console.log(`[IOS-LOAD] ${message}`, fields);
+}
+
+function readOpenClawVersion(): string {
+  try {
+    return String(execSync("openclaw --version", { encoding: "utf-8", timeout: 2500 }) || "").trim() || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function readJiuwenSwarmVersion(): string {
+  const pythonCandidates = [
+    process.env.JIUWENSWARM_PYTHON,
+    process.env.JIUWENCLAW_PYTHON,
+    "/root/jiuwenclaw/bin/python3",
+    "/home/ubuntu/.venvs/jiuwenswarm-022-f538/bin/python3",
+    "python3",
+  ].filter(Boolean) as string[];
+  const script = "import importlib.metadata; print(importlib.metadata.version('jiuwenswarm'))";
+  for (const python of pythonCandidates) {
+    try {
+      const version = String(execSync(`${JSON.stringify(python)} -c ${JSON.stringify(script)}`, {
+        encoding: "utf-8",
+        timeout: 2500,
+      }) || "").trim();
+      if (version) return version;
+    } catch {}
+  }
+  return "unknown";
 }
 
 function resolveProtectedClawAdoptId(req: Request): string | null {
@@ -296,6 +341,7 @@ async function startServer() {
   registerIframeRoutes(app);
   registerMiscRoutes(app);
   registerAuditExportRoutes(app);
+  registerAuditIngestRoutes(app);
   registerDesktopRoutes(app);
   registerAgentClusterLabRoutes(app);
   registerTaskWorkbenchLabRoutes(app);
@@ -352,15 +398,25 @@ async function startServer() {
       return;
     }
 
-    try {
-      const raw = execSync("openclaw --version", { encoding: "utf-8", timeout: 2500 });
-      const version = String(raw || "").trim() || "unknown";
-      openClawVersionCache = { value: version, expiresAt: now + 5 * 60 * 1000 };
-      res.json({ version });
-    } catch (_e) {
-      openClawVersionCache = { value: "unknown", expiresAt: now + 30 * 1000 };
-      res.json({ version: "unknown" });
+    const version = readOpenClawVersion();
+    openClawVersionCache = { value: version, expiresAt: now + (version === "unknown" ? 30 * 1000 : 5 * 60 * 1000) };
+    res.json({ version });
+  });
+
+  app.get("/api/meta/runtime-versions", async (_req, res) => {
+    const now = Date.now();
+    if (runtimeVersionsCache && runtimeVersionsCache.expiresAt > now) {
+      res.json(runtimeVersionsCache.value);
+      return;
     }
+
+    const value = {
+      openclaw: readOpenClawVersion(),
+      jiuwenswarm: readJiuwenSwarmVersion(),
+    };
+    const hasUnknown = Object.values(value).some((version) => version === "unknown");
+    runtimeVersionsCache = { value, expiresAt: now + (hasUnknown ? 30 * 1000 : 5 * 60 * 1000) };
+    res.json(value);
   });
 
   app.get("/api/claw/help-doc", async (_req, res) => {

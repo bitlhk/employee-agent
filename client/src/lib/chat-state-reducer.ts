@@ -60,48 +60,8 @@ function updateAssistant(
   return next;
 }
 
-function markThinkingDone(message: LingxiaChatMessage, nowMs: number): LingxiaChatMessage {
-  const toolCalls = message.toolCalls;
-  if (!toolCalls?.some((tc) => tc.name === "thinking" && tc.status === "running")) return message;
-  return {
-    ...message,
-    toolCalls: toolCalls.map((tc) => (
-      tc.name === "thinking" && tc.status === "running"
-        ? { ...tc, status: "done", durationMs: nowMs - tc.ts }
-        : tc
-    )),
-  };
-}
-
-function appendThinking(message: LingxiaChatMessage, content: string, nowMs: number): LingxiaChatMessage {
-  const toolCalls = message.toolCalls ?? [];
-  const runningIdx = toolCalls.findIndex((tc) => tc.name === "thinking" && tc.status === "running");
-  if (runningIdx >= 0) {
-    const nextToolCalls = [...toolCalls];
-    const current = nextToolCalls[runningIdx];
-    nextToolCalls[runningIdx] = {
-      ...current,
-      result: `${current.result ?? ""}${content}`,
-    };
-    return { ...message, toolCalls: nextToolCalls };
-  }
-
-  return {
-    ...message,
-    toolCalls: [
-      ...toolCalls,
-      {
-        id: `thinking-${nowMs}`,
-        name: "thinking",
-        arguments: "{}",
-        result: content,
-        status: "running",
-        ts: nowMs,
-        executor: "gateway",
-        _gateway: true,
-      },
-    ],
-  };
+function markThinkingDone(message: LingxiaChatMessage, _nowMs: number): LingxiaChatMessage {
+  return message;
 }
 
 function applyToolStart(message: LingxiaChatMessage, event: Extract<ChatEvent, { type: "tool_call" }>, nowMs: number): LingxiaChatMessage {
@@ -186,7 +146,7 @@ export function reduceLingxiaChatState(
       });
 
     case "thinking":
-      return updateAssistant(messages, targetMessageId, (message) => appendThinking(message, event.content, nowMs));
+      return messages;
 
     case "tool_call":
       return updateAssistant(messages, targetMessageId, (message) => (

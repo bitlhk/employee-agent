@@ -3,6 +3,8 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "glm5/glm-5": "GLM-5",
   "modelarts-maas/glm-5.1": "GLM-5.1",
   "glm5/glm-5.1": "GLM-5.1",
+  "modelarts-maas/glm-5.2": "GLM-5.2",
+  "glm5/glm-5.2": "GLM-5.2",
   "maas/deepseek-v4-flash": "DeepSeek-V4-Flash",
   "deepseek/deepseek-v4-flash": "DeepSeek-V4-Flash",
   "deepseek/deepseek-v4-pro": "DeepSeek-V4-Pro",

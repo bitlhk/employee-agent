@@ -1,5 +1,5 @@
-import { desc, eq, sql } from "drizzle-orm";
-import { businessAgents, skillMarketplace, agentCallLogs, BusinessAgent, InsertBusinessAgent } from "../../drizzle/schema";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { auditEvents, businessAgents, skillMarketplace, agentCallLogs, BusinessAgent, InsertBusinessAgent } from "../../drizzle/schema";
 import { getDb } from "./connection";
 
 // ── Business Agents CRUD ────────────────────────────────────────────────
@@ -112,6 +112,63 @@ export async function incrementSkillDownload(id: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.execute(sql`UPDATE skill_marketplace SET download_count = download_count + 1 WHERE id = ${id}`);
+}
+
+export async function listSkillInvocationCounts(skillIds: string[]): Promise<Record<string, number>> {
+  const normalized = [...new Set(skillIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (normalized.length === 0) return {};
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const rows = await db
+    .select({
+      skillId: auditEvents.resourceId,
+      count: sql<number>`count(*)`,
+    })
+    .from(auditEvents)
+    .where(and(
+      eq(auditEvents.action, "skill.invoked"),
+      eq(auditEvents.resourceType, "skill"),
+      inArray(auditEvents.resourceId, normalized),
+    ))
+    .groupBy(auditEvents.resourceId);
+  const out: Record<string, number> = {};
+  for (const row of rows) {
+    const skillId = String(row.skillId || "").trim();
+    if (skillId) out[skillId] = Number(row.count || 0);
+  }
+  return out;
+}
+
+export async function listMcpInvocationCounts(serverIds: string[]): Promise<Record<string, { total: number; tools: Record<string, number> }>> {
+  const normalized = [...new Set(serverIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (normalized.length === 0) return {};
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const rows = await db
+    .select({
+      serverId: auditEvents.resourceId,
+      toolName: auditEvents.toolName,
+      count: sql<number>`count(*)`,
+    })
+    .from(auditEvents)
+    .where(and(
+      eq(auditEvents.action, "mcp.tool.completed"),
+      eq(auditEvents.resourceType, "mcp_server"),
+      inArray(auditEvents.resourceId, normalized),
+    ))
+    .groupBy(auditEvents.resourceId, auditEvents.toolName);
+  const out: Record<string, { total: number; tools: Record<string, number> }> = {};
+  for (const row of rows) {
+    const serverId = String(row.serverId || "").trim();
+    if (!serverId) continue;
+    const toolName = String(row.toolName || "").trim() || "_unknown";
+    const count = Number(row.count || 0);
+    const bucket = out[serverId] || { total: 0, tools: {} };
+    bucket.total += count;
+    bucket.tools[toolName] = (bucket.tools[toolName] || 0) + count;
+    out[serverId] = bucket;
+  }
+  return out;
 }
 
 

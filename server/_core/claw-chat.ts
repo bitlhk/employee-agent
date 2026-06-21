@@ -72,7 +72,7 @@ function mergeOpenAiToolCallDeltas(
 }
 
 function normalizeChatRuntimeMode(value: unknown): ChatRuntimeMode {
-  return "fast";
+  return String(value || "").trim().toLowerCase() === "plan" ? "plan" : "fast";
 }
 
 export function registerChatStreamRoutes(app: express.Express) {

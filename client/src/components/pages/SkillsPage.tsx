@@ -93,7 +93,7 @@ type SkillTab = (typeof SKILL_TAB_KEYS)[number];
 type SourceFilter = "all" | SourceKind;
 type StateFilter = "all" | "ready" | "attention" | "disabled";
 const SKILL_TAB_CACHE_KEY = "employee-agent:skills:last-tab";
-const MCP_TOOLS_CACHE_PREFIX = "employee-agent:mcp-tools:";
+const MCP_TOOLS_CACHE_PREFIX = "employee-agent:mcp-tools:v2:";
 
 type McpServerStatus = "available" | "disabled" | "missing";
 type McpToolSummary = {

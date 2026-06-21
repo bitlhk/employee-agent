@@ -1,8 +1,10 @@
 import type { Request, Response } from "express";
+import { createHash } from "crypto";
 import { execFile } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
 import path from "path";
 import { WebSocket, type RawData } from "ws";
+import { auditRequest, recordAuditBestEffort } from "./audit-events";
 import {
   appendLogAsync,
   buildSessionRegistryScope,
@@ -34,6 +36,7 @@ type ForwardOptions = {
 
 const DEFAULT_AGENTSERVER_WS_URL = "ws://127.0.0.1:18092";
 const DEFAULT_SERVICE_ID = "linggan";
+const seenJiuwenAuditEventIds = new Set<string>();
 
 function runtimeEnabled(): boolean {
   return String(process.env.JIUWENCLAW_RUNTIME_ENABLED || "").toLowerCase() === "true";
@@ -118,6 +121,264 @@ function parseJsonFrame(raw: RawData): any | null {
   }
 }
 
+function sha256(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function stableJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, (_key, item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+      return Object.keys(item as Record<string, unknown>).sort().reduce((acc: Record<string, unknown>, key) => {
+        acc[key] = (item as Record<string, unknown>)[key];
+        return acc;
+      }, {});
+    });
+  } catch {
+    return String(value);
+  }
+}
+
+function summarizeAuditPayload(value: unknown) {
+  const json = stableJson(value ?? null);
+  return {
+    hash: sha256(json),
+    bytes: Buffer.byteLength(json, "utf8"),
+    fieldNames: value && typeof value === "object" && !Array.isArray(value)
+      ? Object.keys(value as Record<string, unknown>).sort()
+      : [],
+  };
+}
+
+export function inferSkillIdFromJiuwenPayload(value: unknown): string | null {
+  const json = stableJson(value);
+  const patterns = [
+    /(?:^|[/"'\s])(?:skills|skills-shared|temp-skills\/skills)\/([a-zA-Z0-9._-]+)(?:\/|["'\s]|$)/,
+    /(?:^|[/"'\s])\.codex\/skills\/[^/"'\s]+\/([a-zA-Z0-9._-]+)(?:\/|["'\s]|$)/,
+    /(?:^|[/"'\s])\.agents\/skills\/([a-zA-Z0-9._-]+)(?:\/|["'\s]|$)/,
+  ];
+  for (const pattern of patterns) {
+    const match = json.match(pattern);
+    const skillId = String(match?.[1] || "").trim();
+    if (skillId && skillId !== "SKILL.md") return skillId;
+  }
+  const named = json.match(/"skill(?:Id|_id|Name|_name)"\s*:\s*"([a-zA-Z0-9._-]+)"/);
+  return String(named?.[1] || "").trim() || null;
+}
+
+export function inferMcpServerForJiuwenTool(toolName: string): string | null {
+  const name = String(toolName || "").trim();
+  if (!name) return null;
+  if (name.startsWith("wealth_assistant_customer_")) return "wealth_assistant_customer";
+  if (
+    name.startsWith("wealth_assistant_product_")
+    || name === "wealth_assistant_product_search"
+    || name === "wealth_assistant_product_info"
+    || name === "wealth_assistant_fund_info"
+    || name === "wealth_assistant_nav_history"
+    || name === "wealth_assistant_wealth_product"
+    || name === "wealth_assistant_market_news"
+  ) return "wealth_assistant_product";
+  if (name.startsWith("qieman_")) return "qieman";
+  if (name.startsWith("get_company_") || name === "get_financial_news") return "wind_financial_docs";
+  if (name.startsWith("get_stock_")) return "wind_stock_data";
+  if (name.startsWith("get_index_")) return "wind_index_data";
+  if (name.startsWith("get_fund_")) return "wind_fund_data";
+  if (name.startsWith("get_bond_")) return "wind_bond_data";
+  if (name.startsWith("get_macro_") || name.startsWith("get_industry_")) return "wind_economic_data";
+  if (name.startsWith("get_technical_") || name.startsWith("get_risk_")) return "wind_analytics_data";
+  if (name.startsWith("insurance_telesales_")) return "insurance_telesales_recommend";
+  if (name.startsWith("insurance_")) return "insurance_kb";
+  if (name.startsWith("credential_")) return "credential_skills";
+  if (name.startsWith("group_insurance_")) return "group_insurance_audit";
+  if (name.startsWith("post_loan_")) return "post_loan_risk_data";
+  if (name.startsWith("bond_quote_")) return "bond_quote_parse";
+  return null;
+}
+
+function pickFirstString(obj: any, keys: string[]): string {
+  if (!obj || typeof obj !== "object") return "";
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function normalizeJiuwenToolPayload(eventType: string, delta: any): {
+  isResult: boolean;
+  callId: string;
+  toolName: string;
+  argumentsPayload: unknown;
+  resultPayload: unknown;
+  isError: boolean;
+} | null {
+  if (eventType !== "chat.tool_call" && eventType !== "chat.tool_result") return null;
+  const isResult = eventType === "chat.tool_result";
+  const nested = delta?.[isResult ? "tool_result" : "tool_call"] && typeof delta?.[isResult ? "tool_result" : "tool_call"] === "object"
+    ? delta[isResult ? "tool_result" : "tool_call"]
+    : delta;
+  const fn = nested?.function && typeof nested.function === "object" ? nested.function : {};
+  const toolName = pickFirstString(nested, ["name", "toolName", "tool_name", "tool"]) || pickFirstString(fn, ["name"]);
+  if (!toolName) return null;
+  return {
+    isResult,
+    callId: pickFirstString(nested, ["id", "tool_call_id", "toolCallId", "call_id"]) || pickFirstString(delta, ["tool_call_id", "toolCallId", "id"]),
+    toolName,
+    argumentsPayload: nested.arguments ?? nested.args ?? fn.arguments ?? delta?.arguments ?? delta?.args ?? null,
+    resultPayload: nested.result ?? nested.content ?? nested.output ?? delta?.result ?? delta?.content ?? null,
+    isError: Boolean(nested.is_error || nested.isError || nested.error || nested.status === "failed" || delta?.error),
+  };
+}
+
+function stringifyToolPayload(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+async function recordJiuwenToolAudit(args: {
+  claw: JiuwenClawRuntimeClaw;
+  req?: Request;
+  agentId: string;
+  sessionId: string;
+  requestId: string;
+  channelId: string;
+  eventType: string;
+  delta: any;
+}) {
+  const tool = normalizeJiuwenToolPayload(args.eventType, args.delta);
+  if (!tool) return;
+  const phase = tool.isResult ? (tool.isError ? "failed" : "completed") : "started";
+  const baseRaw = [
+    args.agentId,
+    args.sessionId,
+    args.requestId,
+    args.eventType,
+    tool.callId,
+    tool.toolName,
+    phase,
+  ].join("|");
+  const baseEventId = `jw_tool_${sha256(baseRaw).slice(0, 55)}`;
+  if (!seenJiuwenAuditEventIds.has(baseEventId)) {
+    seenJiuwenAuditEventIds.add(baseEventId);
+    await recordAuditBestEffort({
+      eventId: baseEventId,
+      action: `tool.jiuwenswarm.${phase}`,
+      result: tool.isError ? "failed" : "success",
+      severity: tool.isError ? "medium" : "info",
+      actorType: "user",
+      actorUserId: args.claw.userId,
+      ...(args.req ? auditRequest(args.req) : {}),
+      requestId: args.requestId,
+      targetType: "runtime_tool",
+      targetId: (tool.callId || baseEventId).slice(0, 128),
+      targetName: tool.toolName.slice(0, 256),
+      resourceType: "jiuwenswarm_tool",
+      resourceId: (tool.callId || baseEventId).slice(0, 128),
+      resourceName: tool.toolName.slice(0, 256),
+      agentInstanceId: args.claw.adoptId,
+      runtimeType: "jiuwenswarm",
+      runtimeAgentId: args.agentId,
+      sessionId: args.sessionId,
+      correlationId: args.requestId,
+      channel: args.channelId,
+      toolName: tool.toolName.slice(0, 128),
+      errorCode: tool.isError ? "JIUWENSWARM_TOOL_FAILED" : null,
+      metadata: {
+        source: "jiuwenswarm_webchannel",
+        eventType: args.eventType,
+        callId: tool.callId || null,
+        args: tool.isResult ? null : summarizeAuditPayload(tool.argumentsPayload),
+        result: tool.isResult ? summarizeAuditPayload(tool.resultPayload) : null,
+      },
+    });
+  }
+
+  const mcpServer = inferMcpServerForJiuwenTool(tool.toolName);
+  if (mcpServer) {
+    const mcpEventId = `jw_mcp_${sha256(`${baseRaw}|${mcpServer}`).slice(0, 56)}`;
+    if (!seenJiuwenAuditEventIds.has(mcpEventId)) {
+      seenJiuwenAuditEventIds.add(mcpEventId);
+      await recordAuditBestEffort({
+        eventId: mcpEventId,
+        action: `mcp.tool.${phase}`,
+        result: tool.isError ? "failed" : "success",
+        severity: tool.isError ? "medium" : "info",
+        actorType: "user",
+        actorUserId: args.claw.userId,
+        ...(args.req ? auditRequest(args.req) : {}),
+        requestId: args.requestId,
+        targetType: "mcp_tool",
+        targetId: tool.toolName.slice(0, 128),
+        targetName: tool.toolName.slice(0, 256),
+        resourceType: "mcp_server",
+        resourceId: mcpServer.slice(0, 128),
+        resourceName: mcpServer.slice(0, 256),
+        agentInstanceId: args.claw.adoptId,
+        runtimeType: "jiuwenswarm",
+        runtimeAgentId: args.agentId,
+        sessionId: args.sessionId,
+        correlationId: args.requestId,
+        channel: args.channelId,
+        toolName: tool.toolName.slice(0, 128),
+        errorCode: tool.isError ? "MCP_TOOL_CALL_FAILED" : null,
+        metadata: {
+          source: "jiuwenswarm_webchannel",
+          eventType: args.eventType,
+          callId: tool.callId || null,
+          args: tool.isResult ? null : summarizeAuditPayload(tool.argumentsPayload),
+          result: tool.isResult ? summarizeAuditPayload(tool.resultPayload) : null,
+        },
+      });
+    }
+  }
+
+  if (!tool.isResult) {
+    const skillId = inferSkillIdFromJiuwenPayload(tool.argumentsPayload);
+    if (skillId) {
+      const skillEventId = `jw_skill_${sha256(`${baseRaw}|${skillId}`).slice(0, 54)}`;
+      if (!seenJiuwenAuditEventIds.has(skillEventId)) {
+        seenJiuwenAuditEventIds.add(skillEventId);
+        await recordAuditBestEffort({
+          eventId: skillEventId,
+          action: "skill.invoked",
+          result: "success",
+          severity: "info",
+          actorType: "user",
+          actorUserId: args.claw.userId,
+          ...(args.req ? auditRequest(args.req) : {}),
+          requestId: args.requestId,
+          targetType: "skill",
+          targetId: skillId.slice(0, 128),
+          targetName: skillId.slice(0, 256),
+          resourceType: "skill",
+          resourceId: skillId.slice(0, 128),
+          resourceName: skillId.slice(0, 256),
+          agentInstanceId: args.claw.adoptId,
+          runtimeType: "jiuwenswarm",
+          runtimeAgentId: args.agentId,
+          sessionId: args.sessionId,
+          correlationId: args.requestId,
+          channel: args.channelId,
+          toolName: tool.toolName.slice(0, 128),
+          metadata: {
+            source: "jiuwenswarm_webchannel",
+            inferredFrom: "chat.tool_call.arguments",
+            eventType: args.eventType,
+            callId: tool.callId || null,
+            args: summarizeAuditPayload(tool.argumentsPayload),
+          },
+        });
+      }
+    }
+  }
+}
+
 function pickText(value: unknown): string {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object") return "";
@@ -130,9 +391,16 @@ function pickText(value: unknown): string {
 
 function pickErrorMessage(frame: any): string {
   const body = frame?.body || {};
+  const delta = body?.delta || {};
   return String(
     body?.message
       || body?.error
+      || body?.content
+      || body?.text
+      || delta?.error
+      || delta?.message
+      || delta?.content
+      || delta?.text
       || body?.details?.message
       || body?.details?.error
       || frame?.message
@@ -142,7 +410,7 @@ function pickErrorMessage(frame: any): string {
 
 function collectRecentWorkspaceFiles(workspaceDir: string, sinceMs: number): Array<{ name: string; size: number; path: string }> {
   if (!workspaceDir || !existsSync(workspaceDir)) return [];
-  const skipDirs = new Set(["skills", "memory", "node_modules", ".git", ".dreams", "dist", "build", ".openclaw", ".agent_history"]);
+  const skipDirs = new Set(["skills", "memory", "prompt_attachment", "node_modules", ".git", ".dreams", "dist", "build", ".openclaw", ".agent_history"]);
   const files: Array<{ name: string; size: number; path: string }> = [];
 
   const scanDir = (dir: string, relBase: string, depth: number) => {
@@ -225,6 +493,9 @@ function normalizeJiuwenFileEvent(delta: any, workspaceDir: string): Array<{ nam
 }
 
 function normalizeJiuwenMode(value: unknown): "agent.fast" | "agent.plan" | "team" {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "plan" || mode === "agent.plan") return "agent.plan";
+  if (mode === "team" || mode === "code.team") return "team";
   return "agent.fast";
 }
 
@@ -440,6 +711,8 @@ export async function forwardToJiuwenClaw(
         elapsedMs: Date.now() - startedAt,
       });
     };
+    writeStatus("JiuwenClaw 已连接，正在处理请求...");
+    res.flush?.();
     const keepalive = setInterval(() => {
       if (res.writableEnded) return;
       writeStatus("JiuwenClaw 仍在处理...");
@@ -585,6 +858,48 @@ export async function forwardToJiuwenClaw(
               writeEvent("workspace_files", { adoptId: claw.adoptId, files });
             }
             return;
+          }
+          if (eventType === "chat.tool_call" || eventType === "chat.tool_result") {
+            recordJiuwenToolAudit({
+              claw,
+              req: opts.req,
+              agentId,
+              sessionId,
+              requestId,
+              channelId,
+              eventType,
+              delta: body?.delta,
+            }).catch((error) => {
+              console.warn("[jiuwenclaw-audit] tool audit failed", {
+                adoptId: claw.adoptId,
+                agentId,
+                eventType,
+                error: error?.message || String(error),
+              });
+            });
+            const tool = normalizeJiuwenToolPayload(eventType, body?.delta);
+            if (tool) {
+              const toolCallId = tool.callId || `jiuwen-${sha256(`${requestId}|${tool.toolName}`).slice(0, 16)}`;
+              if (tool.isResult) {
+                writeEvent("tool_result", {
+                  tool_call_id: toolCallId,
+                  name: tool.toolName,
+                  result: stringifyToolPayload(tool.resultPayload),
+                  is_error: tool.isError,
+                  executor: "jiuwenswarm",
+                  adoptId: claw.adoptId,
+                });
+              } else {
+                writeEvent("tool_call", {
+                  id: toolCallId,
+                  name: tool.toolName,
+                  arguments: stringifyToolPayload(tool.argumentsPayload) || "{}",
+                  executor: "jiuwenswarm",
+                  adoptId: claw.adoptId,
+                });
+              }
+              return;
+            }
           }
           writeEvent("jiuwen_event", {
             event_type: eventType,

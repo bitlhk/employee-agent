@@ -27,6 +27,7 @@ import {
   openClawSkillMarketDir,
   resolveRuntimeWorkspaceByIds,
 } from "./helpers";
+import { listApprovedSkillMarketItems, listMcpInvocationCounts, listSkillInvocationCounts, resolveEffectiveRoleAssets } from "../db";
 import { skillRegistry } from "./skills/skill-registry";
 import { skillInstaller } from "./skills/skill-installer";
 import {
@@ -304,7 +305,7 @@ const MCP_TOOL_CATALOG = [
         name: "客户经理财富助手",
         description:
           "聚合客户数据与推荐产品数据，可查询客户列表、客户详情、基金/理财产品、净值历史和市场新闻。",
-        serverIds: ["wealth_assistant"],
+        serverIds: ["wealth_assistant_customer", "wealth_assistant_product"],
         displayServerId: "wealth-assistant-context",
         tools: [
           {
@@ -426,6 +427,100 @@ const MCP_TOOL_CATALOG = [
     ],
     recommendedSkills: ["credential-review"],
   },
+  {
+    id: "insurance-kb",
+    name: "保险知识库 MCP",
+    category: "内部业务 MCP",
+    description:
+      "内部业务 MCP，连接保险知识库，提供保险产品、条款解释、异议处理和销售辅助知识检索能力。",
+    children: [
+      {
+        id: "insurance-kb-search",
+        name: "保险知识库检索",
+        description: "检索保险产品信息、条款解释、FAQ 和异议处理话术。",
+        serverIds: ["insurance_kb"],
+        tools: [
+          {
+            name: "insurance_kb_search",
+            description:
+              "知识检索：输入保险相关问题，返回匹配的知识片段、相似度和来源。",
+          },
+          {
+            name: "insurance_kb_list",
+            description:
+              "知识库清单：列出可用保险知识库，用于确认检索范围。",
+          },
+        ],
+      },
+    ],
+    recommendedSkills: ["insurance-advisor-pro"],
+  },
+  {
+    id: "post-loan-risk-data",
+    name: "贷后风控数据 MCP",
+    category: "内部业务 MCP",
+    description:
+      "内部业务 MCP，提供企业贷后风控所需的企业画像、贷款账户、财报、还款、担保、司法、舆情和行业基准数据。",
+    children: [
+      {
+        id: "post-loan-risk-core",
+        name: "企业贷后风险数据",
+        description: "围绕统一社会信用代码查询贷后风险评估所需的数据，当前为灰度演示版。",
+        serverIds: ["post_loan_risk_data"],
+        tools: [
+          { name: "get_enterprise_profile", description: "企业画像：查询企业基本信息、行业、规模和经营状态。" },
+          { name: "get_loan_account", description: "贷款账户：查询贷款余额、授信额度、五级分类和逾期情况。" },
+          { name: "get_financial_statements", description: "财务报表：查询资产、负债、现金流、利润和偿债指标。" },
+          { name: "get_repayment_history", description: "还款历史：查询逾期次数、最大逾期天数和近期还款记录。" },
+          { name: "get_credit_rating", description: "信用评级：查询内部评级、外部评级和评分变化。" },
+        ],
+      },
+      {
+        id: "post-loan-risk-external",
+        name: "外部风险与行业基准",
+        description: "补充司法、舆情、经营异常、税务、失信、行业和宏观风险信号。",
+        serverIds: ["post_loan_risk_data"],
+        tools: [
+          { name: "get_judicial_info", description: "司法风险：查询诉讼、执行和资产冻结信息。" },
+          { name: "get_public_opinion", description: "舆情风险：查询负面舆情和重大风险报道。" },
+          { name: "get_business_abnormal", description: "经营异常：查询工商异常和严重违法信息。" },
+          { name: "get_dishonest_record", description: "失信记录：查询企业及关联方失信被执行信息。" },
+          { name: "get_industry_benchmark", description: "行业基准：查询偿债、流动性、负债率等行业对标指标。" },
+          { name: "get_industry_rating", description: "行业评级：查询行业风险评级、景气度和政策风险。" },
+          { name: "get_macro_indicator", description: "宏观指标：查询 GDP、PMI、CPI、PPI、LPR、M2 等宏观指标。" },
+        ],
+      },
+    ],
+    recommendedSkills: ["post-loan-risk-prediction"],
+  },
+  {
+    id: "insurance-telesales-recommend",
+    name: "车险智能外呼 MCP",
+    category: "内部业务 MCP",
+    description:
+      "车险电销对话分析 MCP，实时识别客户意图并推荐合规应对话术，面向车险外呼坐席辅助场景。",
+    children: [
+      {
+        id: "telesales-analyze",
+        name: "外呼对话分析",
+        description: "分析外呼通话记录，识别客户意图并推荐应对话术。",
+        serverIds: ["insurance_telesales_recommend"],
+        tools: [
+          {
+            name: "telesales_analyze_conversation",
+            description:
+              "对话分析：输入通话对话历史，返回意图编码、置信度、推荐话术与风险提示。",
+          },
+          {
+            name: "telesales_list_intents",
+            description:
+              "意图清单：返回系统支持的全部意图分类（编码 + 名称 + 关键词）。",
+          },
+        ],
+      },
+    ],
+    recommendedSkills: ["insurance-telesales-recommend"],
+  },
 ];
 
 function readOpenClawConfig(): Record<string, any> {
@@ -444,6 +539,19 @@ function readOpenClawMcpServers(config = readOpenClawConfig()): Record<string, a
   return config?.mcp?.servers && typeof config.mcp.servers === "object"
     ? config.mcp.servers
     : {};
+}
+
+export function listConfiguredMcpServers() {
+  const servers = readOpenClawMcpServers();
+  return Object.entries(servers)
+    .map(([serverId, raw]) => ({
+      serverId,
+      configured: true,
+      enabled: !Boolean((raw as any)?.disabled),
+      status: Boolean((raw as any)?.disabled) ? "disabled" : "available",
+      existsOnDisk: mcpServerExistsOnDisk(serverId, raw),
+    }))
+    .sort((a, b) => a.serverId.localeCompare(b.serverId));
 }
 
 function readAllowedToolNames(config: Record<string, any>): Set<string> {
@@ -512,7 +620,9 @@ function mcpServerExistsOnDisk(serverId: string, raw: any): boolean {
   return existsSync(path.join(OPENCLAW_HOME, "mcp", serverId));
 }
 
-export function listMcpToolGroups() {
+export function listMcpToolGroups(options: { allowedServerIds?: Set<string> | null; invocationCounts?: Record<string, { total: number; tools: Record<string, number> }> | null } = {}) {
+  const allowedServerIds = options.allowedServerIds || null;
+  const invocationCounts = options.invocationCounts || {};
   const config = readOpenClawConfig();
   const servers = readOpenClawMcpServers(config);
   const allowedToolNames = readAllowedToolNames(config);
@@ -530,9 +640,15 @@ export function listMcpToolGroups() {
   const knownServerIds = new Set<string>();
 
   const groups = MCP_TOOL_CATALOG.map(item => {
-    const children = item.children.map(child => {
-      for (const id of child.serverIds) knownServerIds.add(id);
-      const aliasServers = child.serverIds.map(
+    const visibleChildren = allowedServerIds
+      ? item.children.filter(child => child.serverIds.some(serverId => allowedServerIds.has(serverId)))
+      : item.children;
+    const children = visibleChildren.map(child => {
+      const visibleServerIds = allowedServerIds
+        ? child.serverIds.filter(serverId => allowedServerIds.has(serverId))
+        : child.serverIds;
+      for (const id of visibleServerIds) knownServerIds.add(id);
+      const aliasServers = visibleServerIds.map(
         serverId =>
           byId.get(serverId) || {
             serverId,
@@ -547,6 +663,17 @@ export function listMcpToolGroups() {
       const toolNames = Array.isArray(child.tools)
         ? child.tools.map(tool => String(tool?.name || "").trim()).filter(Boolean)
         : [];
+      const invocationCount = visibleServerIds.reduce((sum, serverId) => sum + Number(invocationCounts[serverId]?.total || 0), 0);
+      const tools = Array.isArray(child.tools)
+        ? child.tools.map((tool: any) => {
+          const toolName = String(tool?.name || "").trim();
+          const toolInvocationCount = visibleServerIds.reduce(
+            (sum, serverId) => sum + Number(invocationCounts[serverId]?.tools?.[toolName] || 0),
+            0
+          );
+          return { ...tool, invocationCount: toolInvocationCount };
+        })
+        : child.tools;
       const pluginToolsConfigured =
         toolNames.length > 0 && toolNames.every(toolName => allowedToolNames.has(toolName));
       const configured = aliasServers.some(server => server.configured) || pluginToolsConfigured;
@@ -567,7 +694,8 @@ export function listMcpToolGroups() {
         enabled,
         status,
         existsOnDisk: aliasServers.some(server => server.existsOnDisk) || pluginToolsConfigured,
-        tools: child.tools,
+        invocationCount,
+        tools,
       };
     });
     const availableCount = children.filter(
@@ -589,16 +717,22 @@ export function listMcpToolGroups() {
       availableCount,
       configuredCount,
       serverCount: children.length,
+      invocationCount: children.reduce((sum, child: any) => sum + Number(child.invocationCount || 0), 0),
       children,
     };
-  });
+  }).filter(group => group.children.length > 0);
+
+  const visibleServerRows = allowedServerIds
+    ? serverRows.filter(row => allowedServerIds.has(row.serverId))
+    : serverRows;
 
   return {
     items: groups,
     totals: {
       groups: groups.length,
-      configuredServers: serverRows.length,
-      availableServers: serverRows.filter(row => row.enabled).length,
+      configuredServers: visibleServerRows.length,
+      availableServers: visibleServerRows.filter(row => row.enabled).length,
+      invocations: groups.reduce((sum, group: any) => sum + Number(group.invocationCount || 0), 0),
     },
   };
 }
@@ -627,8 +761,9 @@ async function discoverGeneratedRuntimeSkills(
   const skipped: Array<{ skillId: string; reason: string }> = [];
 
   for (const entry of readdirSync(runtimeSkillsRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
     const sourceDir = path.join(runtimeSkillsRoot, entry.name);
+    const isSkillDir = entry.isDirectory() || (entry.isSymbolicLink() && existsSync(sourceDir) && statSync(sourceDir).isDirectory());
+    if (!isSkillDir) continue;
     if (!existsSync(path.join(sourceDir, "SKILL.md"))) continue;
     if (onlySkillId && entry.name !== onlySkillId) continue;
 
@@ -738,6 +873,34 @@ async function readSkillPackagePayload(req: express.Request): Promise<{
 }
 
 export function registerSkillRoutes(app: express.Express) {
+  app.get("/api/claw/skill-market/list", async (req, res) => {
+    try {
+      const adoptId = String(req.query.adoptId || "").trim();
+      if (!adoptId) {
+        res.status(400).json({ error: "adoptId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      const roleTemplate = String((claw as any).roleTemplate || "general-assistant");
+      const rows = await listApprovedSkillMarketItems();
+      const invocationCounts = await listSkillInvocationCounts(
+        rows.map((item: any) => String(item.skillId || "").trim())
+      ).catch(() => ({} as Record<string, number>));
+      res.json({
+        items: rows.map((item: any) => {
+          const skillId = String(item.skillId || "").trim();
+          return { ...item, invocationCount: invocationCounts[skillId] || 0 };
+        }),
+        roleTemplate,
+        filtered: false,
+      });
+    } catch (e) {
+      console.error("[skill market] list failed", e);
+      res.status(500).json({ error: "list skill market failed" });
+    }
+  });
+
   app.get("/api/claw/mcp-tools/status", async (req, res) => {
     try {
       const adoptId = String(req.query.adoptId || "").trim();
@@ -747,7 +910,21 @@ export function registerSkillRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      res.json(listMcpToolGroups());
+      const roleTemplate = String((claw as any).roleTemplate || "general-assistant");
+      const effectiveAssets = await resolveEffectiveRoleAssets(roleTemplate);
+      const allowedServerIds = new Set([
+        ...effectiveAssets.mcpServers.default,
+        ...effectiveAssets.mcpServers.optional,
+      ]);
+      const invocationCounts = await listMcpInvocationCounts(Array.from(allowedServerIds)).catch(
+        () => ({} as Record<string, { total: number; tools: Record<string, number> }>)
+      );
+      res.json({
+        ...listMcpToolGroups({ allowedServerIds, invocationCounts }),
+        roleTemplate,
+        filtered: true,
+        allowedServerIds: Array.from(allowedServerIds).sort(),
+      });
     } catch (e) {
       console.error("[mcp tools] status failed", e);
       res.status(500).json({ error: "list mcp tools failed" });
@@ -763,6 +940,7 @@ export function registerSkillRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
+      const roleTemplate = String((claw as any).roleTemplate || "general-assistant");
       const runtimeAgentId = await resolveRuntimeAgentId(
         adoptId,
         String((claw as any).agentId || "")
@@ -775,7 +953,11 @@ export function registerSkillRoutes(app: express.Express) {
           .json({ error: result.error.detail, kind: result.error.kind });
         return;
       }
-      res.json({ items: result.value });
+      res.json({
+        items: result.value,
+        roleTemplate,
+        filtered: false,
+      });
     } catch (e) {
       console.error("[skills registry] list failed", e);
       res.status(500).json({ error: "list skills failed" });

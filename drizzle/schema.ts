@@ -342,6 +342,9 @@ export const clawAdoptions = mysqlTable("claw_adoptions", {
   agentId: varchar("agentId", { length: 128 }).notNull().unique(),
   status: mysqlEnum("status", ["creating", "active", "expiring", "recycled", "failed"]).default("creating").notNull(),
   permissionProfile: varchar("permissionProfile", { length: 32 }).default("plus").notNull(),
+  roleTemplate: varchar("roleTemplate", { length: 64 }).default("general-assistant").notNull(),
+  industry: varchar("industry", { length: 32 }).default("general").notNull(),
+  runtime: varchar("runtime", { length: 32 }).default("openclaw").notNull(),
   hermesPort: int("hermes_port"),
   ttlDays: int("ttlDays").default(7).notNull(),
   entryUrl: varchar("entryUrl", { length: 512 }).notNull(),
@@ -790,12 +793,37 @@ export const skillMarketplace = mysqlTable("skill_marketplace", {
   downloadCount: int("download_count").notNull().default(0),
   license:       varchar("license", { length: 64 }).default("MIT"),
   packagePath:   varchar("package_path", { length: 512 }),
+  roleTag:       varchar("role_tag", { length: 32 }),
+  provider:      varchar("provider", { length: 64 }),
   createdAt:     timestamp("created_at").defaultNow().notNull(),
   updatedAt:     timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
 
 export type SkillMarketItem = typeof skillMarketplace.$inferSelect;
 export type InsertSkillMarketItem = typeof skillMarketplace.$inferInsert;
+
+// ── Role-based Skill/MCP grants ──
+export const roleAssetGrants = mysqlTable("role_asset_grants", {
+  id: int("id").autoincrement().primaryKey(),
+  roleKey: varchar("role_key", { length: 64 }).notNull(),
+  assetType: mysqlEnum("asset_type", ["skill", "mcp_server"]).notNull(),
+  assetId: varchar("asset_id", { length: 128 }).notNull(),
+  grantMode: mysqlEnum("grant_mode", ["default", "optional"]).notNull().default("optional"),
+  source: mysqlEnum("source", ["seed", "admin", "market"]).notNull().default("market"),
+  enabled: boolean("enabled").notNull().default(true),
+  createdBy: varchar("created_by", { length: 128 }),
+  updatedBy: varchar("updated_by", { length: 128 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  roleLookupIdx: index("idx_role_asset_grants_role").on(table.roleKey, table.assetType, table.enabled),
+  assetLookupIdx: index("idx_role_asset_grants_asset").on(table.assetType, table.assetId, table.enabled),
+  sourceIdx: index("idx_role_asset_grants_source").on(table.source),
+  uniqGrant: uniqueIndex("uk_role_asset_grants_scope").on(table.roleKey, table.assetType, table.assetId, table.source),
+}));
+
+export type RoleAssetGrant = typeof roleAssetGrants.$inferSelect;
+export type InsertRoleAssetGrant = typeof roleAssetGrants.$inferInsert;
 
 // ── 用户记忆 (平台级) ──
 export const userMemories = mysqlTable("user_memories", {

@@ -24,6 +24,7 @@ type ChatInputProps = {
   maxLength?: number;
   messages?: Array<{ role: string; text: string; timeLabel: string }>;
   onUserMention?: (user: MentionUser) => void;
+  leftControls?: ReactNode;
   rightControls?: ReactNode;
   statusExtras?: ReactNode;
   historyStorageKey?: string;
@@ -107,6 +108,7 @@ export function ChatInput({
   maxLength = 4000,
   messages = [],
   onUserMention,
+  leftControls,
   rightControls,
   statusExtras,
   historyStorageKey,
@@ -741,6 +743,7 @@ export function ChatInput({
                 <line x1="8" y1="23" x2="16" y2="23"/>
               </svg>
             </button>
+            {leftControls}
           </div>
 
           <div className="flex items-center gap-1">

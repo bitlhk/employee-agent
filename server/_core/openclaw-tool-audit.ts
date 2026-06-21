@@ -51,6 +51,20 @@ function eventIdFor(event: any, runtimeAgentId: string, sessionKey: string) {
   return `oc_tool_${sha256(raw).slice(0, 56)}`;
 }
 
+function skillEventIdFor(event: any, runtimeAgentId: string, sessionKey: string, skillId: string) {
+  const raw = [
+    runtimeAgentId,
+    sessionKey,
+    event?.traceId || "",
+    event?.runId || "",
+    event?.seq || "",
+    event?.type || "",
+    event?.data?.toolCallId || event?.data?.itemId || "",
+    skillId,
+  ].join("|");
+  return `skill_${sha256(raw).slice(0, 58)}`;
+}
+
 async function auditEventExists(eventId: string) {
   if (seenEventIds.has(eventId)) return true;
   const db = await getDb();
@@ -84,6 +98,52 @@ function summarizeResult(result: unknown) {
   };
 }
 
+export function inferMcpServerFromOpenClawToolName(toolName: string): string | null {
+  const name = String(toolName || "").trim();
+  if (!name) return null;
+  if (name.startsWith("wealth_assistant_customer_")) return "wealth_assistant_customer";
+  if (
+    name.startsWith("wealth_assistant_product_")
+    || name === "wealth_assistant_product_search"
+    || name === "wealth_assistant_product_info"
+    || name === "wealth_assistant_fund_info"
+    || name === "wealth_assistant_nav_history"
+    || name === "wealth_assistant_wealth_product"
+    || name === "wealth_assistant_market_news"
+  ) return "wealth_assistant_product";
+  if (name.startsWith("qieman_")) return "qieman";
+  if (name.startsWith("get_company_") || name === "get_financial_news") return "wind_financial_docs";
+  if (name.startsWith("get_stock_")) return "wind_stock_data";
+  if (name.startsWith("get_index_")) return "wind_index_data";
+  if (name.startsWith("get_fund_")) return "wind_fund_data";
+  if (name.startsWith("get_bond_")) return "wind_bond_data";
+  if (name.startsWith("get_macro_") || name.startsWith("get_industry_")) return "wind_economic_data";
+  if (name.startsWith("get_technical_") || name.startsWith("get_risk_")) return "wind_analytics_data";
+  if (name.startsWith("insurance_telesales_")) return "insurance_telesales_recommend";
+  if (name.startsWith("insurance_")) return "insurance_kb";
+  if (name.startsWith("credential_")) return "credential_skills";
+  if (name.startsWith("group_insurance_")) return "group_insurance_audit";
+  if (name.startsWith("post_loan_")) return "post_loan_risk_data";
+  if (name.startsWith("bond_quote_")) return "bond_quote_parse";
+  return null;
+}
+
+export function inferSkillIdFromToolArgs(args: unknown): string | null {
+  const json = stableJson(args);
+  const patterns = [
+    /(?:^|[/"'\s])(?:skills|skills-shared|temp-skills\/skills)\/([a-zA-Z0-9._-]+)(?:\/|["'\s]|$)/,
+    /(?:^|[/"'\s])\.codex\/skills\/[^/"'\s]+\/([a-zA-Z0-9._-]+)(?:\/|["'\s]|$)/,
+    /(?:^|[/"'\s])\.agents\/skills\/([a-zA-Z0-9._-]+)(?:\/|["'\s]|$)/,
+  ];
+  for (const pattern of patterns) {
+    const match = json.match(pattern);
+    const skillId = String(match?.[1] || "").trim();
+    if (skillId && skillId !== "SKILL.md") return skillId;
+  }
+  const named = json.match(/"skill(?:Id|_id|Name|_name)"\s*:\s*"([a-zA-Z0-9._-]+)"/);
+  return String(named?.[1] || "").trim() || null;
+}
+
 async function reconcileOpenClawToolAuditNow(input: OpenClawToolAuditInput) {
   const runtimeAgentId = String(input.runtimeAgentId || "").trim();
   const sessionKey = String(input.sessionKey || "").trim();
@@ -114,6 +174,47 @@ async function reconcileOpenClawToolAuditNow(input: OpenClawToolAuditInput) {
 
     const isResult = event.type === "tool.result";
     const isError = Boolean(data.isError || data.status === "failed" || data.error);
+    const skillId = !isResult ? inferSkillIdFromToolArgs(data.arguments) : null;
+    if (skillId) {
+      const skillEventId = skillEventIdFor(event, runtimeAgentId, sessionKey, skillId);
+      if (!(await auditEventExists(skillEventId))) {
+        await recordAuditBestEffort({
+          eventId: skillEventId,
+          eventTime: event.ts ? new Date(event.ts) : undefined,
+          action: "skill.invoked",
+          result: "success",
+          severity: "info",
+          actorType: input.userId ? "user" : "system",
+          actorUserId: input.userId ?? null,
+          ...(input.req ? auditRequest(input.req) : {}),
+          targetType: "skill",
+          targetId: skillId.slice(0, 128),
+          targetName: skillId.slice(0, 256),
+          resourceType: "skill",
+          resourceId: skillId.slice(0, 128),
+          resourceName: skillId.slice(0, 256),
+          agentInstanceId: input.adoptId || runtimeAgentId,
+          runtimeType: "openclaw",
+          runtimeAgentId,
+          sessionId: session.sessionId,
+          correlationId: String(event.runId || event.traceId || "").slice(0, 128) || null,
+          channel: input.channel || null,
+          toolName,
+          metadata: {
+            source: "openclaw_trajectory",
+            inferredFrom: "tool.call.arguments",
+            transport: input.transport || null,
+            traceId: event.traceId || null,
+            runId: event.runId || null,
+            seq: event.seq ?? null,
+            toolCallId: data.toolCallId || null,
+            itemId: data.itemId || null,
+            args: summarizeArgs(data.arguments),
+          },
+        });
+        seenEventIds.add(skillEventId);
+      }
+    }
     await recordAuditBestEffort({
       eventId,
       eventTime: event.ts ? new Date(event.ts) : undefined,
@@ -158,6 +259,54 @@ async function reconcileOpenClawToolAuditNow(input: OpenClawToolAuditInput) {
       },
     });
     seenEventIds.add(eventId);
+
+    const mcpServer = inferMcpServerFromOpenClawToolName(toolName);
+    if (mcpServer) {
+      const mcpEventId = `oc_mcp_${sha256(`${eventId}|${mcpServer}`).slice(0, 57)}`;
+      if (!(await auditEventExists(mcpEventId))) {
+        await recordAuditBestEffort({
+          eventId: mcpEventId,
+          eventTime: event.ts ? new Date(event.ts) : undefined,
+          action: isResult
+            ? isError ? "mcp.tool.failed" : "mcp.tool.completed"
+            : "mcp.tool.started",
+          result: isResult ? isError ? "failed" : "success" : "success",
+          severity: isError ? "medium" : "info",
+          actorType: input.userId ? "user" : "system",
+          actorUserId: input.userId ?? null,
+          ...(input.req ? auditRequest(input.req) : {}),
+          targetType: "mcp_tool",
+          targetId: toolName.slice(0, 128),
+          targetName: toolName.slice(0, 256),
+          resourceType: "mcp_server",
+          resourceId: mcpServer.slice(0, 128),
+          resourceName: mcpServer.slice(0, 256),
+          agentInstanceId: input.adoptId || runtimeAgentId,
+          runtimeType: "openclaw",
+          runtimeAgentId,
+          sessionId: session.sessionId,
+          correlationId: String(event.runId || event.traceId || "").slice(0, 128) || null,
+          channel: input.channel || null,
+          toolName,
+          errorCode: isError ? "MCP_TOOL_CALL_FAILED" : null,
+          metadata: {
+            source: "openclaw_trajectory",
+            inferredFrom: "tool.name",
+            transport: input.transport || null,
+            traceId: event.traceId || null,
+            runId: event.runId || null,
+            seq: event.seq ?? null,
+            toolCallId: data.toolCallId || null,
+            itemId: data.itemId || null,
+            status: data.status || null,
+            isError,
+            args: isResult ? null : summarizeArgs(data.arguments),
+            result: isResult ? summarizeResult(data.result) : null,
+          },
+        });
+        seenEventIds.add(mcpEventId);
+      }
+    }
   }
 }
 

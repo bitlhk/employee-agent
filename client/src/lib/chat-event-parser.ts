@@ -151,6 +151,19 @@ export function parseWirePayloadToChatEvents(
     })) : [];
     return [{ type: "workspace.files", adoptId: asString(payload.adoptId), files }];
   }
+  if (wireEvent === "jiuwen_event" && payload.event_type === "workflow.updated") {
+    const delta = isRecord(payload.delta) ? payload.delta : {};
+    return [{
+      type: "workflow.updated",
+      phase: asString(delta.phase) ?? asString(delta.stage) ?? asString(delta.step),
+      status: asString(delta.status) ?? asString(delta.state),
+      agentId: asString(delta.agentId) ?? asString(delta.agent_id),
+      workflowId: asString(delta.workflowId) ?? asString(delta.workflow_id),
+      runId: asString(delta.runId) ?? asString(delta.run_id),
+      message: asString(delta.message) ?? asString(delta.text),
+      data: delta,
+    }];
+  }
   if (wireEvent === "agent_dispatch") {
     const agents = Array.isArray(payload.agents) ? payload.agents.filter(isRecord).map((agent) => ({
       id: String(agent.id ?? ""),
@@ -202,9 +215,6 @@ export function parseWirePayloadToChatEvents(
 
   const events: ChatEvent[] = [];
   const delta = isRecord(choice.delta) ? choice.delta : undefined;
-  const reasoning = delta ? asString(delta.reasoning_content) : undefined;
-  if (reasoning) events.push({ type: "thinking", content: reasoning });
-
   const content = delta ? extractTextContent(delta.content) : "";
   if (content) events.push({ type: "delta", content });
 

@@ -78,7 +78,7 @@ export const DEMO_PUBLISH_META_KEY = "demo_route_publish_meta_v1";
 export const IFRAME_BYPASS_KEY = "iframe_bypass_experience_ids";
 
 type ClawModelOption = { id: string; name: string; desc?: string; isDefault?: boolean };
-const DEFAULT_FRONTEND_MODEL_FALLBACKS = ["modelarts-maas/glm-5.1", "maas/deepseek-v4-flash"];
+const DEFAULT_FRONTEND_MODEL_FALLBACKS = ["modelarts-maas/glm-5.2", "maas/deepseek-v4-flash"];
 
 const FRONTEND_MODEL_ALLOWLIST = new Set<string>(
   String(process.env.LINGXIA_FRONTEND_MODEL_ALLOWLIST || process.env.FRONTEND_MODEL_ALLOWLIST || "")
@@ -93,6 +93,7 @@ function isFrontendModelAllowed(modelId: string): boolean {
 }
 
 function modelDisplayName(modelId: string): string {
+  if (modelId === "modelarts-maas/glm-5.2") return "GLM-5.2（默认）";
   if (modelId === "modelarts-maas/glm-5.1") return "GLM-5.1（默认）";
   if (modelId === "maas/deepseek-v4-flash") return "DeepSeek-V4-Flash";
   if (modelId === "openai/gpt-5.5") return "GPT-5.5";
