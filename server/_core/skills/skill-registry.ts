@@ -556,9 +556,59 @@ export class FileSkillRegistry implements SkillRegistry {
     });
   }
 
+  private async syncJiuwenSwarmWorkspaceSkills(adoptId: string): Promise<void> {
+    const { getClawByAdoptId } = await import("../../db");
+    const { resolveEffectiveRoleAssets } = await import("../../db");
+    const { resolveAgentRoleTemplate } = await import("../role-templates");
+    const { writeJiuwenSwarmRoleScopeManifest } = await import("../jiuwenswarm-role-scope");
+
+    const claw = await getClawByAdoptId(adoptId).catch(() => null);
+    const runtimeAgentId = await this.runtimeAgentId(adoptId);
+    const roleTemplate = String((claw as any)?.roleTemplate || "general-assistant");
+    const role = resolveAgentRoleTemplate(roleTemplate);
+    const effectiveAssets = await resolveEffectiveRoleAssets(role.id);
+    const activeSkillIds = this.loadRegistry()
+      .filter((skill) => skill.adoptId === adoptId && skill.enabled && skill.state === "ready")
+      .map((skill) => skill.id);
+
+    const result = writeJiuwenSwarmRoleScopeManifest({
+      workspaceDir: jiuwenClawWorkspaceDir(adoptId, runtimeAgentId),
+      role,
+      effectiveAssets,
+      activeSkillIds,
+      skillSourceDirs: [
+        path.join(this.openclawHome, "skills-shared"),
+        path.join(this.openclawHome, "skill-market", "approved"),
+      ],
+    });
+
+    const changed =
+      Number(result.changed) +
+      Number(result.identityChanged) +
+      Number(result.userChanged) +
+      result.linkedSharedSkills.length +
+      result.removedSharedSkills.length;
+    if (changed > 0) {
+      console.log("[SKILL-REGISTRY][JIUWENSWARM-SKILLS-SYNC] reconciled workspace skills", {
+        adoptId,
+        runtimeAgentId,
+        roleTemplate: role.id,
+        changed,
+        linkedSharedSkills: result.linkedSharedSkills,
+        removedSharedSkills: result.removedSharedSkills,
+        identityChanged: result.identityChanged,
+        userChanged: result.userChanged,
+      });
+    }
+  }
+
   private async invalidateRuntime(adoptId: string): Promise<void> {
     try {
-      await this.syncOpenClawAgentSkillFilter(adoptId);
+      if (isJiuwenClawAdoptId(adoptId)) {
+        await this.syncJiuwenSwarmWorkspaceSkills(adoptId);
+      } else {
+        await this.syncOpenClawAgentSkillFilter(adoptId);
+      }
       const runtimeAgentId = await this.runtimeAgentId(adoptId);
       clearAgentSessionsCache(runtimeAgentId, this.openclawHome.replace(/\/\.openclaw$/, ""));
       bumpSessionEpoch(adoptId);

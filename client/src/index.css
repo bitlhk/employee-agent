@@ -2171,11 +2171,11 @@
 }
 
 .sidebar-item {
-  border-radius: 10px;
-  min-height: 44px;
-  height: auto;
-  padding: 10px 16px;
-  gap: 12px;
+  border-radius: 8px;
+  min-height: 38px;
+  height: 38px;
+  padding: 0 10px;
+  gap: 10px;
   border: 1px solid transparent;
   background: transparent;
   font-size: 14px;
@@ -2195,7 +2195,7 @@
 }
 .sidebar-item.active .sidebar-item-label {
   color: var(--oc-sidebar-text) !important;
-  font-weight: 600;
+  font-weight: 500;
 }
 .sidebar-item.active .sidebar-item-icon {
   color: var(--oc-sidebar-text) !important;
@@ -2206,6 +2206,23 @@
 }
 .sidebar-item:hover .sidebar-item-icon {
   color: var(--oc-sidebar-text);
+}
+.sidebar-item:hover .sidebar-item-label {
+  color: var(--oc-sidebar-text);
+}
+.session-list-item {
+  font-size: 13px;
+  font-weight: 400;
+}
+.session-list-item .sidebar-item-label {
+  font-size: 13px;
+  font-weight: 400;
+}
+.session-list-item.active .sidebar-item-label {
+  font-weight: 400;
+}
+:root[data-theme-mode="light"] .session-list-item.active .sidebar-item-label {
+  font-weight: 400 !important;
 }
 .sidebar-item-indicator {
   display: none;
@@ -3769,31 +3786,54 @@ input.session-searchbar__input:focus-visible,
 /* ── 表格 Final ── */
 .lingxia-md-table-wrap {
   overflow-x: auto;
-  margin: 0.65em 0;
+  max-width: 100%;
+  margin: 0.8em 0;
   border-radius: 8px;
   border: 1px solid rgba(255,255,255,0.09);
+  background: rgba(255,255,255,0.012);
+  -webkit-overflow-scrolling: touch;
 }
 .lingxia-md-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  table-layout: auto;
+  font-size: 12.5px;
+  line-height: 1.52;
 }
 .lingxia-md-th {
-  padding: 7px 13px;
+  padding: 7px 11px;
   text-align: left;
   font-weight: 600;
   font-size: 11.5px;
   color: rgba(156,163,175,0.8);
   background: rgba(255,255,255,0.03);
   border-bottom: 1px solid rgba(255,255,255,0.07);
+  border-right: 1px solid rgba(255,255,255,0.045);
   letter-spacing: 0.2px;
-  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: top;
 }
 .lingxia-md-td {
-  padding: 7px 13px;
+  padding: 8px 11px;
   border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-right: 1px solid rgba(255,255,255,0.035);
   color: var(--oc-text-primary);
-  line-height: 1.55;
+  line-height: 1.58;
+  vertical-align: top;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.lingxia-md-th:last-child,
+.lingxia-md-td:last-child { border-right: none; }
+.lingxia-md-th[style*="right"],
+.lingxia-md-td[style*="right"] {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.lingxia-md-td .lingxia-inline-code {
+  white-space: nowrap;
+  word-break: normal;
 }
 .lingxia-md-table tr:last-child .lingxia-md-td { border-bottom: none; }
 .lingxia-md-table tr:hover .lingxia-md-td     { background: rgba(255,255,255,0.018); }
@@ -4487,7 +4527,7 @@ input.session-searchbar__input:focus-visible,
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-label {
   color: var(--oc-sidebar-text) !important;
-  font-weight: 600 !important;
+  font-weight: 500 !important;
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-icon {
   color: var(--oc-sidebar-text) !important;
@@ -4641,7 +4681,7 @@ input.session-searchbar__input:focus-visible,
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-label {
   color: var(--oc-sidebar-text) !important;
-  font-weight: 600 !important;
+  font-weight: 500 !important;
 }
 :root[data-theme-mode="light"] .sidebar-item.active .sidebar-item-icon {
   color: var(--oc-sidebar-text) !important;
@@ -4693,14 +4733,17 @@ input.session-searchbar__input:focus-visible,
 /* 浅色：表格 */
 :root[data-theme-mode="light"] .lingxia-md-table-wrap {
   border-color: #E5E7EB !important;
+  background: #FFFFFF !important;
 }
 :root[data-theme-mode="light"] .lingxia-md-th {
   background: #F9FAFB !important;
   border-bottom-color: #E5E7EB !important;
+  border-right-color: #EEF2F7 !important;
   color: #6B7280 !important;
 }
 :root[data-theme-mode="light"] .lingxia-md-td {
   border-bottom-color: #F3F4F6 !important;
+  border-right-color: #F3F4F6 !important;
   color: #1F2937 !important;
 }
 :root[data-theme-mode="light"] .lingxia-md-table tr:hover .lingxia-md-td {

@@ -67,6 +67,15 @@ export const jiuwenClawWorkspaceDir = (adoptId: string, dbAgentIdRaw: any) =>
     "agent",
     "jiuwenclaw_workspace",
   );
+export const jiuwenClawAgentDir = (adoptId: string, dbAgentIdRaw: any) =>
+  path.join(
+    JIUWENCLAW_HOME,
+    `service_${jiuwenClawServiceId()}`,
+    `agent_${jiuwenClawAgentId(adoptId, dbAgentIdRaw)}`,
+    "agent",
+  );
+export const jiuwenClawSessionsDir = (adoptId: string, dbAgentIdRaw: any) =>
+  path.join(jiuwenClawAgentDir(adoptId, dbAgentIdRaw), "sessions");
 
 export function normalizeHermesProfilesDir(raw?: string): string {
   const value = expandHomePath(

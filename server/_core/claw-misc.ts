@@ -9,6 +9,9 @@ import {
   OPENCLAW_HOME,
   OPENCLAW_JSON_PATH,
   buildSessionRegistryScope,
+  isJiuwenClawAdoptId,
+  jiuwenClawAgentId,
+  jiuwenClawSessionsDir,
   openClawAgentDir,
   openClawSkillMarketDir,
   openClawWorkspaceDir,
@@ -365,6 +368,237 @@ function collectOpenClawChatHistoryMessages(args: {
   }
 
   return dedupeHistoryMessages(merged, maxMessages);
+}
+
+function normalizeJiuwenHistoryTimestamp(value: unknown): number {
+  const raw = Number(value || 0) || 0;
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return raw < 10_000_000_000 ? raw * 1000 : raw;
+}
+
+function jiuwenConversationIdFromSessionId(sessionId: string, adoptId: string): string {
+  const prefix = `sess_${adoptId}_web_`;
+  const value = String(sessionId || "").trim();
+  if (!value.startsWith(prefix)) return recoveredConversationId(value || "jiuwen");
+  const rest = value.slice(prefix.length);
+  const lastUnderscore = rest.lastIndexOf("_");
+  const conversationId = lastUnderscore > 0 ? rest.slice(0, lastUnderscore) : rest;
+  return conversationId || recoveredConversationId(value);
+}
+
+function safeJiuwenSessionId(value: unknown): string {
+  const sessionId = String(value || "").trim();
+  return /^[a-zA-Z0-9._-]{8,160}$/.test(sessionId) ? sessionId : "";
+}
+
+function jiuwenHistoryFileForSession(sessionsDir: string, sessionId: string): string | null {
+  const safeSessionId = safeJiuwenSessionId(sessionId);
+  if (!safeSessionId) return null;
+  const sessionsRoot = path.resolve(sessionsDir);
+  const file = path.resolve(path.join(sessionsDir, safeSessionId, "history.json"));
+  if (!file.startsWith(sessionsRoot + path.sep)) return null;
+  return file;
+}
+
+function readJiuwenSessionMetadata(sessionsDir: string, sessionId: string): any {
+  const safeSessionId = safeJiuwenSessionId(sessionId);
+  if (!safeSessionId) return {};
+  const sessionsRoot = path.resolve(sessionsDir);
+  const file = path.resolve(path.join(sessionsDir, safeSessionId, "metadata.json"));
+  if (!file.startsWith(sessionsRoot + path.sep) || !existsSync(file)) return {};
+  try {
+    return JSON.parse(readFileSync(file, "utf8") || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function jiuwenHistoryContent(raw: any): string {
+  const value = raw?.content ?? raw?.text ?? raw?.message?.content ?? "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (typeof item?.text === "string") return item.text;
+        if (typeof item?.content === "string") return item.content;
+        return "";
+      })
+      .filter(Boolean)
+      .join("");
+  }
+  return "";
+}
+
+function shouldUseJiuwenAssistantHistoryEvent(eventType: string): boolean {
+  const type = String(eventType || "").toLowerCase();
+  if (!type) return true;
+  if (type.includes("reasoning") || type.includes("thinking")) return false;
+  if (type.includes("tool") || type.includes("usage")) return false;
+  if (type === "chat.delta" || type === "chat.final" || type === "chat.message") return true;
+  return type.startsWith("chat.");
+}
+
+function mergeJiuwenAssistantText(previous: string, next: string, eventType: string): string {
+  const text = String(next || "");
+  if (!text) return previous;
+  if (eventType === "chat.final") return text;
+  if (!previous) return text;
+  if (text.includes(previous) && text.length > previous.length) return text;
+  if (previous.includes(text)) return previous;
+  return `${previous}${text}`;
+}
+
+export function extractJiuwenChatMessages(historyFile: string, maxMessages = 200): ChatHistoryMessage[] {
+  if (!historyFile || !existsSync(historyFile)) return [];
+  const messages: ChatHistoryMessage[] = [];
+  const assistantByRequest = new Map<string, {
+    id: string;
+    finalText: string;
+    fallbackText: string;
+    timestamp: number;
+  }>();
+  const lines = readFileSync(historyFile, "utf8").split("\n");
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let event: any;
+    try { event = JSON.parse(line); } catch { continue; }
+    const role = String(event?.role || event?.message?.role || "");
+    if (role !== "user" && role !== "assistant") continue;
+    const eventType = String(event?.event_type || event?.type || "").toLowerCase();
+    const timestamp = normalizeJiuwenHistoryTimestamp(event?.timestamp || event?.created_at || event?.time);
+    const text = role === "user"
+      ? stripPlatformLanguagePolicy(jiuwenHistoryContent(event)).trim()
+      : jiuwenHistoryContent(event).trim();
+    if (!text) continue;
+
+    if (role === "user") {
+      messages.push({
+        id: `jiuwen-${String(event?.id || messages.length)}`,
+        role,
+        text,
+        timeLabel: formatHistoryTimeLabel(timestamp),
+        timestamp,
+      });
+      continue;
+    }
+
+    if (!shouldUseJiuwenAssistantHistoryEvent(eventType)) continue;
+    const requestId = String(event?.request_id || event?.id || `${timestamp}-${messages.length}`);
+    let existing = assistantByRequest.get(requestId);
+    if (!existing) {
+      existing = {
+        id: `jiuwen-${requestId}`,
+        finalText: "",
+        fallbackText: "",
+        timestamp,
+      };
+      assistantByRequest.set(requestId, existing);
+    }
+    if (eventType === "chat.final") {
+      existing.finalText = text;
+    } else {
+      existing.fallbackText = mergeJiuwenAssistantText(existing.fallbackText, text, eventType);
+    }
+    if (!existing.timestamp && timestamp) {
+      existing.timestamp = timestamp;
+    }
+  }
+
+  for (const entry of assistantByRequest.values()) {
+    const text = entry.finalText || entry.fallbackText;
+    if (!text.trim()) continue;
+    messages.push({
+      id: entry.id,
+      role: "assistant",
+      text,
+      timeLabel: formatHistoryTimeLabel(entry.timestamp),
+      timestamp: entry.timestamp,
+    });
+  }
+
+  return dedupeHistoryMessages(
+    messages
+      .filter((message) => normalizeHistoryText(message.text))
+      .sort((a, b) => {
+        const at = typeof a.timestamp === "number" && Number.isFinite(a.timestamp) ? a.timestamp : 0;
+        const bt = typeof b.timestamp === "number" && Number.isFinite(b.timestamp) ? b.timestamp : 0;
+        return at - bt;
+      }),
+    maxMessages,
+  );
+}
+
+export function listJiuwenChatHistorySessions(args: {
+  adoptId: string;
+  dbAgentId: string;
+  limit: number;
+}): any[] {
+  const sessionsDir = jiuwenClawSessionsDir(args.adoptId, args.dbAgentId);
+  const sessionsRoot = path.resolve(sessionsDir);
+  let entries: ReturnType<typeof readdirSync> = [];
+  try {
+    entries = readdirSync(sessionsDir, { withFileTypes: true }) as any;
+  } catch {
+    return [];
+  }
+
+  const candidates: any[] = [];
+  for (const entry of entries as any[]) {
+    if (!entry.isDirectory()) continue;
+    const sessionId = safeJiuwenSessionId(entry.name);
+    if (!sessionId) continue;
+    const historyFile = jiuwenHistoryFileForSession(sessionsDir, sessionId);
+    if (!historyFile || !historyFile.startsWith(sessionsRoot + path.sep) || !existsSync(historyFile)) continue;
+    const metadata = readJiuwenSessionMetadata(sessionsDir, sessionId);
+    const channelId = String(metadata?.channel_id || "");
+    if (channelId && channelId !== "web") continue;
+    let st: ReturnType<typeof statSync> | null = null;
+    try { st = statSync(historyFile); } catch { st = null; }
+    const updatedAt = normalizeJiuwenHistoryTimestamp(metadata?.last_message_at) || Number(st?.mtimeMs || 0) || 0;
+    const createdAt = normalizeJiuwenHistoryTimestamp(metadata?.created_at) || Number(st?.birthtimeMs || updatedAt || 0) || updatedAt;
+    candidates.push({ sessionId, historyFile, metadata, updatedAt, createdAt });
+  }
+
+  return candidates
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, args.limit)
+    .map((entry) => {
+      const messages = extractJiuwenChatMessages(entry.historyFile, 80);
+      const firstUser = messages.find((m) => m.role === "user");
+      const last = [...messages].reverse().find((m) => normalizeHistoryText(m.text));
+      const conversationId = jiuwenConversationIdFromSessionId(entry.sessionId, args.adoptId);
+      return {
+        conversationId,
+        sessionKey: entry.sessionId,
+        sessionId: entry.sessionId,
+        title: truncateHistoryText(entry.metadata?.title || firstUser?.text || "", 24) || "新对话",
+        preview: truncateHistoryText(last?.text || "", 42),
+        searchText: normalizeHistoryText(messages.map((message) => message.text || "").join(" ")).slice(0, 12000),
+        messageCount: messages.length,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+      };
+    })
+    .filter((entry) => entry.messageCount > 0);
+}
+
+export function resolveJiuwenHistorySession(args: {
+  adoptId: string;
+  dbAgentId: string;
+  sessionKey: string;
+}): { conversationId: string; sessionId: string; historyFile: string; sessionsDir: string } | null {
+  const sessionId = safeJiuwenSessionId(args.sessionKey);
+  if (!sessionId) return null;
+  const sessionsDir = jiuwenClawSessionsDir(args.adoptId, args.dbAgentId);
+  const historyFile = jiuwenHistoryFileForSession(sessionsDir, sessionId);
+  if (!historyFile || !existsSync(historyFile)) return null;
+  return {
+    conversationId: jiuwenConversationIdFromSessionId(sessionId, args.adoptId),
+    sessionId,
+    historyFile,
+    sessionsDir,
+  };
 }
 
 function parseWebSessionKey(sessionKey: string, runtimeAgentId: string): { conversationId: string; epoch?: number } | null {
@@ -877,6 +1111,24 @@ export function registerMiscRoutes(app: express.Express) {
       }
 
       const dbAgentId = String((claw as any).agentId || "").trim();
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const sessions = listJiuwenChatHistorySessions({ adoptId, dbAgentId, limit });
+        logIosLoadDebug("chat_history_sessions_done_jiuwen", {
+          adoptId,
+          runtimeAgentId: jiuwenClawAgentId(adoptId, dbAgentId),
+          returnedCount: sessions.length,
+          ms: Date.now() - startedAt,
+        });
+        res.json({
+          sessions,
+          meta: {
+            runtime: "jiuwenswarm",
+            timings: { totalMs: Date.now() - startedAt },
+          },
+        });
+        return;
+      }
+
       const trialAgentId = `trial_${adoptId}`;
       const runtimeAgentId = existsSync(openClawAgentDir(trialAgentId)) ? trialAgentId : dbAgentId;
       const sessionsPath = path.join(openClawAgentDir(runtimeAgentId), "sessions", "sessions.json");
@@ -1022,6 +1274,29 @@ export function registerMiscRoutes(app: express.Express) {
       }
 
       const dbAgentId = String((claw as any).agentId || "").trim();
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const resolved = resolveJiuwenHistorySession({ adoptId, dbAgentId, sessionKey });
+        if (!resolved) {
+          res.status(404).json({ error: "session_missing" });
+          return;
+        }
+        const messages = extractJiuwenChatMessages(resolved.historyFile, 200);
+        logIosLoadDebug("chat_history_messages_done_jiuwen", {
+          adoptId,
+          runtimeAgentId: jiuwenClawAgentId(adoptId, dbAgentId),
+          sessionKey,
+          messageCount: messages.length,
+          ms: Date.now() - startedAt,
+        });
+        res.json({
+          conversationId: resolved.conversationId,
+          sessionKey,
+          sessionId: resolved.sessionId,
+          messages,
+        });
+        return;
+      }
+
       const trialAgentId = `trial_${adoptId}`;
       const runtimeAgentId = existsSync(openClawAgentDir(trialAgentId)) ? trialAgentId : dbAgentId;
       const parsed = parseWebSessionKey(sessionKey, runtimeAgentId);
@@ -1089,6 +1364,26 @@ export function registerMiscRoutes(app: express.Express) {
       if (!claw) return;
 
       const dbAgentId = String((claw as any).agentId || "").trim();
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const resolved = resolveJiuwenHistorySession({ adoptId, dbAgentId, sessionKey });
+        if (!resolved) {
+          res.status(404).json({ error: "session_missing" });
+          return;
+        }
+        const runtimeAgentId = jiuwenClawAgentId(adoptId, dbAgentId);
+        const currentEpoch = readSessionEpoch(adoptId);
+        const scope = buildSessionRegistryScope("web", resolved.conversationId);
+        upsertSessionRegistry(adoptId, runtimeAgentId, sessionKey, currentEpoch, scope);
+        res.json({
+          ok: true,
+          conversationId: resolved.conversationId,
+          sessionKey,
+          epoch: currentEpoch,
+          runtime: "jiuwenswarm",
+        });
+        return;
+      }
+
       const trialAgentId = `trial_${adoptId}`;
       const runtimeAgentId = existsSync(openClawAgentDir(trialAgentId)) ? trialAgentId : dbAgentId;
       const parsed = parseWebSessionKey(sessionKey, runtimeAgentId);

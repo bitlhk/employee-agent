@@ -8,6 +8,7 @@ import {
 import { mkdirSync } from "fs";
 import path from "path";
 import { writeJiuwenSwarmRoleScopeManifest } from "../_core/jiuwenswarm-role-scope";
+import { ensureJiuwenSwarmWorkspacePermission } from "../_core/jiuwenswarm-permissions";
 import { applyOpenClawRoleScope } from "../_core/openclaw-role-scope";
 import { OPENCLAW_HOME, OPENCLAW_JSON_PATH, openClawWorkspaceDir, resolveRuntimeWorkspaceByIds } from "../_core/helpers";
 import { isJiuwenClawRuntimeEnabled } from "../_core/jiuwenclaw-bridge";
@@ -80,6 +81,7 @@ class JiuwenSwarmRoleRuntimeAdapter implements RoleRuntimeAdapter {
     }
     const workspaceDir = resolveRuntimeWorkspaceByIds(input.adoptId, input.agentId);
     mkdirSync(path.join(workspaceDir, "skills"), { recursive: true });
+    const workspacePermission = ensureJiuwenSwarmWorkspacePermission(workspaceDir);
     return {
       ok: true,
       mode: "jiuwenswarm-workspace",
@@ -89,6 +91,7 @@ class JiuwenSwarmRoleRuntimeAdapter implements RoleRuntimeAdapter {
         adoptId: input.adoptId,
         agentId: input.agentId,
         workspaceDir,
+        workspacePermission,
         roleTemplate: input.role.id,
         effectiveAssets: input.effectiveAssets,
       },
@@ -96,8 +99,10 @@ class JiuwenSwarmRoleRuntimeAdapter implements RoleRuntimeAdapter {
   }
 
   reconcileSkills(input: RoleRuntimeReconcileInput): RoleRuntimeReconcileResult {
+    const workspaceDir = resolveRuntimeWorkspaceByIds(input.adoptId, input.agentId);
+    const workspacePermission = ensureJiuwenSwarmWorkspacePermission(workspaceDir);
     const result = writeJiuwenSwarmRoleScopeManifest({
-      workspaceDir: resolveRuntimeWorkspaceByIds(input.adoptId, input.agentId),
+      workspaceDir,
       role: input.role,
       effectiveAssets: input.effectiveAssets,
       activeSkillIds: input.activeSkillIds,
@@ -106,12 +111,18 @@ class JiuwenSwarmRoleRuntimeAdapter implements RoleRuntimeAdapter {
         `${OPENCLAW_HOME}/skill-market/approved`,
       ],
     });
-    const changed = Number(result.changed) + result.linkedSharedSkills.length + result.removedSharedSkills.length;
+    const changed =
+      Number(result.changed) +
+      Number(result.identityChanged) +
+      Number(result.userChanged) +
+      result.linkedSharedSkills.length +
+      result.removedSharedSkills.length;
+    const totalChanged = changed + Number(workspacePermission.changed);
     return {
       ok: true,
-      applied: changed > 0,
-      changed,
-      reason: result.manifestPath,
+      applied: totalChanged > 0,
+      changed: totalChanged,
+      reason: `${result.manifestPath}; workspacePermission=${workspacePermission.changed ? "updated" : "ok"}`,
     };
   }
 

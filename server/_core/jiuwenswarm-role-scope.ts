@@ -24,6 +24,8 @@ export type JiuwenSwarmRoleScopeManifest = {
 export type JiuwenSwarmRoleScopeWriteResult = {
   manifestPath: string;
   changed: boolean;
+  identityChanged: boolean;
+  userChanged: boolean;
   linkedSharedSkills: string[];
   removedSharedSkills: string[];
 };
@@ -80,6 +82,8 @@ export function writeJiuwenSwarmRoleScopeManifest(args: {
 
   mkdirSync(workspaceDir, { recursive: true });
   mkdirSync(path.join(workspaceDir, "skills"), { recursive: true });
+  const identityChanged = writeJiuwenSwarmIdentityFilesIfMissing(workspaceDir, args.role, args.effectiveAssets).identityChanged;
+  const userChanged = writeJiuwenSwarmUserFileIfMissing(workspaceDir, args.role).userChanged;
 
   const skillSourceDirs = uniqueSorted([
     ...(args.skillSourceDirs || []),
@@ -94,10 +98,87 @@ export function writeJiuwenSwarmRoleScopeManifest(args: {
     })
     : { linkedSharedSkills: [], removedSharedSkills: [] };
 
-  if (current === next) return { manifestPath, changed: false, ...linkResult };
+  if (current === next) return { manifestPath, changed: false, identityChanged, userChanged, ...linkResult };
 
   writeFileSync(manifestPath, next, "utf8");
-  return { manifestPath, changed: true, ...linkResult };
+  return { manifestPath, changed: true, identityChanged, userChanged, ...linkResult };
+}
+
+function roleGuidance(role: AgentRoleTemplate): string {
+  switch (role.id) {
+    case "wealth-manager":
+      return "重点支持客户经营、资产配置、产品匹配、客户沟通和财富管理材料整理。涉及投资建议时保持审慎，避免承诺收益。";
+    case "risk-manager":
+      return "重点支持风险识别、贷后监控、异常线索归因、风险报告和处置建议。输出应区分事实、判断和待核验信息。";
+    case "review-specialist":
+      return "重点支持材料审核、凭证识别、合规检查、审核意见生成和异常点提示。输出应明确依据、缺口和下一步补充材料。";
+    case "insurance-advisor":
+      return "重点支持保险需求分析、产品解释、销售陪练、话术推荐和异议处理。严格遵守合规边界，不承诺收益，不替代人工核保或理赔结论。";
+    case "investment-analyst":
+      return "重点支持投研分析、行情解读、基金/股票/债券资料整理、组合对比和投资备忘。输出应标注数据口径和不确定性。";
+    default:
+      return "重点支持通用办公、资料整理、信息检索、文本生成和任务协作。遇到专业金融、合规或投资判断时应提示限制并建议人工复核。";
+  }
+}
+
+function formatAssetLine(label: string, values: string[]): string {
+  return `- ${label}: ${values.length ? values.join(", ") : "无"}`;
+}
+
+export function buildJiuwenSwarmIdentityMarkdown(
+  role: AgentRoleTemplate,
+  effectiveAssets: EffectiveRoleAssets,
+): string {
+  return [
+    "# 身份",
+    "",
+    `你是企业员工智能体，当前岗位为「${role.name}」。`,
+    "",
+    "## 工作方式",
+    "",
+    `- ${roleGuidance(role)}`,
+    "- 优先使用当前工作目录已安装的岗位技能和已授权 MCP；如果能力不可用，应明确说明不可用，不要编造结果。",
+    "- 回答默认使用中文，面向业务用户，避免暴露底层 runtime、文件路径、调试日志等实现细节。",
+    "- 对金融、保险、证券、风控、审核相关内容保持合规审慎；区分事实、推断和建议。",
+    "",
+    "## 当前岗位资产",
+    "",
+    formatAssetLine("默认技能", effectiveAssets.skills.default),
+    formatAssetLine("默认 MCP", effectiveAssets.mcpServers.default),
+    "",
+  ].join("\n");
+}
+
+export function buildJiuwenSwarmUserMarkdown(role: AgentRoleTemplate): string {
+  return [
+    "# 用户偏好",
+    "",
+    `用户申请该智能体时选择的岗位是「${role.name}」。`,
+    "用户希望智能体围绕岗位职责提供直接、可执行的业务协助；在信息不足时，先简短追问关键缺口。",
+    "如用户提出与岗位无关的问题，可正常协助通用任务，但不要主动越权调用未授权工具或输出高风险结论。",
+    "",
+  ].join("\n");
+}
+
+export function writeJiuwenSwarmIdentityFilesIfMissing(
+  workspaceDir: string,
+  role: AgentRoleTemplate,
+  effectiveAssets: EffectiveRoleAssets,
+): { identityPath: string; identityChanged: boolean } {
+  const identityPath = path.join(workspaceDir, "IDENTITY.md");
+  if (existsSync(identityPath)) return { identityPath, identityChanged: false };
+  writeFileSync(identityPath, buildJiuwenSwarmIdentityMarkdown(role, effectiveAssets), "utf8");
+  return { identityPath, identityChanged: true };
+}
+
+export function writeJiuwenSwarmUserFileIfMissing(
+  workspaceDir: string,
+  role: AgentRoleTemplate,
+): { userPath: string; userChanged: boolean } {
+  const userPath = path.join(workspaceDir, "USER.md");
+  if (existsSync(userPath)) return { userPath, userChanged: false };
+  writeFileSync(userPath, buildJiuwenSwarmUserMarkdown(role), "utf8");
+  return { userPath, userChanged: true };
 }
 
 export function reconcileJiuwenSwarmSharedSkillLinks(params: {

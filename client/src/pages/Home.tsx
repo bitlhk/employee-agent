@@ -25,6 +25,7 @@ import { TopBar } from "@/components/console/TopBar";
 import { MainPanel } from "@/components/console/MainPanel";
 import { SettingsOverlay, type SettingsHealthDiagnostics } from "@/components/settings/SettingsOverlay";
 import { ChatPage } from "@/components/pages/ChatPage";
+import { LingxiaIcon } from "@/components/LingxiaIcon";
 import { LINGXIA_SIDEBAR_NAV } from "@/config/navigation";
 import { sidebarIconMap } from "@/config/icons";
 import { applySettings as applyUiSettings, getSettings, subscribeSettings } from "@/lib/settings";
@@ -32,11 +33,23 @@ import { useLingxiaChat } from "@/hooks/useLingxiaChat";
 import { formatModelName } from "@/lib/modelDisplay";
 import { classifyDisplayError, displayErrorMessage } from "@/lib/errorDisplay";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Bot, History } from "lucide-react";
+import { History } from "lucide-react";
 
 
 const ENABLE_OPENCLAW_WS_CHAT = true;
 
+const ROLE_DISPLAY_NAMES: Record<string, string> = {
+  "investment-researcher": "投顾分析",
+  "wealth-manager": "财富经理",
+  "credential-compliance": "审核专员",
+  "insurance-advisor": "保险顾问",
+  "general-assistant": "通用助手",
+};
+
+function roleDisplayName(roleTemplate: unknown) {
+  const role = String(roleTemplate || "").trim();
+  return ROLE_DISPLAY_NAMES[role] || "通用助手";
+}
 
 // reasoning_content 是模型内部推理流。当前产品不直接展示原始推理内容，避免和真实工具调用卡片混淆。
 function markThinkingDone(msgs: any[]): any[] {
@@ -336,6 +349,16 @@ const CLIENT_LOAD_METRIC_LABELS: Record<string, string> = {
   runtimeInfo: "运行时信息",
   skills: "技能列表",
 };
+const CLIENT_LOAD_PRIMARY_KEYS = new Set(["auth", "agent", "settings", "models", "health", "runtimeInfo", "skills"]);
+
+function clientMetricDisplayMs(metric: ClientLoadMetric): number {
+  return metric.requestMs ?? metric.elapsedMs;
+}
+
+function formatClientMetricDuration(metric: ClientLoadMetric): string {
+  if (metric.status === "skip") return "跳过";
+  return `${clientMetricDisplayMs(metric)}ms`;
+}
 
 function ChatStartupSkeleton() {
   return (
@@ -543,11 +566,10 @@ export default function Home() {
   const [lingxiaToolCalls, setLingxiaToolCalls] = useState<ToolCallEntry[]>([]);
   const [lingxiaShowToolCalls, setLingxiaShowToolCalls] = useState(true);
   const [lingxiaDisplayName, setLingxiaDisplayName] = useState(brand.name);
-  const identityNameRef = useRef<string>("");
     const [lingxiaMemoryEnabled, setLingxiaMemoryEnabled] = useState<"yes" | "no">("yes");
   const [lingxiaContextTurns, setLingxiaContextTurns] = useState(20);
   const [lingxiaModelId, setLingxiaModelId] = useState("");
-  const [sidebarWidth, setSidebarWidth] = useState(260);
+  const [sidebarWidth, setSidebarWidth] = useState(248);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768);
   const [openclawVersion, setOpenclawVersion] = useState("OpenClaw 2026.5.7");
   const [jiuwenswarmVersion, setJiuwenswarmVersion] = useState("JiuwenSwarm");
@@ -797,6 +819,8 @@ export default function Home() {
   const wsClientRef = useRef<OpenClawWSClient | null>(null);
   const restoredSessionKeyRef = useRef<string>("");
   const pendingConversationRestoreRef = useRef<{ conversationId: string; messages: any[] } | null>(null);
+  const suppressSessionPersistRef = useRef<string>("");
+  const restoredConversationMessageCountsRef = useRef<Record<string, number>>({});
   const [wsConnected, setWsConnected] = useState(false);
   const MSGS_KEY = resolvedAdoptId && userStorageId && webConversationId ? webMessagesStorageKey(userStorageId, resolvedAdoptId, webConversationId) : null;
   const LEGACY_MSGS_KEY = resolvedAdoptId && webConversationId ? legacyWebMessagesStorageKey(resolvedAdoptId, webConversationId) : null;
@@ -976,7 +1000,7 @@ export default function Home() {
   }, [clawByAdoptId, clawByAdoptLoading, clawHealthLoading, isDirectHttpRuntime, resolvedAdoptId]);
 
   const refreshBackendWebSessions = useCallback(async (silent = false) => {
-    if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return [];
+    if (!resolvedAdoptId || !SESSION_INDEX_KEY || isHermesRuntime) return [];
     if (silent && activeLingxiaStreaming) {
       markClientLoadMetric("sessions", "skip", "聊天处理中，暂停后台历史同步");
       return webSessionsRef.current;
@@ -1024,10 +1048,10 @@ export default function Home() {
     } finally {
       if (shouldShowLoading && isCurrentRequest()) setWebSessionsLoading(false);
     }
-  }, [activeLingxiaStreaming, resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime, markClientLoadMetric]);
+  }, [activeLingxiaStreaming, resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isHermesRuntime, markClientLoadMetric]);
 
   useEffect(() => {
-    if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return;
+    if (!resolvedAdoptId || !SESSION_INDEX_KEY || isHermesRuntime) return;
     let cancelled = false;
     let timer: number | undefined;
     refreshBackendWebSessions(false)
@@ -1042,10 +1066,10 @@ export default function Home() {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime, refreshBackendWebSessions]);
+  }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isHermesRuntime, refreshBackendWebSessions]);
 
   useEffect(() => {
-    if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return;
+    if (!resolvedAdoptId || !SESSION_INDEX_KEY || isHermesRuntime) return;
     const onFocus = () => void refreshBackendWebSessions(true).catch(() => {});
     const timer = window.setInterval(() => {
       void refreshBackendWebSessions(true).catch(() => {});
@@ -1055,7 +1079,7 @@ export default function Home() {
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
     };
-  }, [isDirectHttpRuntime, refreshBackendWebSessions, resolvedAdoptId, SESSION_INDEX_KEY]);
+  }, [isHermesRuntime, refreshBackendWebSessions, resolvedAdoptId, SESSION_INDEX_KEY]);
 
   useEffect(() => {
     if (!SESSION_INDEX_KEY) return;
@@ -1069,7 +1093,7 @@ export default function Home() {
   }, [SESSION_INDEX_KEY, HIDDEN_SESSION_KEY]);
 
   useEffect(() => {
-    if (isDirectHttpRuntime || activeLingxiaStreaming || !webConversationId || activeLingxiaMsgs.length === 0) return;
+    if (isHermesRuntime || activeLingxiaStreaming || !webConversationId || activeLingxiaMsgs.length === 0) return;
     const meaningfulMessages = activeLingxiaMsgs.filter((m: any) => normalizeSessionText(m.text || ""));
     if (meaningfulMessages.length === 0) return;
     const refreshKey = `${webConversationId}:${meaningfulMessages.length}`;
@@ -1079,11 +1103,12 @@ export default function Home() {
       void refreshBackendWebSessions().catch(() => {});
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [activeLingxiaMsgs, activeLingxiaStreaming, isDirectHttpRuntime, refreshBackendWebSessions, webConversationId]);
+  }, [activeLingxiaMsgs, activeLingxiaStreaming, isHermesRuntime, refreshBackendWebSessions, webConversationId]);
 
   useEffect(() => {
     if (!isDirectHttpRuntime) return;
     if (!SESSION_INDEX_KEY || !webConversationId || activeLingxiaMsgs.length === 0) return;
+    if (suppressSessionPersistRef.current === webConversationId) return;
     const meaningfulMessages = activeLingxiaMsgs.filter((m: any) => normalizeSessionText(m.text || ""));
     if (meaningfulMessages.length === 0) return;
     const now = Date.now();
@@ -1091,18 +1116,30 @@ export default function Home() {
     const preview = inferSessionPreview(activeLingxiaMsgs as any);
     const existing = readWebSessionIndex(SESSION_INDEX_KEY);
     const previous = existing.find((item) => item.conversationId === webConversationId);
+    const nextTitle = previous?.sessionKey && previous.title ? previous.title : title;
+    const nextPreview = previous?.sessionKey && previous.preview ? previous.preview : preview;
+    const restoredBaselineCount = Number(restoredConversationMessageCountsRef.current[webConversationId] || 0) || 0;
+    const isRestoredBaseline = Boolean(previous && restoredBaselineCount > 0 && meaningfulMessages.length <= restoredBaselineCount);
+    const unchangedExisting =
+      previous &&
+      Number(previous.messageCount || 0) === meaningfulMessages.length &&
+      normalizeSessionText(previous.title || "") === normalizeSessionText(nextTitle || "") &&
+      normalizeSessionText(previous.preview || "") === normalizeSessionText(nextPreview || "");
     const nextRecord: WebChatSessionRecord = {
       conversationId: webConversationId,
       sessionKey: previous?.sessionKey,
       sessionId: previous?.sessionId,
-      title: previous?.sessionKey && previous.title ? previous.title : title,
+      title: nextTitle,
       customTitle: previous?.customTitle,
-      preview: previous?.sessionKey && previous.preview ? previous.preview : preview,
+      preview: nextPreview,
       messageCount: meaningfulMessages.length,
       createdAt: previous?.createdAt || now,
-      updatedAt: now,
+      updatedAt: (unchangedExisting || isRestoredBaseline) ? (previous?.updatedAt || now) : now,
       pinnedAt: previous?.pinnedAt,
     };
+    if (restoredBaselineCount > 0 && meaningfulMessages.length > restoredBaselineCount) {
+      delete restoredConversationMessageCountsRef.current[webConversationId];
+    }
     const next = [
       nextRecord,
       ...existing.filter((item) => item.conversationId !== webConversationId),
@@ -1112,6 +1149,11 @@ export default function Home() {
     setWebSessions(sorted);
   }, [SESSION_INDEX_KEY, webConversationId, activeLingxiaMsgs, isDirectHttpRuntime]);
 
+  useEffect(() => {
+    if (!webConversationId || suppressSessionPersistRef.current !== webConversationId) return;
+    if (activeLingxiaMsgs.length === 0) suppressSessionPersistRef.current = "";
+  }, [activeLingxiaMsgs.length, webConversationId]);
+
   const updateWebSessionMeta = useCallback((conversationId: string, patch: Partial<WebChatSessionRecord>) => {
     if (!SESSION_INDEX_KEY) return;
     let nextSessions: WebChatSessionRecord[] = [];
@@ -1120,6 +1162,34 @@ export default function Home() {
       nextSessions = sortWebSessionRecords(source.map((item) =>
         item.conversationId === conversationId ? { ...item, ...patch } : item
       ));
+      writeWebSessionIndex(SESSION_INDEX_KEY, nextSessions);
+      return nextSessions;
+    });
+  }, [SESSION_INDEX_KEY]);
+
+  const ensureEmptyWebSession = useCallback((conversationId: string) => {
+    if (!SESSION_INDEX_KEY || !conversationId) return;
+    const now = Date.now();
+    let nextSessions: WebChatSessionRecord[] = [];
+    setWebSessions((previous) => {
+      const source = previous.length > 0 ? previous : readWebSessionIndex(SESSION_INDEX_KEY);
+      const existing = source.find((item) => item.conversationId === conversationId);
+      const placeholder: WebChatSessionRecord = {
+        conversationId,
+        sessionKey: existing?.sessionKey,
+        sessionId: existing?.sessionId,
+        title: "新对话",
+        customTitle: existing?.customTitle,
+        preview: "",
+        messageCount: 0,
+        createdAt: existing?.createdAt || now,
+        updatedAt: existing?.updatedAt || now,
+        pinnedAt: existing?.pinnedAt,
+      };
+      nextSessions = sortWebSessionRecords([
+        placeholder,
+        ...source.filter((item) => item.conversationId !== conversationId),
+      ]).slice(0, 100);
       writeWebSessionIndex(SESSION_INDEX_KEY, nextSessions);
       return nextSessions;
     });
@@ -1150,15 +1220,29 @@ export default function Home() {
   const activateWebConversation = (conversationId: string, restoredMessages?: any[]) => {
     if (!resolvedAdoptId || !userStorageId) return;
     const nextMessages = restoredMessages ? restoredMessages.slice(-100) : [];
+    const hasRestoredMessages = Array.isArray(restoredMessages);
+    restoreConversationRequestSeqRef.current += 1;
+    restoredSessionKeyRef.current = hasRestoredMessages ? restoredSessionKeyRef.current : "";
+    if (hasRestoredMessages) {
+      const restoredCount = nextMessages.filter((m: any) => normalizeSessionText(m?.text || "")).length;
+      restoredConversationMessageCountsRef.current[conversationId] = restoredCount;
+    } else {
+      suppressSessionPersistRef.current = conversationId;
+      delete restoredConversationMessageCountsRef.current[conversationId];
+    }
     try {
       localStorage.setItem(webConversationStorageKey(userStorageId, resolvedAdoptId), conversationId);
-      if (restoredMessages) {
+      if (hasRestoredMessages) {
         localStorage.setItem(webMessagesStorageKey(userStorageId, resolvedAdoptId, conversationId), JSON.stringify(nextMessages));
+      } else {
+        localStorage.removeItem(webMessagesStorageKey(userStorageId, resolvedAdoptId, conversationId));
+        localStorage.removeItem(legacyWebMessagesStorageKey(resolvedAdoptId, conversationId));
       }
     } catch {}
     if (conversationId === webConversationId) {
       pendingConversationRestoreRef.current = null;
       restoreLingxiaMessages(nextMessages);
+      if (nextMessages.length === 0) suppressSessionPersistRef.current = "";
     } else {
       pendingConversationRestoreRef.current = { conversationId, messages: nextMessages };
     }
@@ -1376,7 +1460,9 @@ export default function Home() {
     }
     if (sessionSwitchingId) return;
     setSessionMenuOpen(false);
-    activateWebConversation(makeConversationId());
+    const conversationId = makeConversationId();
+    ensureEmptyWebSession(conversationId);
+    activateWebConversation(conversationId);
   };
 
   const switchLingxiaConversation = async (conversationId: string) => {
@@ -1468,7 +1554,7 @@ export default function Home() {
     } catch {}
     if (conversationId === webConversationId) {
       const nextSession = next[0];
-      if (nextSession?.sessionKey && !isDirectHttpRuntime) {
+      if (nextSession?.sessionKey && !isHermesRuntime) {
         const apiBase = import.meta.env.VITE_API_URL || "";
         try {
           const response = await fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(nextSession.sessionKey)}`, {
@@ -1632,34 +1718,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!clawSettings) return;
-    if (!identityNameRef.current) setLingxiaDisplayName(String((clawSettings as any).displayName || (clawByAdoptId as any)?.displayName || brand.name));
-        setLingxiaMemoryEnabled(((clawSettings as any).memoryEnabled || "yes") as "yes" | "no");
+    setLingxiaDisplayName(roleDisplayName((clawByAdoptId as any)?.roleTemplate));
+    setLingxiaMemoryEnabled(((clawSettings as any).memoryEnabled || "yes") as "yes" | "no");
     setLingxiaContextTurns(Number((clawSettings as any).contextTurns || 20));
     // 模型选择由 availableModels useEffect 统一管理
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clawSettings, clawByAdoptId]);
-
-  // 从 IDENTITY.md 读取角色名（覆盖 clawSettings 的 displayName）
-  useEffect(() => {
-    if (!resolvedAdoptId) return;
-    const apiBase = (import.meta as any).env?.VITE_API_URL || "";
-    fetch(`${apiBase}/api/claw/core-files/read?adoptId=${encodeURIComponent(resolvedAdoptId)}&name=IDENTITY.md`, {
-      credentials: "include",
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (!d?.content) return;
-        const content: string = d.content;
-        // 格式: **Name:** XXX 或 - **Name:** XXX
-        const nameFieldMatch = content.match(/\*\*Name:\*\*\s*(.+)/);
-        const headingMatch = content.match(/^#\s+(?:我叫|名字[：:]?\s*)?(.+)/m);
-        const labelMatch = content.match(/(?:名字|名称|称呼)[：:]\s*(.+)/);
-        const sentenceMatch = content.match(/我叫([^\s，。！？,\.!?]{1,20})/);
-        const name = (nameFieldMatch?.[1] || headingMatch?.[1] || labelMatch?.[1] || sentenceMatch?.[1] || "").trim();
-        if (name) { identityNameRef.current = name; setLingxiaDisplayName(name); }
-      })
-      .catch(() => {});
-  }, [resolvedAdoptId]);
 
 
   const stopLingxiaStreaming = () => {
@@ -2564,19 +2628,23 @@ export default function Home() {
   const sidebarClawStatus = String((clawByAdoptId as any)?.status || cachedClawStatus || "");
   const sidebarClawOnline = sidebarClawStatus === "active";
   const clientLoadMetricList = useMemo(() => (
-    Object.values(clientLoadMetrics).sort((a, b) => (a.requestMs ?? a.elapsedMs) - (b.requestMs ?? b.elapsedMs))
+    Object.values(clientLoadMetrics).sort((a, b) => clientMetricDisplayMs(a) - clientMetricDisplayMs(b))
   ), [clientLoadMetrics]);
+  const primaryClientLoadMetricList = useMemo(() => (
+    clientLoadMetricList.filter((metric) => CLIENT_LOAD_PRIMARY_KEYS.has(metric.key))
+  ), [clientLoadMetricList]);
   const clientLoadTotalMs = useMemo(() => {
     // 优先统计各探针的真实请求往返耗时(requestMs)，没有 requestMs 的早期 TRPC/auth 探针
     // 使用首次完成时相对页面加载的 elapsedMs 作为首屏耗时近似值。
     // 旧实现用 (now - 页面加载时刻)，但探针每 30s 定时重测、切回标签页(focus)也重测，
     // 每次重测都把 elapsedMs 刷成"自页面打开以来的时长"，导致数值随页面停留时间无限增长，
     // 首屏之后就退化成"页面开了多久"，表现为忽高忽低（刚打开~200ms，开一会儿跳到几千ms）。
-    return clientLoadMetricList.reduce((max, metric) => Math.max(max, metric.requestMs ?? metric.elapsedMs), 0);
-  }, [clientLoadMetricList]);
+    return primaryClientLoadMetricList.reduce((max, metric) => Math.max(max, clientMetricDisplayMs(metric)), 0);
+  }, [primaryClientLoadMetricList]);
   const slowestClientMetric = useMemo(() => (
-    clientLoadMetricList.slice().sort((a, b) => (b.requestMs ?? b.elapsedMs) - (a.requestMs ?? a.elapsedMs))[0]
-  ), [clientLoadMetricList]);
+    primaryClientLoadMetricList.slice().sort((a, b) => clientMetricDisplayMs(b) - clientMetricDisplayMs(a))[0]
+      || clientLoadMetricList.slice().sort((a, b) => clientMetricDisplayMs(b) - clientMetricDisplayMs(a))[0]
+  ), [clientLoadMetricList, primaryClientLoadMetricList]);
   const reportClientLoadMetrics = useCallback(async (reason: string) => {
     if (!resolvedAdoptId || !user || clientLoadReportedRef.current || clientLoadMetricList.length === 0) return;
     clientLoadReportedRef.current = true;
@@ -2599,7 +2667,7 @@ export default function Home() {
   }, [clientLoadMetricList, clientLoadTotalMs, resolvedAdoptId, user]);
   useEffect(() => {
     if (!resolvedAdoptId || !user || clientLoadReportedRef.current) return;
-    const coreKeys = ["auth", "agent", "models", "health", "sessions", "skills"];
+    const coreKeys = ["auth", "agent", "models", "health", "skills"];
     if (coreKeys.every((key) => clientLoadMetrics[key])) {
       void reportClientLoadMetrics("core-ready");
     }
@@ -2677,8 +2745,10 @@ export default function Home() {
     const connection = isDirectHttpRuntime
       ? {
           status: "ok" as const,
-          title: "HTTP SSE 运行时",
-          detail: isHermesRuntime ? "Hermes 工作台走 HTTP SSE，不依赖 OpenClaw WebSocket。" : "当前运行时不依赖 OpenClaw WebSocket。",
+          title: isJiuwenRuntime ? "SSE 已连接" : "HTTP SSE 运行时",
+          detail: isHermesRuntime
+            ? "Hermes 工作台走 HTTP SSE，不依赖 OpenClaw WebSocket。"
+            : "JiuwenSwarm 工作台走 HTTP SSE，由 EA 后端桥接到 JiuwenSwarm AgentServer。",
         }
       : wsConnected
       ? { status: "ok" as const, title: "WS 已连接", detail: "浏览器与 OpenClaw Gateway 的实时通道可用。" }
@@ -2784,7 +2854,11 @@ export default function Home() {
 
   const chatComposerStatus = useMemo(() => {
     const items: Array<{ key: string; label: string; tone?: "ok" | "warning" | "muted" }> = [];
-    if (!isDirectHttpRuntime) {
+    if (isJiuwenRuntime) {
+      items.push({ key: "jiuwenswarm", label: "SSE 已连接", tone: "ok" });
+    } else if (isHermesRuntime) {
+      items.push({ key: "hermes", label: "SSE 已连接", tone: "ok" });
+    } else {
       const readiness = clawHealthSummary?.readiness;
       if (readiness?.status === "ready" || readiness?.ok) {
         items.push({ key: "ready", label: wsConnected ? "WS 已连接" : "配置正常", tone: "ok" });
@@ -2813,7 +2887,8 @@ export default function Home() {
     clawHealthError,
     clawHealthLoading,
     clawHealthSummary,
-    isDirectHttpRuntime,
+    isHermesRuntime,
+    isJiuwenRuntime,
     latestContextMessage,
     wsConnected,
   ]);
@@ -2879,42 +2954,39 @@ export default function Home() {
               type="button"
               title={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
               onClick={() => setSidebarCollapsed(v => !v)}
-              className="absolute right-2 top-2 z-40 w-6 h-6 rounded-md text-xs"
-              style={{ background: "var(--oc-bg-surface)", border: "1px solid var(--oc-border-subtle)", color: "var(--oc-sidebar-muted)" }}
+              className="absolute right-2 top-[20px] z-40 flex items-center justify-center rounded-md"
+              style={{ width: 22, height: 22, background: "transparent", border: "none", color: "var(--oc-text-tertiary)", fontSize: 16 }}
             >
               {sidebarCollapsed ? "»" : "«"}
             </button>
 
             {/* 实例信息头 */}
-            <div className="px-4 py-4 shrink-0 flex items-center gap-2.5" style={{ borderBottom: "1px solid var(--oc-border-subtle)" }}>
+            <div className="shrink-0 flex items-center gap-2.5" style={{ padding: "10px 8px 14px", borderBottom: "1px solid var(--oc-border-subtle)" }}>
               <div
-                className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center relative"
-                style={{ background: "var(--oc-sidebar-avatar-bg)", color: "var(--oc-sidebar-muted)" }}
+                className="rounded-full shrink-0 flex items-center justify-center relative"
+                style={{ width: 38, height: 38, background: "var(--oc-sidebar-avatar-bg)", color: "var(--oc-sidebar-muted)" }}
               >
-                <Bot size={18} strokeWidth={1.8} />
+                <LingxiaIcon size={26} animate={false} breathe={false} />
                 {sidebarClawOnline ? (
                   <span
                     aria-hidden="true"
                     className="absolute rounded-full"
                     style={{
-                      width: 7,
-                      height: 7,
-                      right: -1,
-                      top: 1,
-                      background: "#22C55E",
-                      border: "2px solid var(--oc-sidebar-bg)",
+                      width: 9,
+                      height: 9,
+                      right: 1,
+                      bottom: 1,
+                      background: "#1D9E75",
+                      border: "1.5px solid var(--oc-sidebar-bg)",
                     }}
                   />
                 ) : null}
               </div>
-              <div className="min-w-0" style={{ display: sidebarCollapsed ? "none" : "block" }}>
-                <p className="text-sm font-medium truncate" style={{ color: "var(--oc-sidebar-text)" }}>{lingxiaDisplayName || brand.name}</p>
-                <p className="text-[11px] font-mono truncate" style={{ color: "var(--oc-sidebar-subtle)" }} title={resolvedAdoptId}>{resolvedAdoptId}</p>
-                {sidebarClawStatus && (
-                  <p className="text-[11px] flex items-center gap-1" style={{ color: sidebarClawOnline ? "#22C55E" : "var(--oc-warning)" }}>
-                    <span>{sidebarClawOnline ? "在线" : sidebarClawStatus}</span>
-                  </p>
-                )}
+              <div className="min-w-0 flex-1 pr-5" style={{ display: sidebarCollapsed ? "none" : "block" }}>
+                <p className="truncate" style={{ color: "var(--oc-sidebar-text)", fontSize: 14, fontWeight: 600, lineHeight: "20px" }}>灵感智能体</p>
+                <p className="truncate" style={{ color: "var(--oc-sidebar-subtle)", fontSize: 12, fontWeight: 400, lineHeight: "17px" }} title={lingxiaDisplayName || brand.name}>
+                  {lingxiaDisplayName || brand.name}
+                </p>
               </div>
             </div>
 
@@ -2956,7 +3028,7 @@ export default function Home() {
               onMouseDown={(e) => {
                 e.preventDefault();
                 const onMove = (ev: MouseEvent) => {
-                  const w = Math.min(Math.max(ev.clientX, 220), 520);
+                  const w = Math.min(Math.max(ev.clientX, 248), 520);
                   setSidebarWidth(w);
                 };
                 const onUp = () => {
@@ -2990,7 +3062,7 @@ export default function Home() {
                   title="查看首屏请求耗时"
                 >
                   <span className="client-load-diagnostics__dot" data-status={slowestClientMetric?.status || "pending"} />
-                  <span>{clientLoadMetricList.length > 0 ? `${clientLoadTotalMs}ms` : "诊断"}</span>
+                  <span>{primaryClientLoadMetricList.length > 0 ? `首屏 ${clientLoadTotalMs}ms` : "诊断"}</span>
                 </button>
                 {clientDiagnosticsOpen ? (
                   <div className="client-load-diagnostics__panel">
@@ -3005,7 +3077,7 @@ export default function Home() {
                         <div key={metric.key} className="client-load-diagnostics__row">
                           <span className="client-load-diagnostics__name">{metric.label}</span>
                           <span className="client-load-diagnostics__meta" data-status={metric.status}>
-                            {metric.requestMs != null ? `${metric.requestMs}ms` : `${metric.elapsedMs}ms`}
+                            {formatClientMetricDuration(metric)}
                           </span>
                           <span className="client-load-diagnostics__detail">{metric.detail || metric.status}</span>
                         </div>

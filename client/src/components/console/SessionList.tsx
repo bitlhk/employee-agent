@@ -235,8 +235,8 @@ export function SessionList({
 
   return (
     <div ref={rootRef} className="flex min-h-0 flex-1 flex-col">
-      <div className={isMobile ? "mb-2 flex items-center justify-between px-1" : "mb-1 flex items-center justify-between px-3"}>
-        <span style={{ color: isMobile ? "var(--oc-text-primary)" : "var(--oc-sidebar-muted)", fontSize: isMobile ? 14 : 12, fontWeight: isMobile ? 500 : 400 }}>
+      <div className={isMobile ? "mb-2 flex items-center justify-between px-1" : "mt-4 mb-2 flex items-center justify-between px-0"}>
+        <span style={{ color: isMobile ? "var(--oc-text-primary)" : "var(--oc-sidebar-muted)", fontSize: isMobile ? 14 : 12, fontWeight: 500 }}>
           {title}
         </span>
         {onNewConversation ? (
@@ -247,8 +247,8 @@ export function SessionList({
             disabled={!!sessionSwitchingId}
             className="rounded-md flex items-center justify-center"
             style={{
-              width: isMobile ? 30 : 24,
-              height: isMobile ? 30 : 24,
+              width: isMobile ? 30 : 16,
+              height: isMobile ? 30 : 16,
               border: isMobile ? "1px solid var(--oc-border-subtle)" : "none",
               background: isMobile ? "var(--oc-bg)" : "transparent",
               color: isMobile ? "var(--oc-text-primary)" : "var(--oc-sidebar-muted)",
@@ -256,7 +256,7 @@ export function SessionList({
               cursor: sessionSwitchingId ? "not-allowed" : "pointer",
             }}
           >
-            <Plus size={isMobile ? 15 : 14} />
+            <Plus size={isMobile ? 15 : 16} />
           </button>
         ) : null}
       </div>
@@ -336,15 +336,15 @@ export function SessionList({
             ))}
           </div>
         ) : sessions.length === 0 ? (
-          <div className={isMobile ? "px-3 py-4 text-xs" : "px-3 py-4 text-xs"} style={{ color: "var(--oc-text-tertiary)" }}>
+          <div className={isMobile ? "px-3 py-4 text-xs text-center" : "px-3 py-4 text-center"} style={{ color: "var(--oc-text-tertiary)", fontSize: 13 }}>
             暂无历史会话
           </div>
         ) : filteredSessions.length === 0 ? (
-          <div className="px-3 py-4 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
+          <div className="px-3 py-4 text-center" style={{ color: "var(--oc-text-tertiary)", fontSize: 13 }}>
             没有匹配的会话
           </div>
         ) : (
-          <div className={isMobile ? "space-y-2" : "space-y-2"}>
+          <div className={isMobile ? "space-y-2" : "space-y-0.5"}>
             {groupedSessions.map((group) => (
               <div key={group.key} className="space-y-0.5">
                 {isMobile || searchable ? (
@@ -376,17 +376,17 @@ export function SessionList({
                           onSwitchConversation?.(session.conversationId);
                         }
                       }}
-                      className={`group w-full text-left flex items-center gap-3 sidebar-item relative ${active ? "active" : ""}`}
+                      className={`group w-full text-left flex items-center sidebar-item session-list-item relative ${active ? "active" : ""}`}
                       style={{
-                        padding: isMobile ? "10px 10px" : "10px 16px",
-                        minHeight: isMobile ? 58 : 44,
+                        padding: isMobile ? "10px 10px" : undefined,
+                        minHeight: isMobile ? 58 : undefined,
                         borderRadius: isMobile ? 8 : undefined,
                         opacity: sessionSwitchingId && !switching ? 0.52 : 1,
                         cursor: sessionSwitchingId ? "wait" : "pointer",
                       }}
                     >
                       {active && !isMobile ? <span className="sidebar-item-indicator" /> : null}
-                      <MessageSquareText size={16} className="sidebar-item-icon" style={{ flexShrink: 0 }} />
+                      <MessageSquareText size={20} strokeWidth={1.7} className="sidebar-item-icon" style={{ flexShrink: 0 }} />
                       <div className="min-w-0 flex-1">
                         {editing ? (
                           <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
@@ -423,7 +423,7 @@ export function SessionList({
                             </button>
                           </div>
                         ) : (
-                          <div className="sidebar-item-label truncate" style={{ fontSize: 14, fontWeight: active ? 600 : 500, color: isMobile ? "var(--oc-text-primary)" : undefined }}>
+                          <div className="sidebar-item-label truncate" style={{ fontSize: isMobile ? 14 : 13, fontWeight: 400, color: isMobile ? "var(--oc-text-primary)" : undefined }}>
                             {switching ? "正在切换..." : highlightText(shortTitle(session), debouncedQuery)}
                           </div>
                         )}

@@ -205,6 +205,35 @@ function pickFirstString(obj: any, keys: string[]): string {
   return "";
 }
 
+function finiteNumber(value: unknown): number | undefined {
+  const numberValue = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(numberValue) ? numberValue : undefined;
+}
+
+function normalizeJiuwenUsageSummary(delta: any): { usage: Record<string, number>; model?: string } | null {
+  const usage = delta?.usage && typeof delta.usage === "object" ? delta.usage : null;
+  if (!usage) return null;
+
+  const input = finiteNumber(usage.input_tokens ?? usage.input ?? usage.inputTokens ?? usage.prompt_tokens);
+  const output = finiteNumber(usage.output_tokens ?? usage.output ?? usage.outputTokens ?? usage.completion_tokens);
+  const total = finiteNumber(usage.total_tokens ?? usage.total ?? usage.totalTokens);
+  const contextWindow = finiteNumber(delta?.context_window_tokens ?? usage.context_window_tokens ?? usage.contextWindow);
+  const contextPercent = finiteNumber(delta?.usage_percent ?? usage.usage_percent ?? usage.contextPercent);
+
+  if (input == null && output == null && total == null && contextWindow == null && contextPercent == null) return null;
+
+  return {
+    usage: {
+      input: input ?? 0,
+      output: output ?? 0,
+      ...(total != null ? { total } : {}),
+      ...(contextWindow != null ? { contextWindow } : {}),
+      ...(contextPercent != null ? { contextPercent } : {}),
+    },
+    model: typeof delta?.model === "string" && delta.model.trim() ? delta.model.trim() : undefined,
+  };
+}
+
 function normalizeJiuwenToolPayload(eventType: string, delta: any): {
   isResult: boolean;
   callId: string;
@@ -239,6 +268,30 @@ function stringifyToolPayload(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function isJiuwenHumanApprovalEvent(eventType: string, delta: unknown): boolean {
+  const normalizedEventType = String(eventType || "").toLowerCase();
+  if (normalizedEventType === "chat.ask_user_question") return true;
+
+  const payload = stableJson(delta).toLowerCase();
+  return (
+    payload.includes('"source":"permission_interrupt"')
+    || payload.includes('"source":"confirm_interrupt"')
+    || payload.includes('"source":"ask_user_interrupt"')
+    || payload.includes("permissioninterrupt")
+    || payload.includes("permission interrupt")
+    || payload.includes("human approval")
+    || payload.includes("human_approval")
+    || payload.includes("ask_user")
+    || payload.includes("requires_confirmation")
+  );
+}
+
+function summarizeJiuwenApprovalEvent(eventType: string, delta: unknown): string {
+  const payload = stableJson(delta);
+  const trimmedPayload = payload.length > 800 ? `${payload.slice(0, 800)}...` : payload;
+  return `JiuwenSwarm 运行时请求人工确认，EA 当前未接入原生确认回传。event=${eventType}; payload=${trimmedPayload}`;
 }
 
 async function recordJiuwenToolAudit(args: {
@@ -644,7 +697,10 @@ export async function forwardToJiuwenClaw(
   const sessionId = buildSessionId(claw, agentId, opts);
   const channelId = claw.adoptId;
   const workspaceDir = resolveRuntimeWorkspace(claw, claw.adoptId);
-  const maxRunMs = Math.max(30_000, Number(process.env.JIUWENCLAW_CHAT_TIMEOUT_MS || 180_000) || 180_000);
+  const rawTimeoutMs = String(process.env.JIUWENCLAW_CHAT_TIMEOUT_MS || "180000").trim().toLowerCase();
+  const maxRunMs = rawTimeoutMs === "0" || rawTimeoutMs === "off" || rawTimeoutMs === "disabled"
+    ? 0
+    : Math.max(30_000, Number(rawTimeoutMs) || 180_000);
 
   const runAttempt = (attempt: number): Promise<"done" | "silent"> => {
   const startedAt = Date.now();
@@ -683,6 +739,7 @@ export async function forwardToJiuwenClaw(
     let clientClosed = false;
     let ackFallbackTimer: NodeJS.Timeout | null = null;
     let timeoutTimer: NodeJS.Timeout | null = null;
+    let finalGraceTimer: NodeJS.Timeout | null = null;
     const emittedWorkspaceFilePaths = new Set<string>();
 
     const logEnd = (event: string, extra: Record<string, unknown> = {}) => {
@@ -721,6 +778,7 @@ export async function forwardToJiuwenClaw(
     const cleanup = () => {
       if (ackFallbackTimer) clearTimeout(ackFallbackTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (finalGraceTimer) clearTimeout(finalGraceTimer);
       clearInterval(keepalive);
     };
     const settle = (outcome: "done" | "silent" = "done") => {
@@ -761,6 +819,14 @@ export async function forwardToJiuwenClaw(
       requestSent = true;
       ws.send(JSON.stringify(requestPayload));
     };
+    const completeSoon = (ws: WebSocket) => {
+      if (finalGraceTimer || settled) return;
+      finalGraceTimer = setTimeout(() => {
+        finalGraceTimer = null;
+        complete();
+        try { ws.close(1000, "complete"); } catch {}
+      }, 1200);
+    };
 
     const ws = new WebSocket(wsUrl, {
       headers: {
@@ -768,13 +834,17 @@ export async function forwardToJiuwenClaw(
       },
     });
 
-    timeoutTimer = setTimeout(() => {
-      if (settled) return;
-      const seconds = Math.round(maxRunMs / 1000);
-      const error = `JiuwenClaw 本次任务执行超过 ${seconds} 秒，已停止以避免连接超时。请缩小问题范围，或切换“快速”模式后重试。`;
-      try { ws.close(1000, "timeout"); } catch {}
-      fail(error);
-    }, maxRunMs);
+    if (maxRunMs <= 0) {
+      logEnd("chat_stream_timeout_disabled", {});
+    } else {
+      timeoutTimer = setTimeout(() => {
+        if (settled) return;
+        const seconds = Math.round(maxRunMs / 1000);
+        const error = `JiuwenClaw 本次任务执行超过 ${seconds} 秒，已停止以避免连接超时。请缩小问题范围，或切换“快速”模式后重试。`;
+        try { ws.close(1000, "timeout"); } catch {}
+        fail(error);
+      }, maxRunMs);
+    }
 
     const onClientClose = () => {
       if (res.writableEnded || settled) return;
@@ -842,13 +912,34 @@ export async function forwardToJiuwenClaw(
               sawText = true;
               writeData({ choices: [{ delta: { content: text }, index: 0 }] });
             }
-            complete();
-            try { ws.close(1000, "complete"); } catch {}
+            completeSoon(ws);
+            return;
+          }
+          if (eventType === "chat.usage_summary") {
+            const usageSummary = normalizeJiuwenUsageSummary(body?.delta);
+            if (usageSummary) {
+              writeData({
+                __perf: {
+                  usage: usageSummary.usage,
+                  ...(usageSummary.model ? { model: usageSummary.model } : {}),
+                },
+              });
+            }
             return;
           }
           if (eventType === "chat.error") {
             fail(text || pickErrorMessage(frame));
             try { ws.close(1000, "failed"); } catch {}
+            return;
+          }
+          if (isJiuwenHumanApprovalEvent(eventType, body?.delta)) {
+            const approvalMessage = summarizeJiuwenApprovalEvent(eventType, body?.delta);
+            logEnd("chat_stream_human_approval_required", {
+              eventType,
+              deltaSummary: summarizeAuditPayload(body?.delta),
+            });
+            fail(approvalMessage);
+            try { ws.close(1000, "human approval required"); } catch {}
             return;
           }
           if (eventType === "chat.file" || eventType === "chat.media") {

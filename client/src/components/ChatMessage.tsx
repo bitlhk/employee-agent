@@ -591,7 +591,11 @@ function ChatMessageInner({
                 </button>
               </div>
             )}
-            <ChatMarkdown content={displayText} />
+            {isLast && streaming ? (
+              <span className="whitespace-pre-wrap break-words">{displayText}</span>
+            ) : (
+              <ChatMarkdown content={displayText} />
+            )}
             {isLast && streaming && <span className="animate-pulse ml-0.5" style={{ color: "var(--oc-text-tertiary)" }}>▌</span>}
           </div>
         </div>

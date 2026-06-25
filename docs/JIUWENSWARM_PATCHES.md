@@ -171,6 +171,92 @@
 
 ---
 
+## Patch 4b — progressive_tool_rail.py：隐藏外部 Skill Hub 工具
+
+文件：
+
+- 上海运行时：`/root/jiuwenclaw/lib/python3.12/site-packages/openjiuwen/harness/rails/progressive_tool_rail.py`
+- 上海备份：`/root/jiuwenclaw/lib/python3.12/site-packages/openjiuwen/harness/rails/progressive_tool_rail.py.bak_linggan_hidden_tools_20260622`
+- 运行时开关：`JIUWENSWARM_PROGRESSIVE_TOOL_HIDDEN_NAMES`
+
+背景：企业 EA 的 Skill 来源应以用户工作目录和平台预装 Skill 为准，不需要模型访问
+jiuwenswarm 外部 Skill Hub。实际使用中，模型可能优先调用 `search_skill`，拿到
+ClawHub / SkillNet / TeamSkillsHub 的外部结果，反而绕过本地 `list_skill`，导致
+“EA 显示有技能，但模型没有按本地技能工作”的误判。
+
+当前策略：
+
+- 上海 `.env` 设置：
+  `JIUWENSWARM_PROGRESSIVE_TOOL_HIDDEN_NAMES=search_skill,install_skill,uninstall_skill`
+- `ProgressiveToolRail` 在三处过滤 hidden tools：
+  - 初始 visible tools 构造时不暴露。
+  - `search_tools` 候选工具列表中不返回。
+  - `load_tools` 请求加载时直接跳过。
+- `list_skill` 不隐藏，仍允许模型查看当前 Agent 工作目录里的本地 Skill。
+
+作用：
+
+- 避免企业 EA Agent 被外部 Skill Hub 搜索结果干扰。
+- 保留本地 Skill 可见性，便于模型理解和使用平台预装 / 用户已安装 Skill。
+- 该补丁只影响 jiuwenswarm progressive tool 层的可见性，不删除任何 Skill 文件，
+  也不改变 EA 技能市场展示策略。
+
+回滚：
+
+1. 快速回滚：删除或置空 `.env` 里的
+   `JIUWENSWARM_PROGRESSIVE_TOOL_HIDDEN_NAMES`，然后重启 jiuwenswarm。
+2. 完整回滚：用备份覆盖运行时文件：
+   `cp progressive_tool_rail.py.bak_linggan_hidden_tools_20260622 progressive_tool_rail.py`，
+   再重启 jiuwenswarm。
+
+升级处理：
+
+- 若上游提供官方 hidden tool / enterprise mode 配置，优先迁到官方配置。
+- 若 `ProgressiveToolRail` 重构，至少要确认 `search_skill` / `install_skill` /
+  `uninstall_skill` 不会进入初始 tools、`search_tools` 结果和 `load_tools` 结果。
+
+---
+
+## EA Patch — Jiuwen Agent 工作目录初始化与技能同步
+
+文件：
+
+- `server/_core/jiuwenswarm-role-scope.ts`
+- `server/_core/skills/skill-registry.ts`
+- `server/routers/role-runtime-adapters.ts`
+
+背景：EA 创建 / 刷新 `lgj-*` JiuwenSwarm Agent 时，前端显示的岗位 Skill/MCP
+和 JiuwenSwarm 实际工作目录可能不同步。典型问题是：
+
+- 新建 Agent 工作目录缺少 `IDENTITY.md` / `USER.md`，模型不知道当前岗位身份和本地 Skill 使用方式。
+- 技能 registry 变更后仍走 OpenClaw 的 `openclaw.json` allowlist 同步逻辑，导致日志出现
+  `AGENT-SKILLS-SYNC agent entry not found`，而 JiuwenSwarm 工作目录未被刷新。
+
+当前策略：
+
+- `writeJiuwenSwarmRoleScopeManifest()` 在写岗位 scope 时，会按岗位生成
+  `IDENTITY.md` 和 `USER.md`，但只在文件缺失时创建，不覆盖用户后续自定义内容。
+- 生成的 `IDENTITY.md` 包含岗位职责、合规边界、默认 Skill/MCP 资产和“优先使用当前工作目录已安装技能”的约束。
+- `lgj-*` 的 skill registry invalidation 改为刷新 JiuwenSwarm workspace：
+  - 重新写 `.ea-role-scope.json`
+  - 同步 `skills/` 下的平台 approved skill 链接
+  - 创建缺失的 `IDENTITY.md` / `USER.md`
+- `lgc-*` OpenClaw Agent 仍走原来的 OpenClaw allowlist 同步逻辑。
+
+作用：
+
+- 新申请 JiuwenSwarm Agent 后，EA 前端显示、岗位默认技能、实际工作目录可见技能保持一致。
+- 存量用户如果已经手动调整过 `IDENTITY.md` / `USER.md`，不会被平台刷新覆盖。
+- 修复技能安装 / 启停时只刷新 EA registry、没有刷新 JiuwenSwarm workspace 的问题。
+
+回滚：
+
+- 回滚上述三个 EA 文件到上一版本，然后重启 EA 服务。
+- 已生成的 `IDENTITY.md` / `USER.md` 是普通用户工作目录文件，回滚代码不会自动删除；
+  如需清理，应按具体 Agent 目录人工确认后处理。
+
+---
+
 ## Patch 5 — 财富助手 product MCP 运行时热修
 
 文件：
@@ -196,6 +282,166 @@
 
 - 这属于业务 MCP 的 dist 热修，不是 jiuwenswarm 上游补丁。后续应回写到财富助手
   MCP 源码或发布包，避免重启/重装后丢失。
+
+---
+
+## EA Bridge Guard — 原生人工确认事件短期兜底
+
+文件：`server/_core/jiuwenclaw-bridge.ts`
+
+背景：jiuwenswarm 的 `PermissionInterruptRail` / `ask_user` 会通过
+`chat.ask_user_question` 发起原生人工确认，`source` 常见为
+`permission_interrupt`、`confirm_interrupt`、`ask_user_interrupt`。EA 当前还没有实现
+“前端弹窗确认 -> 后端回传同一 jiuwenswarm 会话”的完整双向链路。
+
+当前短期策略：
+
+- EA bridge 识别 `chat.ask_user_question` 和常见 interrupt source。
+- 命中后不自动允许，也不尝试伪造确认结果。
+- 直接向前端返回明确错误：
+  `JiuwenSwarm 运行时请求人工确认，EA 当前未接入原生确认回传...`
+- 同时写入 `jiuwenclaw-exec.log` 的
+  `chat_stream_human_approval_required`，便于定位是哪类权限/确认触发。
+
+作用：
+
+- 避免用户只看到“输出截断 / 会话状态异常 / 一直等待”。
+- 把不该触发 ask 的场景暴露出来，优先通过 workspace root、岗位授权、MCP
+  服务端鉴权修正。
+
+后续若要做完整适配：
+
+1. bridge 需要保存 pending approval 状态和 request_id。
+2. 前端渲染“本次允许 / 拒绝 / 取消任务”。
+3. 用户选择后，后端必须把结果发回同一 jiuwenswarm session。
+4. 审批结果必须入审计日志；`always allow` 类策略应限制为管理员能力。
+
+---
+
+## Patch 6（计划）— 每个 Agent 的 workdir / workspace 硬隔离
+
+状态：**未上线，仅方案记录**。
+
+背景：当前 jiuwenswarm 在上海按 `lgj-*` 为每个子 Agent 创建独立工作目录，例如：
+
+```text
+/root/.jiuwenswarm/service_linggan_shanghai/agent_jiuwen_<lgj-id>/agent/jiuwenclaw_workspace
+```
+
+EA 已经在运行时配置层做了短期隔离：
+
+- `/root/.jiuwenswarm/config/config.yaml` 的 `permissions.external_directory["*"]`
+  设为 `deny`。
+- 每个已存在 / 新建 `agent_jiuwen_lgj-*` workspace 单独写入 `allow`。
+- EA 新建 / reconcile JiuwenSwarm Agent 时，通过
+  `server/_core/jiuwenswarm-permissions.ts` 自动补齐该 workspace allow 规则。
+
+这个配置级方案能降低误读外部目录的概率，但它不是严格的 per-agent 硬隔离：
+
+- `external_directory` 是全局配置，不绑定当前请求的 `lgj-*` 身份。
+- 如果所有 Agent workspace 都被全局 allow，理论上 Agent A 仍可能访问 Agent B 的
+  workspace，除非下层工具 / 权限判断再次按当前 workspace 做限制。
+- 因此配置级 deny 只能作为短期兜底，不能作为最终的多租户隔离边界。
+
+### 目标
+
+在 jiuwenswarm 代码层按“当前会话 / 当前 Agent 的 workspace root”做强制约束：
+
+1. 当前请求只能读写自己的 `jiuwenclaw_workspace`。
+2. 对其他 `agent_jiuwen_lgj-*` 目录默认拒绝。
+3. 不影响 MCP 服务端通过可信 header 做数据授权；MCP 数据隔离仍由 MCP 服务端按
+   `x-linggan-agent-id` / `x-jiuwen-channel-id` 强制。
+4. 先以 dry-run 日志模式验证，再切换为 deny 模式。
+
+### 建议实现点
+
+优先在 jiuwenswarm 的文件 / shell 工具执行入口做集中限制，而不是在 EA 前端或
+提示词层做约束。候选位置需要以当前源码为准重新确认，优先查：
+
+- `jiuwenswarm/agents/harness/common/tools/*`
+- `jiuwenswarm/agents/harness/common/rails/permission*`
+- `jiuwenswarm/agents/harness/common/rails/interrupt/*`
+- `jiuwenswarm/server/runtime/agent_adapter/interface_deep.py`
+
+实现思路：
+
+1. 从当前 session / adapter / request config 解析有效 workspace：
+   - `workspace_dir`
+   - `project_dir`
+   - 当前 cwd
+   - 路径里匹配到的 `agent_jiuwen_lgj-*`
+2. 将 workspace root 规范化为真实路径：
+
+```python
+allowed_root = Path(workspace_dir).resolve()
+target = Path(user_supplied_path).resolve()
+if target != allowed_root and allowed_root not in target.parents:
+    deny(...)
+```
+
+3. 文件类工具统一走该校验：
+   - read/list/glob/grep/search
+   - write/edit/create/delete
+   - 文件上传 / 附件落盘
+4. shell / terminal 类工具至少做两层限制：
+   - 默认 cwd 固定在当前 workspace。
+   - 命令中出现其他
+     `/root/.jiuwenswarm/service_linggan_shanghai/agent_jiuwen_*` 路径时，如果不是当前
+     Agent 自己的 workspace，直接 deny。
+5. 对符号链接必须按 `realpath` 后的真实路径判断，不能只看字符串前缀。
+6. 拒绝事件写入日志，至少包含：
+   - current agent/channel
+   - allowed_root
+   - denied target
+   - tool name
+   - session/request id
+
+### 开关设计
+
+建议通过环境变量或 config 增加三态开关：
+
+```text
+JIUWENSWARM_WORKSPACE_ISOLATION=off | log | deny
+```
+
+- `off`：完全关闭，等同当前行为。
+- `log`：只记录越界访问，不阻断。用于上海真实流量观察。
+- `deny`：阻断越界访问，返回明确错误给模型 / 前端。
+
+上海上线顺序：
+
+1. 本机实现 `log` 模式并跑单元 / smoke。
+2. 上海先开 `log`，观察是否误伤正常 skill / MCP / 文件操作。
+3. 清理误报后，对少量 `lgj-*` 开 `deny`。
+4. 稳定后全量 `deny`。
+
+### 与 MCP 的关系
+
+这个补丁只管 JiuwenSwarm 本地工作目录和本地工具访问，不应该拦截正常 MCP 调用。
+
+- MCP 通过 streamable-http / SSE / stdio 暴露工具时，模型看到的是 MCP tool schema。
+- MCP 服务端如果访问业务数据，必须继续按可信 header 做服务端鉴权。
+- 本地 workspace 隔离不能替代 MCP 数据隔离；两者边界不同。
+- 如果某个 MCP 本身需要读 Agent workspace 文件，应优先通过明确的文件参数和服务端
+  权限校验实现，不能依赖模型自由传任意绝对路径。
+
+### 风险
+
+- 可能误伤需要读取项目外配置 / 临时文件的内置工具。
+- 可能影响某些 skill 通过绝对路径访问资源。
+- shell 命令的静态拦截不可能完整理解所有路径访问，因此短期只能覆盖明显跨 Agent
+  路径；更严格的方案需要 OS 级沙箱 / 容器 / 独立用户。
+- 若上游 `0.2.3` 已经引入官方 workspace sandbox，应优先采用官方机制，本文补丁只保留
+  Linggan 多租户策略差异。
+
+### 验证用例
+
+- Agent A 读取自己的 `IDENTITY.md`：允许。
+- Agent A 读取 Agent B 的 `IDENTITY.md`：deny。
+- Agent A 通过 symlink 指向 Agent B workspace：deny。
+- Agent A 普通问候：不触发 deny。
+- Agent A 调用本岗位 MCP：不受本地 workspace deny 影响。
+- Agent A 调用本地已安装 skill：能正常读取当前 workspace 下的 skill 文件。
 
 ---
 

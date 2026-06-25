@@ -87,9 +87,9 @@ export function Sidebar({
           const Icon = it.icon;
           const active = activePage === it.key;
           return (
-            <div key={it.key} className="flex flex-col gap-1">
-              <button title={it.label} onClick={() => setActivePage(it.key)} className={`w-full flex items-center gap-3 text-left sidebar-item relative ${active ? "active" : ""}`} style={{ padding: "10px 16px", minHeight: 44 }}>
-                <Icon size={16} className="sidebar-item-icon" />
+            <div key={it.key} className="flex flex-col">
+              <button title={it.label} onClick={() => setActivePage(it.key)} className={`w-full flex items-center text-left sidebar-item relative ${active ? "active" : ""}`}>
+                <Icon size={20} strokeWidth={1.7} className="sidebar-item-icon" />
                 {!collapsed && <span className="sidebar-item-label">{it.label}</span>}
                 {it.key === "collab" && coopBadge !== undefined && coopBadge > 0 ? (
                   <span className="absolute right-2 top-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 text-[10px] font-semibold rounded-full bg-red-500 text-white" style={{ lineHeight: 1 }}>
@@ -119,7 +119,7 @@ export function Sidebar({
           className={`sidebar-item sidebar-icon-button flex items-center justify-center relative ${active || open ? "active" : ""}`}
           style={{ width: 34, height: 34, padding: 0 }}
         >
-          <Icon size={16} className="sidebar-item-icon" />
+          <Icon size={16} strokeWidth={1.7} className="sidebar-item-icon" />
         </button>
         {open ? (
           <div
@@ -142,13 +142,13 @@ export function Sidebar({
   };
 
   return (
-    <div className="px-2 py-2 flex flex-col flex-1 min-h-0">
-      <div className="space-y-1 shrink-0">
+    <div className="px-3 py-2 flex flex-col flex-1 min-h-0">
+      <div className="flex shrink-0 flex-col gap-0.5">
         {primaryItems.map((item) => renderItem(item))}
       </div>
 
       {!collapsed ? (
-        <div className="mt-6 flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex flex-col">
           <SessionList
             sessions={sessions}
             currentConversationId={currentConversationId}
@@ -177,7 +177,7 @@ export function Sidebar({
             className="sidebar-item sidebar-icon-button flex items-center justify-center relative"
             style={{ width: 34, height: 34, padding: 0 }}
           >
-            <Settings2 size={16} className="sidebar-item-icon" />
+            <Settings2 size={16} strokeWidth={1.7} className="sidebar-item-icon" />
           </button>
           {renderBottomMenu("workbench", "工作台", BriefcaseBusiness, activePage === "office" || activePage === "schedule", (
             <div className="space-y-1">

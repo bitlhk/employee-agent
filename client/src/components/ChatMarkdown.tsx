@@ -27,6 +27,63 @@ function extractLang(className?: string): string {
   return m ? m[1] : "";
 }
 
+function normalizeMarkdownContent(content: string): string {
+  const text = String(content || "").trim();
+  const match = text.match(/^```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)\n```$/);
+  if (!match) return repairMarkdownSpacing(content);
+  const lang = match[1].toLowerCase();
+  const body = match[2].trim();
+  if (!body) return repairMarkdownSpacing(content);
+  const markdownLike =
+    /(^|\n)\s{0,3}#{1,6}\s+\S/.test(body) ||
+    /(^|\n)\s{0,3}(?:[-*+]|\d+[.)])\s+\S/.test(body) ||
+    /(^|\n)\s{0,3}>\s+\S/.test(body) ||
+    /(^|\n)\|.+\|\s*\n\|[-:|\s]+\|/.test(body);
+  if (lang === "markdown" || lang === "md") return repairMarkdownSpacing(body);
+  if ((lang === "" || lang === "text" || lang === "plain" || lang === "txt") && markdownLike) return repairMarkdownSpacing(body);
+  return repairMarkdownSpacing(content);
+}
+
+function repairMarkdownSpacing(content: string): string {
+  const text = String(content || "");
+  if (!text) return text;
+
+  return text
+    .split("\n")
+    .flatMap((rawLine) => {
+      let line = rawLine;
+      const out: string[] = [];
+
+      // Some streaming runtimes concatenate adjacent headings, e.g.
+      // "# Title## Section| A | B |". Split only heading markers that
+      // appear after non-whitespace content on the same line.
+      line = line.replace(/([^\s#])(\s*#{1,6}\s+)/g, "$1\n\n$2");
+
+      for (const part of line.split("\n")) {
+        const listItem = part.replace(/^(\s*[-*+])(?=\S)/, "$1 ");
+
+        const headingTable = listItem.match(/^(#{1,6}\s+[^|]+?)\s*(\|.+\|\s*)$/);
+        if (headingTable) {
+          out.push(headingTable[1].trimEnd(), "", headingTable[2].trim());
+          continue;
+        }
+
+        const headingBody = listItem.match(
+          /^(#{1,6}\s+(?:[一二三四五六七八九十]+[、.．]\s*)?(?:风险与下一步|结论摘要|明细分析|客户分析|客户画像|持仓结构|持仓明细|持仓回顾|临到期清单|可审计思考打印|可审计打印|产品推荐|综合推荐|下一步|结论|摘要|分析|画像|回顾|明细|清单|推荐|打印))([^\s#|].{2,})$/
+        );
+        if (headingBody) {
+          out.push(headingBody[1].trimEnd(), "", headingBody[2].trimStart());
+          continue;
+        }
+
+        out.push(listItem);
+      }
+
+      return out;
+    })
+    .join("\n");
+}
+
 function normalizeSafeHref(href?: string): string | undefined {
   if (!href) return undefined;
   if (href.startsWith("#")) return href;
@@ -113,6 +170,7 @@ function FencedCodeBlock({ code, className }: { code: string; className?: string
 type Props = { content: string };
 
 function ChatMarkdownInner({ content }: Props) {
+  const normalizedContent = normalizeMarkdownContent(content);
   return (
     <div className="lingxia-markdown">
       <ReactMarkdown
@@ -124,10 +182,14 @@ function ChatMarkdownInner({ content }: Props) {
               return <code className="lingxia-inline-code" {...props}>{children}</code>;
             }
             const text = childrenToString(children).replace(/\n$/, "");
-            // text/plain/无语言标记 → 内联高亮，不换行，不单独成块
+            // text/plain/无语言标记仍然是块级代码，不能退化成 inline，否则换行和列表会乱。
             const lang = String(className || "").replace("language-", "").toLowerCase();
             if (!lang || lang === "text" || lang === "plain" || lang === "txt") {
-              return <code className="lingxia-inline-code" style={{ whiteSpace: "pre-wrap", color: "inherit" }} {...props}>{children}</code>;
+              return (
+                <pre className="lingxia-plain-code">
+                  <code {...props}>{text}</code>
+                </pre>
+              );
             }
             return <FencedCodeBlock code={text} className={className} />;
           },
@@ -163,8 +225,16 @@ function ChatMarkdownInner({ content }: Props) {
           table: ({ children }) => (
             <div className="lingxia-md-table-wrap"><table className="lingxia-md-table">{children}</table></div>
           ),
-          th: ({ children }) => <th className="lingxia-md-th">{children}</th>,
-          td: ({ children }) => <td className="lingxia-md-td">{children}</td>,
+          th: ({ children, align }) => (
+            <th className="lingxia-md-th" style={align ? { textAlign: align as any } : undefined}>
+              {children}
+            </th>
+          ),
+          td: ({ children, align }) => (
+            <td className="lingxia-md-td" style={align ? { textAlign: align as any } : undefined}>
+              {children}
+            </td>
+          ),
           a:  ({ href, children }) => {
             const safeHref = normalizeSafeHref(href);
             if (!safeHref) {
@@ -204,7 +274,7 @@ function ChatMarkdownInner({ content }: Props) {
           em:     ({ children }) => <em className="lingxia-md-em">{children}</em>,
         }}
       >
-        {content}
+        {normalizedContent}
       </ReactMarkdown>
     </div>
   );
