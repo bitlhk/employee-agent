@@ -217,6 +217,49 @@ ClawHub / SkillNet / TeamSkillsHub 的外部结果，反而绕过本地 `list_sk
 
 ---
 
+## Patch 4c — skill_toolkits.py：外部 Skill 管理工具执行层禁用
+
+文件：
+
+- 本地维护仓：`/home/ubuntu/jiuwenswarm-linggan/jiuwenswarm/agents/harness/common/tools/skill_toolkits.py`
+- 本地运行目录：`/home/ubuntu/jiuwenclaw-upstream/jiuwenswarm/agents/harness/common/tools/skill_toolkits.py`
+- 运行时开关：复用 `JIUWENSWARM_PROGRESSIVE_TOOL_HIDDEN_NAMES`
+
+背景：Patch 4b 只能让 `search_skill` / `install_skill` / `uninstall_skill` 不出现在
+progressive tool 的初始可见列表、搜索结果和 `load_tools` 结果里。但本地 smoke 发现：
+模型仍可能绕过 progressive 可见性，直接调用已注册的 `search_skill` / `install_skill`。
+因此只做 UI / rail 层隐藏不够，企业模式下还需要在工具函数入口 fail-close。
+
+当前策略：
+
+- 当 `JIUWENSWARM_PROGRESSIVE_TOOL_HIDDEN_NAMES` 包含对应工具名时：
+  - `search_skill` 直接返回 `success=false, disabled=true, items=[]`；
+  - `install_skill` 直接返回 `success=false, disabled=true, installed=false`；
+  - `uninstall_skill` 直接返回 `success=false, disabled=true, removed=false`。
+- `list_skill` 不禁用，仍允许模型读取当前 Agent 已安装 / 预装 Skill。
+- 已安装 Skill 的读取和使用不受影响；该补丁只阻止外部搜索、安装、卸载入口。
+
+验证：
+
+- 直接调用 `SkillToolkit` 三个入口，确认返回 `disabled=true`，且不会联网搜索或写入新
+  Skill 目录。
+- 结合 Patch 4b，`load_tools` 请求加载上述工具时应显示 skipped，直接调用时应被
+  Patch 4c 拒绝。
+
+回滚：
+
+1. 快速回滚：删除或置空 `.env` 里的
+   `JIUWENSWARM_PROGRESSIVE_TOOL_HIDDEN_NAMES`，然后重启 jiuwenswarm。
+2. 代码回滚：还原 `skill_toolkits.py` 中对
+   `_hidden_skill_tool_names()` / `_hidden_tool_result()` 以及三个工具入口的改动。
+
+升级处理：
+
+- 若上游新增官方 enterprise skill policy，应优先迁到上游配置。
+- 升级后必须重新确认：隐藏外部 Skill Hub 不只是“不展示”，而是直接调用也无法执行。
+
+---
+
 ## EA Patch — Jiuwen Agent 工作目录初始化与技能同步
 
 文件：
