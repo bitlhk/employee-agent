@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { trpc } from "@/lib/trpc";
 import { PageContainer } from "@/components/console/PageContainer";
 import {
-  Activity,
   ArrowLeft,
-  CheckCircle2,
+  Bot,
+  CheckSquare2,
   CircleDot,
-  Clock3,
   Copy,
   ExternalLink,
   EyeOff,
@@ -15,6 +14,8 @@ import {
   MoreHorizontal,
   Plus,
   RefreshCw,
+  Send,
+  Square,
   Trash2,
   UserRound,
   Users,
@@ -27,7 +28,7 @@ import { CoopNewForm } from "@/pages/CoopNew";
 import { Button } from "@/components/ui/button";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
-type PageMode = "space" | "list" | "create";
+type PageMode = "list" | "create";
 type FilterKey = "all" | "action" | "created" | "participating" | "completed";
 
 type CoopSessionRow = {
@@ -56,6 +57,7 @@ type CoopCandidate = {
   departmentName: string | null;
   teamName: string | null;
   adoptId: string | null;
+  agentRoleTemplate?: string | null;
   adoptionStatus: string | null;
 };
 
@@ -123,6 +125,43 @@ function coopRoleLabel(candidate: CoopCandidate) {
   return candidate.teamName || candidate.departmentName || candidate.groupName || "协作成员";
 }
 
+const COOP_AGENT_ROLE_NAMES: Record<string, string> = {
+  "investment-researcher": "投顾分析",
+  "wealth-manager": "财富经理",
+  "credential-compliance": "审核专员",
+  "insurance-advisor": "保险顾问",
+  "general-assistant": "通用助手",
+};
+
+function coopAgentRoleName(candidate: CoopCandidate) {
+  const role = String(candidate.agentRoleTemplate || "").trim();
+  return COOP_AGENT_ROLE_NAMES[role] || role || "通用助手";
+}
+
+function coopOrgUnitLabel(candidate: CoopCandidate) {
+  return candidate.teamName || candidate.departmentName || candidate.groupName || candidate.orgName || "组织";
+}
+
+function isJiuwenCoopCandidate(candidate: CoopCandidate) {
+  const adoptId = String(candidate.adoptId || "");
+  return adoptId.startsWith("lgj-") && (!candidate.adoptionStatus || candidate.adoptionStatus === "active");
+}
+
+function prefillCoopMembers(members: CoopCandidate[]) {
+  try {
+    sessionStorage.setItem(
+      "coop_prefill",
+      JSON.stringify({
+        members: members.map((candidate) => ({
+          userId: candidate.userId,
+          userName: candidate.userName,
+          adoptId: candidate.adoptId,
+        })),
+      })
+    );
+  } catch {}
+}
+
 function truthy(value: unknown) {
   return value === true || value === 1 || value === "1";
 }
@@ -166,13 +205,6 @@ function getSessionFlags(session: CoopSessionRow) {
   return { total, completed, pending, isCreator, isMember, needMyAction, readyToConsolidate };
 }
 
-function primaryActionLabel(session: CoopSessionRow) {
-  const flags = getSessionFlags(session);
-  if (flags.needMyAction) return "处理";
-  if (flags.readyToConsolidate) return "汇总";
-  return "进入";
-}
-
 function roleLabel(session: CoopSessionRow) {
   const flags = getSessionFlags(session);
   if (flags.isCreator && flags.isMember) return "发起人 / 成员";
@@ -186,6 +218,21 @@ function progressLabel(session: CoopSessionRow) {
   if (total <= 0) return "未分配";
   if (pending > 0) return `${completed}/${total} 已提交 · ${pending} 待响应`;
   return `${completed}/${total} 已提交`;
+}
+
+function nextActionLabel(session: CoopSessionRow) {
+  const flags = getSessionFlags(session);
+  if (flags.needMyAction) return "待你接收或调整子任务";
+  if (flags.readyToConsolidate) return "成员已完成，等待你汇总发布";
+  if (session.status === "inviting") return flags.pending > 0 ? `等待 ${flags.pending} 位成员接收` : "等待成员接收";
+  if (session.status === "running") {
+    if (flags.total > 0 && flags.completed < flags.total) return "等待成员提交结果";
+    return "等待结果确认";
+  }
+  if (session.status === "consolidating") return "正在生成汇总草稿";
+  if (session.status === "published") return "已发布给全部成员";
+  if (session.status === "closed" || session.status === "dissolved") return "协作已结束";
+  return "进入查看详情";
 }
 
 function sortSessions(list: CoopSessionRow[]) {
@@ -295,7 +342,7 @@ function CoopOfficeHome({
     { limit: 9 },
     { enabled: Boolean(wlQ.data?.whitelisted) }
   );
-  const candidates = ((data as CoopCandidate[]) || []).filter((candidate) => Boolean(candidate.adoptId)).slice(0, 9);
+  const candidates = ((data as CoopCandidate[]) || []).filter(isJiuwenCoopCandidate).slice(0, 9);
   const active = candidates.find((candidate) => candidate.userId === activeUserId) || candidates[0] || null;
   const orgName = active?.orgName || candidates.find((candidate) => candidate.orgName)?.orgName || "华为";
 
@@ -320,16 +367,7 @@ function CoopOfficeHome({
       onCreate();
       return;
     }
-    const members = candidates
-      .filter((candidate) => selectedIds.includes(candidate.userId))
-      .map((candidate) => ({
-        userId: candidate.userId,
-        userName: candidate.userName,
-        adoptId: candidate.adoptId,
-      }));
-    try {
-      sessionStorage.setItem("coop_prefill", JSON.stringify({ members }));
-    } catch {}
+    prefillCoopMembers(candidates.filter((candidate) => selectedIds.includes(candidate.userId)));
     onCreate();
   };
 
@@ -459,7 +497,7 @@ function CoopOfficeHome({
 
 export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
   const [, setLocationCoop] = useLocation();
-  const [mode, setMode] = useState<PageMode>("space");
+  const [mode, setMode] = useState<PageMode>("list");
 
   if (mode === "create") {
     return (
@@ -483,50 +521,195 @@ export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
     );
   }
 
-  if (mode === "space") {
-    return (
-      <PageContainer title="协作工作台" icon={<Users size={18} />}>
-        <CoopOfficeHome
-          onCreate={() => setMode("create")}
-          onShowList={() => setMode("list")}
-        />
-      </PageContainer>
-    );
-  }
-
   return (
     <PageContainer title="协作工作台" icon={<Users size={18} />}>
       <div className="coop-workbench">
-        <div className="page-section-toolbar">
-          <div className="page-section-title">
-            <h2 className="page-section-title__main">协作工作台</h2>
-            <p className="page-section-title__desc">多人任务分发、成员响应和 AI 汇总</p>
-          </div>
-          <button
-            onClick={() => setMode("space")}
-            className="page-secondary-action"
-            title="返回协作空间"
-          >
-            <UsersRound size={15} aria-hidden="true" />
-            空间首页
-          </button>
-          <button
-            onClick={() => setMode("create")}
-            className="page-primary-action"
-            title="发起多人协作"
-          >
-            <Plus size={15} aria-hidden="true" />
-            发起协作
-          </button>
-        </div>
-
-        <CoopSessionsWorkbench onCreate={() => setMode("create")} />
+        <CoopWorkbenchDashboard
+          onCreate={() => setMode("create")}
+        />
       </div>
     </PageContainer>
   );
 }
 
-function CoopSessionsWorkbench({ onCreate }: { onCreate?: () => void }) {
+function CoopWorkbenchDashboard({ onCreate }: { onCreate?: () => void }) {
+  const [, setLocationCoop] = useLocation();
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const wlQ = trpc.coop.isWhitelisted.useQuery();
+  const { data, isLoading } = trpc.coop.mentionCandidates.useQuery(
+    { limit: 80 },
+    { enabled: Boolean(wlQ.data?.whitelisted) }
+  );
+  const { data: myClawData } = trpc.claw.me.useQuery(undefined, { retry: false });
+  const creatorAdoptId = (myClawData as any)?.adoption?.adoptId || (myClawData as any)?.adoptId || "lgc-creator";
+  const createMut = trpc.coop.create.useMutation({
+    onSuccess: (r) => {
+      setSelectedIds([]);
+      toast.success("协作已创建");
+      setLocationCoop(`/coop/${r.sessionId}`);
+    },
+    onError: (error) => toast.error(error.message || "协作创建失败"),
+  });
+  const agents = useMemo(() => {
+    return ((data as CoopCandidate[]) || [])
+      .filter(isJiuwenCoopCandidate);
+  }, [data]);
+
+  useEffect(() => {
+    setSelectedIds((prev) => prev.filter((userId) => agents.some((agent) => agent.userId === userId)));
+  }, [agents]);
+
+  const selectedAgents = useMemo(() => {
+    const selected = new Set(selectedIds);
+    return agents.filter((agent) => selected.has(agent.userId));
+  }, [agents, selectedIds]);
+
+  const startWithSelected = () => {
+    if (selectedAgents.length === 0) {
+      toast.warning("请先选择至少一个协作智能体");
+      return;
+    }
+    createMut.mutate({
+      title: "未命名协作",
+      originMessage: "",
+      creatorAdoptId,
+      members: selectedAgents.map((agent) => ({
+        userId: agent.userId,
+        targetAdoptId: agent.adoptId || `mock:${agent.userId}`,
+        subtask: "等待协作群内消息",
+      })),
+    });
+  };
+
+  return (
+    <div className="coop-dashboard-layout">
+      <div className="coop-dashboard-main">
+        <CoopSessionsWorkbench />
+      </div>
+      <div className="coop-dashboard-side">
+        <div className="coop-side-tab" aria-label="可协作智能体数量">
+          可协作智能体
+          <span>{agents.length}</span>
+        </div>
+        <CoopAgentsPanel
+          agents={agents}
+          isLoading={isLoading}
+          whitelisted={Boolean(wlQ.data?.whitelisted)}
+          whitelistLoading={wlQ.isLoading}
+          whitelistMessage={wlQ.data?.message}
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          onCreate={startWithSelected}
+          creating={createMut.isPending}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CoopAgentsPanel({
+  agents,
+  isLoading,
+  whitelisted,
+  whitelistLoading,
+  whitelistMessage,
+  selectedIds,
+  setSelectedIds,
+  onCreate,
+  creating,
+}: {
+  agents: CoopCandidate[];
+  isLoading: boolean;
+  whitelisted: boolean;
+  whitelistLoading: boolean;
+  whitelistMessage?: string | null;
+  selectedIds: number[];
+  setSelectedIds: Dispatch<SetStateAction<number[]>>;
+  onCreate?: () => void;
+  creating?: boolean;
+}) {
+  const selectedAgents = useMemo(() => {
+    const selected = new Set(selectedIds);
+    return agents.filter((agent) => selected.has(agent.userId));
+  }, [agents, selectedIds]);
+
+  const toggleAgent = (agent: CoopCandidate) => {
+    setSelectedIds((prev) =>
+      prev.includes(agent.userId)
+        ? prev.filter((userId) => userId !== agent.userId)
+        : [...prev, agent.userId]
+    );
+  };
+
+  return (
+    <aside className="coop-agents-panel" aria-label="可协作智能体">
+      <div className="coop-agent-list-wrap">
+        {!whitelisted && !whitelistLoading ? (
+          <div className="coop-agents-panel__empty">{whitelistMessage || "当前用户未开通组织协作。"}</div>
+        ) : isLoading ? (
+          <div className="coop-agents-panel__empty">正在读取智能体...</div>
+        ) : agents.length === 0 ? (
+          <div className="coop-agents-panel__empty">暂无可协作智能体。</div>
+        ) : (
+          <div className="coop-agent-list">
+            {agents.map((agent) => {
+              const name = coopDisplayName(agent);
+              const role = coopAgentRoleName(agent);
+              const orgUnit = coopOrgUnitLabel(agent);
+              const selected = selectedIds.includes(agent.userId);
+              return (
+                <button
+                  type="button"
+                  className="coop-agent-card coop-agent-card--selectable"
+                  data-selected={selected ? "true" : "false"}
+                  key={`${agent.userId}:${agent.adoptId}`}
+                  onClick={() => toggleAgent(agent)}
+                  aria-pressed={selected}
+                >
+                  <span className="coop-agent-card__check" aria-hidden="true">
+                    {selected ? <CheckSquare2 size={16} /> : <Square size={16} />}
+                  </span>
+                  <div className="coop-agent-card__icon">
+                    <Bot size={16} />
+                  </div>
+                  <div className="coop-agent-card__body">
+                    <div className="coop-agent-card__name">{name}</div>
+                    <div className="coop-agent-card__role">{orgUnit} - {role}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="coop-selected-agents" data-empty={selectedAgents.length === 0 ? "true" : "false"}>
+        <div className="coop-selected-agents__head">
+          <span>已选智能体</span>
+          {selectedAgents.length > 0 ? (
+            <button type="button" onClick={() => setSelectedIds([])}>清空</button>
+          ) : null}
+        </div>
+        {selectedAgents.length > 0 ? (
+          <div className="coop-selected-agents__chips">
+            {selectedAgents.map((agent) => (
+              <span key={agent.userId}>{coopDisplayName(agent)}</span>
+            ))}
+          </div>
+        ) : (
+          <p>可多选后发起协作。</p>
+        )}
+      </div>
+
+      <button type="button" className="page-primary-action coop-create-action" onClick={() => onCreate?.()} disabled={creating}>
+        {creating ? <RefreshCw size={15} className="animate-spin" /> : <Send size={15} />}
+        {creating ? "创建中..." : selectedAgents.length > 0 ? `发起协作 (${selectedAgents.length})` : "发起协作"}
+      </button>
+    </aside>
+  );
+}
+
+function CoopSessionsWorkbench() {
   const [, setLoc] = useLocation();
   const { confirm, dialog } = useConfirmDialog();
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
@@ -639,28 +822,42 @@ function CoopSessionsWorkbench({ onCreate }: { onCreate?: () => void }) {
 
   if (sorted.length === 0) {
     return (
-      <div className="coop-empty-state">
+      <>
         {dialog}
-        <div className="coop-empty-state__icon"><UsersRound size={24} /></div>
-        <div className="coop-empty-state__title">还没有协作任务</div>
-        <div className="coop-empty-state__desc">你可以发起一个多人协作，让成员分别处理子任务后统一汇总。</div>
-        <button className="page-primary-action" onClick={() => onCreate?.()}>
-          <Plus size={15} /> 发起协作
-        </button>
-      </div>
+        <div className="coop-workbench__list-head">
+          <div className="coop-filter-tabs" role="tablist" aria-label="协作任务筛选">
+            {filters.map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                className="coop-filter-tab"
+                data-active={activeFilter === filter.key}
+                onClick={() => setActiveFilter(filter.key)}
+              >
+                {filter.label}
+                <span>{filter.count}</span>
+              </button>
+            ))}
+          </div>
+          <div className="coop-workbench__actions">
+            <Button variant="outline" size="sm" className="coop-refresh-button" onClick={() => refetch()} disabled={isFetching}>
+              <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
+              刷新
+            </Button>
+          </div>
+        </div>
+        <div className="coop-empty-state">
+          <div className="coop-empty-state__icon"><UsersRound size={24} /></div>
+          <div className="coop-empty-state__title">还没有协作任务</div>
+          <div className="coop-empty-state__desc">你可以发起一个多人协作，让成员分别处理子任务后统一汇总。</div>
+        </div>
+      </>
     );
   }
 
   return (
     <>
       {dialog}
-      <div className="coop-summary-grid">
-        <SummaryItem icon={<Clock3 size={16} />} label="待我处理" value={stats.action} tone={stats.action > 0 ? "warning" : "neutral"} />
-        <SummaryItem icon={<Activity size={16} />} label="进行中" value={stats.active} tone="info" />
-        <SummaryItem icon={<CheckCircle2 size={16} />} label="可汇总" value={stats.ready} tone={stats.ready > 0 ? "accent" : "neutral"} />
-        <SummaryItem icon={<UsersRound size={16} />} label="总协作" value={sorted.length} tone="neutral" />
-      </div>
-
       <div className="coop-workbench__list-head">
         <div className="coop-filter-tabs" role="tablist" aria-label="协作任务筛选">
           {filters.map((filter) => (
@@ -676,10 +873,12 @@ function CoopSessionsWorkbench({ onCreate }: { onCreate?: () => void }) {
             </button>
           ))}
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-          <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
-          刷新
-        </Button>
+        <div className="coop-workbench__actions">
+          <Button variant="outline" size="sm" className="coop-refresh-button" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
+            刷新
+          </Button>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -692,10 +891,11 @@ function CoopSessionsWorkbench({ onCreate }: { onCreate?: () => void }) {
           <div className="coop-task-table__head" role="row">
             <div>任务</div>
             <div>状态</div>
+            <div>下一步</div>
             <div>角色</div>
             <div>进度</div>
             <div>创建时间</div>
-            <div>操作</div>
+            <div></div>
           </div>
           <div className="coop-task-table__body">
             {filtered.map((session) => {
@@ -722,6 +922,7 @@ function CoopSessionsWorkbench({ onCreate }: { onCreate?: () => void }) {
                   <div>
                     <span className={`badge ${meta.badgeClass}`}>{meta.label}</span>
                   </div>
+                  <div className="coop-task-row__next">{nextActionLabel(session)}</div>
                   <div className="coop-task-row__role">
                     <UserRound size={13} />
                     {roleLabel(session)}
@@ -734,9 +935,6 @@ function CoopSessionsWorkbench({ onCreate }: { onCreate?: () => void }) {
                   </div>
                   <div className="coop-task-row__date">{formatDate(session.created_at)}</div>
                   <div className="coop-task-row__actions" onClick={(event) => event.stopPropagation()}>
-                    <Button size="sm" variant={flags.needMyAction || flags.readyToConsolidate ? "default" : "outline"} onClick={() => setLoc(`/coop/${session.id}`)}>
-                      {primaryActionLabel(session)}
-                    </Button>
                     <button
                       type="button"
                       data-coop-menu-trigger
@@ -779,17 +977,5 @@ function CoopSessionsWorkbench({ onCreate }: { onCreate?: () => void }) {
         </div>
       )}
     </>
-  );
-}
-
-function SummaryItem({ icon, label, value, tone }: { icon: ReactNode; label: string; value: number; tone: "warning" | "info" | "accent" | "neutral" }) {
-  return (
-    <div className="coop-summary-item" data-tone={tone}>
-      <div className="coop-summary-item__icon">{icon}</div>
-      <div>
-        <div className="coop-summary-item__value">{value}</div>
-        <div className="coop-summary-item__label">{label}</div>
-      </div>
-    </div>
   );
 }

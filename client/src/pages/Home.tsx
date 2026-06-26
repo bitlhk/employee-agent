@@ -33,7 +33,7 @@ import { useLingxiaChat } from "@/hooks/useLingxiaChat";
 import { formatModelName } from "@/lib/modelDisplay";
 import { classifyDisplayError, displayErrorMessage } from "@/lib/errorDisplay";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
-import { History } from "lucide-react";
+import { History, Wand2, X } from "lucide-react";
 
 
 const ENABLE_OPENCLAW_WS_CHAT = true;
@@ -86,6 +86,39 @@ const webHiddenSessionsStorageKey = (userId: string, adoptId: string) => `lingxi
 const clawStatusStorageKey = (userId: string, adoptId: string) => `lingxia_claw_status_${userId}_${adoptId}`;
 const clawModelStorageKey = (userId: string, adoptId: string) => `lingxia_claw_model_${userId}_${adoptId}`;
 const clawModelFallbackStorageKey = (adoptId: string) => `lingxia_claw_model_public_${adoptId}`;
+
+type ComposerSkillOption = {
+  id: string;
+  label: string;
+  desc: string;
+  source: string;
+};
+
+function flattenComposerSkills(groups: any): ComposerSkillOption[] {
+  const raw = [
+    ...(Array.isArray(groups?.shared) ? groups.shared : []),
+    ...(Array.isArray(groups?.system) ? groups.system : []),
+    ...(Array.isArray(groups?.private) ? groups.private : []),
+  ];
+  const seen = new Set<string>();
+  const out: ComposerSkillOption[] = [];
+  for (const skill of raw) {
+    const id = String(skill?.id || "").trim();
+    if (!id || seen.has(id)) continue;
+    const enabled = skill?.enabled !== false;
+    const ready = !skill?.state || skill.state === "ready";
+    const runnable = skill?.runnable !== false && skill?.active !== false;
+    if (!enabled || !ready || !runnable) continue;
+    seen.add(id);
+    out.push({
+      id,
+      label: String(skill?.source?.displayName || skill?.displayName || skill?.label || skill?.name || id).trim() || id,
+      desc: String(skill?.desc || skill?.description || skill?.source?.description || "").trim(),
+      source: String(skill?.scope || skill?.source || "skill").trim(),
+    });
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
+}
 
 type WebChatSessionRecord = {
   conversationId: string;
@@ -1033,9 +1066,16 @@ export default function Home() {
         .filter((item) => item?.conversationId && item.sessionKey && !hidden.has(item.conversationId) && Number(item.messageCount || 0) > 0)
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, 30);
+      const backendConversationIds = new Set(backendSessions.map((item) => item.conversationId).filter(Boolean));
       let mergedSessions: WebChatSessionRecord[] = [];
       setWebSessions((previous) => {
-        mergedSessions = mergeWebSessionRecords([...readWebSessionIndex(SESSION_INDEX_KEY), ...previous], backendSessions, hidden);
+        const localSource = [...readWebSessionIndex(SESSION_INDEX_KEY), ...previous].filter((item) => {
+          if (!item?.conversationId || hidden.has(item.conversationId)) return false;
+          if (!item.sessionKey) return true;
+          if (item.conversationId === webConversationIdRef.current) return true;
+          return backendConversationIds.has(item.conversationId);
+        });
+        mergedSessions = mergeWebSessionRecords(localSource, backendSessions, hidden);
         writeWebSessionIndex(SESSION_INDEX_KEY, mergedSessions);
         return mergedSessions;
       });
@@ -1639,6 +1679,17 @@ export default function Home() {
     { adoptId: resolvedAdoptId || "" },
     { enabled: !!resolvedAdoptId, retry: false }
   );
+  const composerSkills = useMemo(() => flattenComposerSkills(lingxiaSkills), [lingxiaSkills]);
+  const [selectedComposerSkillId, setSelectedComposerSkillId] = useState<string>("");
+  const selectedComposerSkill = useMemo(
+    () => composerSkills.find((skill) => skill.id === selectedComposerSkillId) || null,
+    [composerSkills, selectedComposerSkillId],
+  );
+  useEffect(() => {
+    if (selectedComposerSkillId && !composerSkills.some((skill) => skill.id === selectedComposerSkillId)) {
+      setSelectedComposerSkillId("");
+    }
+  }, [composerSkills, selectedComposerSkillId]);
   useEffect(() => {
     if (!resolvedAdoptId || lingxiaSkillsLoading) return;
     const count = Number((lingxiaSkills as any)?.shared?.length || 0)
@@ -1761,7 +1812,7 @@ export default function Home() {
     return () => clearInterval(id);
   }, [lingxiaStreaming]);
 
-  const sendLingxiaMessage = async (messageOverride?: string) => {
+  const sendLingxiaMessage = async (messageOverride?: string, opts?: { selectedSkillId?: string }) => {
     const sourceText = messageOverride ?? lingxiaInput;
     if (!resolvedAdoptId || !sourceText.trim() || lingxiaStreaming) return;
     if (chatV2Enabled) return;
@@ -2090,7 +2141,16 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         signal: controller.signal,
-        body: JSON.stringify({ adoptId: resolvedAdoptId, message: text, model: effectiveLingxiaModelId, clientRunId, channel: "web", conversationId: webConversationId, runtimeMode: chatRuntimeMode }),
+        body: JSON.stringify({
+          adoptId: resolvedAdoptId,
+          message: text,
+          model: effectiveLingxiaModelId,
+          clientRunId,
+          channel: "web",
+          conversationId: webConversationId,
+          runtimeMode: chatRuntimeMode,
+          ...(opts?.selectedSkillId ? { selectedSkillId: opts.selectedSkillId } : {}),
+        }),
       });
 
       if (!resp.ok || !resp.body) {
@@ -3262,7 +3322,7 @@ export default function Home() {
                 if (liveMentions.length === 0) {
                   // 没 @ 任何人 → 普通消息
                   if (mentionedUsers.length > 0) setMentionedUsers([]);
-                  await sendLingxiaMessage(finalText);
+                  await sendLingxiaMessage(finalText, { selectedSkillId: selectedComposerSkill?.id });
                   return true;
                 }
                 if (!text) { toast.error("请先输入任务内容再发起协作"); return; }
@@ -3283,18 +3343,19 @@ export default function Home() {
                     setLingxiaInput("");
 	                  return true;
 	                }
-                // ≥2 人 → 跳 /coop/new 让用户给每人分子任务（飞书+Linear 模式）
-                try {
-	                  sessionStorage.setItem("coop_prefill", JSON.stringify({
-	                    origin: finalText,
-	                    title: text.slice(0, 80).split(/\n/)[0],
-                    members: liveMentions.map((u) => ({ userId: u.userId, userName: u.userName, adoptId: u.adoptId })),
-                  }));
-                } catch {}
+                coopCreateFromChatMut.mutate({
+                  title: text.slice(0, 80).split(/\n/)[0] || "主聊天发起的协作",
+                  originMessage: finalText,
+                  creatorAdoptId: resolvedAdoptId || "lgc-creator",
+                  members: liveMentions.map((u) => ({
+                    userId: u.userId,
+                    targetAdoptId: u.adoptId || `mock:${u.userId}`,
+                    subtask: finalText,
+                  })),
+                });
 	                setMentionedUsers([]);
                   clearLingxiaDraft();
 	                setLingxiaInput("");
-	                setLocationCoop("/coop/new");
 	                return true;
 	              }}
               onStop={chatV2Enabled ? () => chatV2.abort("home_stop") : stopLingxiaStreaming}
@@ -3308,77 +3369,135 @@ export default function Home() {
               onUserMention={(u) => {
                 setMentionedUsers((prev) => prev.some((x) => x.userId === u.userId) ? prev : [...prev, u]);
               }}
+              leftControls={selectedComposerSkill ? (
+                <span className="lingxia-composer-skill-chip" title={`本轮优先使用：${selectedComposerSkill.label}`}>
+                  <Wand2 size={13} strokeWidth={1.8} />
+                  <span>{selectedComposerSkill.label}</span>
+                  <button
+                    type="button"
+                    aria-label="取消选择技能"
+                    onClick={() => setSelectedComposerSkillId("")}
+                  >
+                    <X size={12} strokeWidth={1.8} />
+                  </button>
+                </span>
+              ) : null}
               statusExtras={chatComposerStatus.map((item) => (
                 <span key={item.key} className="lingxia-composer-status-chip" data-tone={item.tone || "muted"}>
                   {item.label}
                 </span>
               ))}
               rightControls={(
-                <Select value={effectiveLingxiaModelId} onValueChange={(v) => {
-                  setLingxiaModelId(v);
-                  setCachedLingxiaModelId(v);
-                  try {
-                    if (MODEL_SELECTION_KEY) localStorage.setItem(MODEL_SELECTION_KEY, v);
-                    if (MODEL_SELECTION_FALLBACK_KEY) localStorage.setItem(MODEL_SELECTION_FALLBACK_KEY, v);
-                  } catch {}
-                  if (!user) { toast.error("请先登录"); return; }
-                  switchModelMutation.mutate({ adoptId: resolvedAdoptId!, modelId: v });
-                }}>
-                  <SelectTrigger
-                    size="sm"
-                    aria-label="选择模型"
-                    className="lingxia-composer-model-select focus:ring-0 focus:ring-offset-0"
-                    disabled={!availableModels || availableModels.length === 0 || activeLingxiaStreaming}
-                    style={{
-                      height: 28,
-                      minWidth: 0,
-                      maxWidth: 180,
-                      paddingLeft: 6,
-                      paddingRight: 4,
-                      background: "transparent",
-                      border: "none",
-                      boxShadow: "none",
-                      color: "var(--oc-text-secondary)",
-                      fontSize: "var(--oc-text-sm)",
-                      fontWeight: "var(--oc-weight-normal)",
-                      borderRadius: 6,
-                    }}
+                <>
+                  <Select
+                    value={selectedComposerSkillId || "__none"}
+                    onValueChange={(v) => setSelectedComposerSkillId(v === "__none" ? "" : v)}
                   >
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {selectedLingxiaModelName}
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent
-                    style={{
-                      background: "var(--oc-bg)",
-                      border: "1px solid var(--oc-border)",
-                      borderRadius: 10,
-                      minWidth: 240,
-                      boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
-                      padding: "4px",
-                    }}
-                  >
-                    {(availableModels || []).map((m: any) => {
-                      const modelName = compactModelDisplayName(String(m.name || "").trim() || formatModelName(m.id));
-                      return (
+                    <SelectTrigger
+                      size="sm"
+                      aria-label="选择技能"
+                      className="lingxia-composer-skill-select focus:ring-0 focus:ring-offset-0"
+                      disabled={composerSkills.length === 0 || activeLingxiaStreaming}
+                    >
+                      <span className="lingxia-composer-skill-select__label">
+                        <Wand2 size={13} strokeWidth={1.8} />
+                        <span>技能</span>
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent
+                      style={{
+                        background: "var(--oc-bg)",
+                        border: "1px solid var(--oc-border)",
+                        borderRadius: 10,
+                        minWidth: 260,
+                        maxWidth: 360,
+                        boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
+                        padding: "4px",
+                      }}
+                    >
+                      <SelectItem value="__none" className="lingxia-skill-select-item">
+                        <span style={{ color: "var(--oc-text-secondary)" }}>不指定技能</span>
+                      </SelectItem>
+                      {composerSkills.map((skill) => (
                         <SelectItem
-                          key={m.id}
-                          value={m.id}
-                          className="lingxia-model-item"
-                          style={{
-                            fontSize: "var(--oc-text-sm)",
-                            fontWeight: "var(--oc-weight-medium)",
-                            borderRadius: 6,
-                            padding: "7px 10px",
-                            cursor: "pointer",
-                          }}
+                          key={skill.id}
+                          value={skill.id}
+                          className="lingxia-skill-select-item"
                         >
-                          <span style={{ color: "var(--oc-text-primary)" }}>{modelName}</span>
+                          <span className="lingxia-skill-select-item__main">
+                            <span className="lingxia-skill-select-item__name">{skill.label}</span>
+                            {skill.desc ? <span className="lingxia-skill-select-item__desc">{skill.desc}</span> : null}
+                          </span>
                         </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={effectiveLingxiaModelId} onValueChange={(v) => {
+                    setLingxiaModelId(v);
+                    setCachedLingxiaModelId(v);
+                    try {
+                      if (MODEL_SELECTION_KEY) localStorage.setItem(MODEL_SELECTION_KEY, v);
+                      if (MODEL_SELECTION_FALLBACK_KEY) localStorage.setItem(MODEL_SELECTION_FALLBACK_KEY, v);
+                    } catch {}
+                    if (!user) { toast.error("请先登录"); return; }
+                    switchModelMutation.mutate({ adoptId: resolvedAdoptId!, modelId: v });
+                  }}>
+                    <SelectTrigger
+                      size="sm"
+                      aria-label="选择模型"
+                      className="lingxia-composer-model-select focus:ring-0 focus:ring-offset-0"
+                      disabled={!availableModels || availableModels.length === 0 || activeLingxiaStreaming}
+                      style={{
+                        height: 28,
+                        minWidth: 0,
+                        maxWidth: 180,
+                        paddingLeft: 6,
+                        paddingRight: 4,
+                        background: "transparent",
+                        border: "none",
+                        boxShadow: "none",
+                        color: "var(--oc-text-secondary)",
+                        fontSize: "var(--oc-text-sm)",
+                        fontWeight: "var(--oc-weight-normal)",
+                        borderRadius: 6,
+                      }}
+                    >
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {selectedLingxiaModelName}
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent
+                      style={{
+                        background: "var(--oc-bg)",
+                        border: "1px solid var(--oc-border)",
+                        borderRadius: 10,
+                        minWidth: 240,
+                        boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
+                        padding: "4px",
+                      }}
+                    >
+                      {(availableModels || []).map((m: any) => {
+                        const modelName = compactModelDisplayName(String(m.name || "").trim() || formatModelName(m.id));
+                        return (
+                          <SelectItem
+                            key={m.id}
+                            value={m.id}
+                            className="lingxia-model-item"
+                            style={{
+                              fontSize: "var(--oc-text-sm)",
+                              fontWeight: "var(--oc-weight-medium)",
+                              borderRadius: 6,
+                              padding: "7px 10px",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <span style={{ color: "var(--oc-text-primary)" }}>{modelName}</span>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </>
               )}
             />
 

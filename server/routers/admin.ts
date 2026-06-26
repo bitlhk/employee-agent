@@ -434,7 +434,10 @@ async function listCollabSpacesWithStats() {
     const memberRows = await db
       .select({ c: sql<number>`count(*)` })
       .from(lxCollabUserProfiles)
-      .where(eq(lxCollabUserProfiles.spaceId, space.id));
+      .where(and(
+        eq(lxCollabUserProfiles.spaceId, space.id),
+        eq(lxCollabUserProfiles.status, "active"),
+      ));
 
     const activeSessionRows = await db
       .select({ c: sql<number>`count(*)` })

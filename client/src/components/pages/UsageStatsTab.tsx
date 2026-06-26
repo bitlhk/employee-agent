@@ -6,6 +6,7 @@ interface AdoptionStat {
   total: number;
   userId: number;
   userName: string;
+  runtime?: string;
   lastActivity: string;
   recent7d: number;
   dailyBreakdown: Array<{ date: string; count: number }>;
@@ -140,6 +141,11 @@ export function UsageStatsTab() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-mono text-gray-800">{a.adoptId}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                      a.runtime === "jiuwenswarm" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
+                    }`}>
+                      {a.runtime === "jiuwenswarm" ? "JiuwenSwarm" : "OpenClaw"}
+                    </span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{a.userName}</span>
                   </div>
                 </div>

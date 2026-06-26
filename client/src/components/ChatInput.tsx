@@ -28,6 +28,7 @@ type ChatInputProps = {
   rightControls?: ReactNode;
   statusExtras?: ReactNode;
   historyStorageKey?: string;
+  showUtilityButtons?: boolean;
 };
 
 const MAX_INPUT_HISTORY = 30;
@@ -112,6 +113,7 @@ export function ChatInput({
   rightControls,
   statusExtras,
   historyStorageKey,
+  showUtilityButtons = true,
 }: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -702,7 +704,7 @@ export function ChatInput({
                 lineHeight: "24px",
                 minHeight: 28,
                 maxHeight: 144,
-                overflowY: "hidden",
+                overflowY: "auto",
                 display: "block",
                 border: "none",
                 outline: "none",
@@ -748,18 +750,22 @@ export function ChatInput({
 
           <div className="flex items-center gap-1">
             {rightControls}
-            <button onClick={onNewChat} title="新对话" className="lingxia-toolbar-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-            </button>
-            <button onClick={exportMarkdown} title="导出 Markdown" className="lingxia-toolbar-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/>
-                <line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-            </button>
+            {showUtilityButtons ? (
+              <>
+                <button onClick={onNewChat} title="新对话" className="lingxia-toolbar-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                </button>
+                <button onClick={exportMarkdown} title="导出 Markdown" className="lingxia-toolbar-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                </button>
+              </>
+            ) : null}
             <button
               onClick={() => void submitMessage()}
               disabled={streaming ? false : (disabled || submittingAttachments || (!value.trim() && attachments.length === 0))}

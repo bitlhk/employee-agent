@@ -54,7 +54,7 @@ import {
   provisionEmployeeAgentInstance,
   writeClawExecAudit,
 } from "./helpers";
-import { hermesProfileSkillsDir, resolveRuntimeAgentId } from "../_core/helpers";
+import { hermesProfileSkillsDir, isJiuwenClawAdoptId, resolveRuntimeAgentId } from "../_core/helpers";
 import { getAuditBaselineHealth } from "../_core/audit-health";
 import { auditActor, auditErrorMetadata, auditRequest, recordAuditBestEffort, recordAuditRequired } from "../_core/audit-events";
 import { onboardBuiltinSkillsForAdopt } from "../_core/skills/skill-onboarding";
@@ -1603,13 +1603,11 @@ export const clawRouter = router({
       return skills;
     }),
 
-        adminGetConfig: adminProcedure.query(async () => {
+    adminGetConfig: adminProcedure.query(async () => {
       const visibility = (await getSystemConfigValue("claw_visibility", "internal")).trim() || "internal";
-      const defaultTtlDays = await getSystemConfigNumber("claw_default_ttl_days", 0);
       const defaultProfile = (await getSystemConfigValue("claw_default_profile", "plus")).trim() || "plus";
       return {
         visibility: visibility === "internal" ? "internal" : "public",
-        defaultTtlDays,
         defaultProfile: (defaultProfile === "internal" ? "internal" : "plus") as "plus" | "internal",
       };
     }),
@@ -1617,19 +1615,12 @@ export const clawRouter = router({
     adminSetConfig: adminProcedure
       .input(z.object({
         visibility: z.enum(["public", "internal"]).optional(),
-        defaultTtlDays: z.number().int().min(0).max(365).optional(),
         defaultProfile: z.enum(["plus", "internal"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         if (input.visibility) {
           await upsertSystemConfig(
             { key: "claw_visibility", value: input.visibility, description: "员工智能体可见性：public/internal" },
-            ctx.user!.id
-          );
-        }
-        if (typeof input.defaultTtlDays === "number") {
-          await upsertSystemConfig(
-            { key: "claw_default_ttl_days", value: String(input.defaultTtlDays), description: "员工智能体默认有效期（天，0 表示长期有效）" },
             ctx.user!.id
           );
         }
@@ -1749,7 +1740,6 @@ export const clawRouter = router({
           .object({
             permissionProfile: z.enum(["plus", "internal"]).optional(),
             roleTemplate: z.string().min(1).max(64).optional(),
-            ttlDays: z.number().int().min(0).max(365).optional(),
             preferRuntime: z.enum(["jiuwenswarm", "openclaw"]).optional(),
           })
           .optional()
@@ -1801,8 +1791,7 @@ export const clawRouter = router({
           );
         }
         const runtimeAdapter = getRoleRuntimeAdapter(provisionPlan.runtime);
-        const defaultTtl = await getSystemConfigNumber("claw_default_ttl_days", 0);
-        const ttlDays = input?.ttlDays ?? defaultTtl;
+        const ttlDays = 0;
         // 测试主页统一直达生产 demo 域名，避免落到 linggantest 域
         const baseDomain = process.env.DEMO_ROUTE_DOMAIN || "demo.linggan.top";
         const entryScheme = (await getSystemConfigValue("claw_demo_entry_scheme", "https")).trim() || "https";
@@ -1811,7 +1800,7 @@ export const clawRouter = router({
         const adoptId = provisionPlan.runtime === "jiuwenswarm" ? `lgj-${suffix}` : `lgc-${suffix}`;
         const agentId = provisionPlan.runtime === "jiuwenswarm" ? `jiuwen_${adoptId}` : `trial_${adoptId}`;
         const entryUrl = `${entryScheme}://${adoptId}.${baseDomain}`;
-        const expiresAt = ttlDays > 0 ? new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000) : null;
+        const expiresAt = null;
 
         const adoptionId = await createClawAdoption({
           userId,
@@ -2177,6 +2166,40 @@ export const clawRouter = router({
       .input(z.object({ adoptId: z.string().min(1).max(64) }))
       .query(async ({ input, ctx }) => {
         const claw = await assertClawOwnerOrThrow(ctx, input.adoptId);
+
+        if (isJiuwenClawAdoptId(input.adoptId)) {
+          const listed = await skillRegistry.listSkills(input.adoptId);
+          if (!listed.ok) {
+            return { shared: [], system: [], private: [], privateNotInstalled: [] };
+          }
+          const privateSkills = listed.value.map((skill) => ({
+            id: skill.id,
+            label: skill.source.displayName || skill.id,
+            desc: skill.source.description || "智能体技能",
+            emoji: "⚡",
+            source: "private" as const,
+            scope: "private" as const,
+            sourcePath: skill.sync.runtimePath || skill.source.sourcePath || "",
+            ownerAgentId: input.adoptId,
+            visible: true,
+            runnable: skill.enabled && skill.state === "ready",
+            reason: skill.enabled && skill.state === "ready" ? "" : skill.state,
+            active: skill.enabled,
+            state: skill.state,
+            enabled: skill.enabled,
+            sync: skill.sync,
+          }));
+          return {
+            shared: [],
+            system: [],
+            private: privateSkills,
+            privateNotInstalled: [],
+            summary: {
+              discovered: privateSkills.length,
+              runnable: privateSkills.filter((s) => s.runnable).length,
+            },
+          };
+        }
 
         // Hermes runtime (lgh-*) 走专属 skill provider，读 /root/.hermes/profiles/<name>/skills/
         if (String(input.adoptId).startsWith("lgh-")) {

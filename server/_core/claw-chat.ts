@@ -1,6 +1,7 @@
 import express from "express";
 import http from "http";
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import path from "path";
 import { clawChatLimiter } from "./security";
 import { routeTool, type ToolContext } from "./tool_router";
 import {
@@ -29,8 +30,53 @@ import {
 } from "./chat-inflight";
 import { restoreDeletedProtectedCoreFiles, snapshotProtectedCoreFiles } from "./core-file-guard";
 import { scheduleOpenClawToolAudit } from "./openclaw-tool-audit";
+import { skillRegistry } from "./skills/skill-registry";
 
 type ChatRuntimeMode = "fast" | "plan";
+
+type SelectedSkillContext =
+  | { ok: true; message: string; skillId: string; label: string; skillFile: string }
+  | { ok: false; status: number; error: string };
+
+function normalizeSelectedSkillId(value: unknown): string {
+  const skillId = String(value || "").trim();
+  if (!skillId) return "";
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(skillId)) return "";
+  return skillId;
+}
+
+async function buildSelectedSkillContext(adoptId: string, selectedSkillId: unknown, userMessage: string): Promise<SelectedSkillContext | null> {
+  const skillId = normalizeSelectedSkillId(selectedSkillId);
+  if (!skillId) return null;
+
+  const listed = await skillRegistry.listSkills(adoptId);
+  if (!listed.ok) {
+    return { ok: false, status: 400, error: `技能读取失败：${listed.error.detail}` };
+  }
+
+  const skill = listed.value.find((item: any) => String(item?.id || "") === skillId);
+  if (!skill) return { ok: false, status: 404, error: "所选技能不存在或不属于当前智能体" };
+  if (!skill.enabled || skill.state !== "ready") {
+    return { ok: false, status: 400, error: "所选技能未启用或尚未就绪" };
+  }
+
+  const runtimePath = String((skill as any)?.sync?.runtimePath || "").trim();
+  if (!runtimePath) return { ok: false, status: 400, error: "所选技能尚未同步到运行时" };
+  const skillFile = path.join(runtimePath, "SKILL.md");
+  if (!existsSync(skillFile)) return { ok: false, status: 400, error: "所选技能运行时文件不存在" };
+
+  const label = String((skill as any)?.source?.displayName || (skill as any)?.displayName || (skill as any)?.label || skillId).trim() || skillId;
+  const message = [
+    "【本轮已由用户在输入框选择技能 Chip】",
+    `selectedSkillId: ${skillId}`,
+    `selectedSkillName: ${label}`,
+    `selectedSkillFile: ${skillFile}`,
+    "要求：本轮必须优先使用 selectedSkillFile 指向的 SKILL.md；不要搜索或安装外部技能；请先读取/遵循该技能，再回答用户问题。",
+    "",
+    `用户问题：${userMessage}`,
+  ].join("\n");
+  return { ok: true, message, skillId, label, skillFile };
+}
 
 type OpenAiToolCallAccumulator = {
   index: number;
@@ -81,7 +127,7 @@ export function registerChatStreamRoutes(app: express.Express) {
   // 直连 Gateway /v1/chat/completions SSE，用 Node http 模块透传（避免 fetch 缓冲问题）
   app.post("/api/claw/chat-stream", clawChatLimiter, async (req, res) => {
     const routeEnterMs = Date.now();
-    let { adoptId, message, model, pendingToolContext, epochLabel, channel, conversationId, runtimeMode } = req.body || {};
+    let { adoptId, message, model, pendingToolContext, epochLabel, channel, conversationId, runtimeMode, selectedSkillId } = req.body || {};
     const clientRunId = normalizeClientRunId(req.body?.clientRunId);
     const normalizedRuntimeMode = normalizeChatRuntimeMode(runtimeMode);
     if (!adoptId || !message) {
@@ -110,6 +156,25 @@ export function registerChatStreamRoutes(app: express.Express) {
         res.status(400).json({ error: "message is empty" });
         return;
       }
+      const selectedSkill = await buildSelectedSkillContext(String(claw.adoptId), selectedSkillId, msgStrForRuntime);
+      if (selectedSkill && !selectedSkill.ok) {
+        res.status(selectedSkill.status).json({ error: selectedSkill.error });
+        return;
+      }
+      const runtimeMessage = selectedSkill?.ok ? selectedSkill.message.slice(0, 8000) : msgStrForRuntime;
+      if (selectedSkill?.ok) {
+        appendLogAsync("jiuwenclaw-exec.log", {
+          ts: new Date().toISOString(),
+          event: "selected_skill_injected",
+          adoptId: String(claw.adoptId),
+          agentId: String(claw.agentId || `jiuwen_${String(claw.adoptId)}`),
+          userId: Number(claw.userId),
+          clientRunId,
+          selectedSkillId: selectedSkill.skillId,
+          selectedSkillName: selectedSkill.label,
+          selectedSkillFile: selectedSkill.skillFile,
+        });
+      }
       const { forwardToJiuwenClaw } = await import("./jiuwenclaw-bridge");
       await forwardToJiuwenClaw(
         {
@@ -117,7 +182,7 @@ export function registerChatStreamRoutes(app: express.Express) {
           agentId: String(claw.agentId || `jiuwen_${String(claw.adoptId)}`),
           userId: Number(claw.userId),
         },
-        msgStrForRuntime,
+        runtimeMessage,
         res,
         {
           model,

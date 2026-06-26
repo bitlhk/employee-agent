@@ -171,7 +171,7 @@ export function CollaborationTab() {
 
   const selectedSpaceMembers = useMemo(() => {
     if (!selectedSpace) return [];
-    return members.filter((member: any) => member.spaceId === selectedSpace.id);
+    return members.filter((member: any) => member.spaceId === selectedSpace.id && member.status === "active");
   }, [members, selectedSpace]);
 
   const filteredMembers = useMemo(() => {

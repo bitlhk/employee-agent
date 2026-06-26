@@ -4,18 +4,20 @@
  * 
  * 视角：
  *   creator  — 发起人；看所有成员状态
- *   member   — 被邀请人；在 pending 状态时能同意/拒绝/修改子任务
+ *   member   — 群成员；可直接在群里发言，或让自己的智能体代写后确认发送
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ArrowLeft, CheckCircle2, Users as UsersIcon, Paperclip, Download } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { Loader2, ArrowLeft, CheckCircle2, Users as UsersIcon, Paperclip, Download, Sparkles, FolderOpen, Square, Copy, PanelRightClose, PanelRightOpen, Bot, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
-import { CoopChatBox } from "@/components/CoopChatBox";
-import { memberStatusMeta, sessionStatusMeta } from "@/lib/coopStatus";
+import { ChatInput } from "@/components/ChatInput";
+import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { sessionStatusMeta } from "@/lib/coopStatus";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,7 +29,59 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-type EventAttachment = { name: string; url: string; source?: string; size?: number };
+type EventAttachment = {
+  name: string;
+  url: string;
+  source?: "chat" | "task" | "agent_workspace";
+  size?: number;
+  adoptId?: string;
+  path?: string;
+};
+
+type ComposerSkillOption = {
+  id: string;
+  label: string;
+  desc: string;
+};
+
+function flattenComposerSkills(groups: any): ComposerSkillOption[] {
+  const raw = [
+    ...(Array.isArray(groups?.shared) ? groups.shared : []),
+    ...(Array.isArray(groups?.system) ? groups.system : []),
+    ...(Array.isArray(groups?.private) ? groups.private : []),
+  ];
+  const seen = new Set<string>();
+  const out: ComposerSkillOption[] = [];
+  for (const skill of raw) {
+    const id = String(skill?.id || "").trim();
+    if (!id || seen.has(id)) continue;
+    const enabled = skill?.enabled !== false;
+    const ready = !skill?.state || skill.state === "ready";
+    const runnable = skill?.runnable !== false && skill?.active !== false;
+    if (!enabled || !ready || !runnable) continue;
+    seen.add(id);
+    out.push({
+      id,
+      label: String(skill?.source?.displayName || skill?.displayName || skill?.label || skill?.name || id).trim() || id,
+      desc: String(skill?.desc || skill?.description || skill?.source?.description || "").trim(),
+    });
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
+}
+
+function workspaceFileToAttachment(file: any, adoptId: string): EventAttachment | null {
+  const name = String(file?.name || "").trim();
+  const path = String(file?.path || "").trim();
+  if (!name || !path || !adoptId) return null;
+  return {
+    name,
+    size: Number(file?.size || 0) || undefined,
+    source: "agent_workspace",
+    url: `/api/claw/files/download?adoptId=${encodeURIComponent(adoptId)}&path=${encodeURIComponent(path)}`,
+    adoptId,
+    path,
+  };
+}
 
 function formatAttSize(bytes?: number): string {
   if (!bytes || bytes <= 0) return "";
@@ -37,10 +91,20 @@ function formatAttSize(bytes?: number): string {
 }
 
 function formatMemberOrg(member: any): string {
-  const parts = [member.targetOrgName, member.targetDepartmentName, member.targetTeamName].filter(Boolean);
-  if (parts.length > 0) return parts.join(" · ");
-  if (member.targetGroupName && member.targetGroupId > 0) return `— · ${member.targetGroupName}`;
-  return "—";
+  return member.targetTeamName || member.targetDepartmentName || member.targetGroupName || member.targetOrgName || "组织";
+}
+
+const COOP_AGENT_ROLE_NAMES: Record<string, string> = {
+  "investment-researcher": "投顾分析",
+  "wealth-manager": "财富经理",
+  "credential-compliance": "审核专员",
+  "insurance-advisor": "保险顾问",
+  "general-assistant": "通用助手",
+};
+
+function formatMemberRole(member: any): string {
+  const role = String(member.targetRoleTemplate || "").trim();
+  return COOP_AGENT_ROLE_NAMES[role] || role || "通用助手";
 }
 
 function AttachmentList({ attachments }: { attachments: EventAttachment[] }) {
@@ -76,6 +140,14 @@ export default function CoopSession() {
   const [, params] = useRoute("/coop/:sessionId");
   const [, setLocation] = useLocation();
   const sessionId = params?.sessionId || "";
+  const [groupInput, setGroupInput] = useState("");
+  const [agentMode, setAgentMode] = useState(false);
+  const [agentDraft, setAgentDraft] = useState("");
+  const [agentAttachments, setAgentAttachments] = useState<EventAttachment[]>([]);
+  const [agentStreaming, setAgentStreaming] = useState(false);
+  const [sideOpen, setSideOpen] = useState(true);
+  const [selectedComposerSkillId, setSelectedComposerSkillId] = useState("");
+  const agentAbortRef = useRef<AbortController | null>(null);
 
   // 拉 session 详情（每 3 秒 refetch 一次作为轮询）
   const { data, isLoading, error, refetch } = trpc.coop.getSession.useQuery(
@@ -83,25 +155,37 @@ export default function CoopSession() {
     { enabled: Boolean(sessionId), refetchInterval: 3000 }
   );
 
-  const agreeMut = trpc.coop.agree.useMutation({
-    onSuccess: () => { toast.success("已同意"); refetch(); },
-    onError: (e) => toast.error(e.message || "同意失败"),
-  });
-  const rejectMut = trpc.coop.reject.useMutation({
-    onSuccess: () => { toast.success("已拒绝"); refetch(); },
-    onError: (e) => toast.error(e.message || "拒绝失败"),
-  });
-
   // 拿当前用户的 adoptId，返回时跳 /claw/{adoptId}（即"我的智能体"主页 + 协作 tab）
   // 注意：App.tsx 里 / 是 <ClawHome /> 创建页，/claw/:adoptId 才是 <Home /> 含「我的协作」
   const { data: myClawForBack } = trpc.claw.me.useQuery(undefined, { retry: false });
   const myAdoptIdForBack = (myClawForBack as any)?.adoption?.adoptId as string | undefined;
+  const { data: lingxiaSkills } = trpc.claw.listSkills.useQuery(
+    { adoptId: myAdoptIdForBack || "" },
+    { enabled: Boolean(myAdoptIdForBack), retry: false }
+  );
+  const composerSkills = useMemo(() => flattenComposerSkills(lingxiaSkills), [lingxiaSkills]);
+  const selectedComposerSkill = useMemo(
+    () => composerSkills.find((skill) => skill.id === selectedComposerSkillId) || null,
+    [composerSkills, selectedComposerSkillId]
+  );
+  useEffect(() => {
+    if (selectedComposerSkillId && !composerSkills.some((skill) => skill.id === selectedComposerSkillId)) {
+      setSelectedComposerSkillId("");
+    }
+  }, [composerSkills, selectedComposerSkillId]);
 
   // 拉 events 用于解析每个已提交成员的附件列表（来自 member_completed event payload.attachments）
   const eventsQ = trpc.coop.listEvents.useQuery(
     { sessionId, sinceId: 0, limit: 200 },
     { enabled: Boolean(sessionId), refetchInterval: 5000 }
   );
+  const sendGroupMessageMut = trpc.coop.sendMessage.useMutation({
+    onSuccess: () => {
+      setGroupInput("");
+      eventsQ.refetch();
+    },
+    onError: (error) => toast.error(error.message || "发送失败"),
+  });
   // 按 requestId 索引附件列表
   const attachmentsByRequestId = useMemo(() => {
     const map = new Map<number, EventAttachment[]>();
@@ -143,9 +227,178 @@ export default function CoopSession() {
 
   const { session, members, viewerRole } = data;
   const currentUserId = (data as any).viewerUserId as number | undefined;
+  const creatorInfo = (data as any).creator as { userId?: number; name?: string | null; email?: string | null } | undefined;
   const isMember = Boolean((data as any).viewerIsMember);
   const isCreator = Boolean((data as any).viewerIsCreator);
+  const creatorDisplayName = isCreator
+    ? "我"
+    : (creatorInfo?.name || creatorInfo?.email || `发起人 #${session.creatorUserId}`);
   const sessionStatus = sessionStatusMeta(session.status);
+  const myCard = members.find((m: any) => m.targetUserId === currentUserId);
+  const completedMembers = members.filter((m: any) => m.status === "completed" && m.resultSummary);
+  const showAgentDraft = Boolean(isCreator || (myCard && ["pending", "approved", "running"].includes(myCard.status)));
+  const events = ((eventsQ.data?.events as any[]) || []);
+  const groupMessages = events
+    .filter((event) => event.eventType === "group_message")
+    .map((event) => {
+      let payload: any = event.payload;
+      if (typeof payload === "string") {
+        try { payload = JSON.parse(payload); } catch { payload = null; }
+      }
+      const member = members.find((m: any) => m.targetUserId === event.actorUserId);
+      const name = event.actorUserId === session.creatorUserId
+        ? (event.actorUserId === currentUserId ? "我" : (creatorInfo?.name || creatorInfo?.email || `发起人 #${event.actorUserId}`))
+        : (member?.targetUserName || member?.targetEmail || `#${event.actorUserId}`);
+      return {
+        id: Number(event.id || 0),
+        actorUserId: Number(event.actorUserId || 0),
+        name,
+        text: String(payload?.text || ""),
+        attachments: Array.isArray(payload?.attachments) ? payload.attachments as EventAttachment[] : [],
+        createdAt: event.createdAt,
+      };
+    })
+    .filter((message) => message.text)
+    .sort((a, b) => a.id - b.id);
+  const sharedAttachments = [
+    ...completedMembers.flatMap((m: any) =>
+      (attachmentsByRequestId.get(m.requestId) || []).map((attachment) => ({
+        ...attachment,
+        memberName: m.targetUserName || m.targetEmail || `#${m.targetUserId}`,
+      }))
+    ),
+    ...groupMessages.flatMap((message) =>
+      (message.attachments || []).map((attachment) => ({
+        ...attachment,
+        memberName: message.name,
+      }))
+    ),
+  ];
+  const runAgentDraft = async (text: string) => {
+    const clean = text.trim();
+    if (!clean || !myAdoptIdForBack || agentStreaming) return;
+    setAgentDraft("");
+    setAgentAttachments([]);
+    setAgentStreaming(true);
+    const controller = new AbortController();
+    agentAbortRef.current = controller;
+    try {
+      const apiBase = (import.meta as any).env?.VITE_API_URL || "";
+      const resp = await fetch(`${apiBase}/api/claw/chat-stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        signal: controller.signal,
+        body: JSON.stringify({
+          adoptId: myAdoptIdForBack,
+          message: clean,
+          epochLabel: `coop-${sessionId}-agent-draft`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64),
+          ...(selectedComposerSkill?.id ? { selectedSkillId: selectedComposerSkill.id } : {}),
+        }),
+      });
+      if (!resp.ok || !resp.body) throw new Error(`请求失败 (${resp.status})`);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+            continue;
+          }
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6).trim();
+          if (raw === "[DONE]") return;
+          try {
+            const chunk = JSON.parse(raw);
+            if (chunk?.__perf || currentEvent === "agent_status") {
+              currentEvent = "";
+              continue;
+            }
+            if (currentEvent === "workspace_files") {
+              const wsAdoptId = String(chunk?.adoptId || myAdoptIdForBack || "");
+              const files = Array.isArray(chunk?.files) ? chunk.files : [];
+              const attachments = files
+                .map((file: any) => workspaceFileToAttachment(file, wsAdoptId))
+                .filter(Boolean) as EventAttachment[];
+              if (attachments.length > 0) {
+                setAgentAttachments((prev) => {
+                  const seen = new Set(prev.map((item) => `${item.adoptId || ""}:${item.path || item.url}`));
+                  const next = [...prev];
+                  for (const attachment of attachments) {
+                    const key = `${attachment.adoptId || ""}:${attachment.path || attachment.url}`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    next.push(attachment);
+                  }
+                  return next;
+                });
+              }
+              currentEvent = "";
+              continue;
+            }
+            const delta =
+              chunk?.choices?.[0]?.delta?.content ||
+              chunk?.delta?.content ||
+              chunk?.content ||
+              "";
+            if (delta) setAgentDraft((prev) => prev + delta);
+            currentEvent = "";
+          } catch {}
+        }
+      }
+    } catch (error: any) {
+      if (error?.name !== "AbortError") toast.error(error?.message || "智能体生成失败");
+    } finally {
+      setAgentStreaming(false);
+      agentAbortRef.current = null;
+    }
+  };
+
+  const sendGroupMessage = () => {
+    if (!groupInput.trim()) return false;
+    if (agentMode) {
+      void runAgentDraft(groupInput);
+      setGroupInput("");
+      return false;
+    }
+    sendGroupMessageMut.mutate({ sessionId, text: groupInput.trim() });
+    return false;
+  };
+
+  const sendAgentDraftToGroup = () => {
+    const text = agentDraft.trim();
+    if (!text || agentStreaming) return;
+    sendGroupMessageMut.mutate(
+      { sessionId, text, attachments: agentAttachments },
+      {
+        onSuccess: () => {
+          setAgentDraft("");
+          setAgentAttachments([]);
+          setAgentMode(false);
+          setGroupInput("");
+          eventsQ.refetch();
+        },
+      }
+    );
+  };
+
+  const copyAgentDraft = async () => {
+    const text = agentDraft.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("已复制智能体草稿");
+    } catch {
+      toast.error("复制失败");
+    }
+  };
 
   return (
     <div className="coop-session-themed">
@@ -177,135 +430,314 @@ export default function CoopSession() {
         </div>
       </div>
 
-      {/* 原始消息 */}
-      {session.originMessage && (
-        <div className="coop-session-shell coop-session-shell--top">
-          <Card className="coop-session-card coop-session-origin">
-            <div className="coop-session-section-label">发起任务</div>
-            <div className="coop-session-body-text">{session.originMessage}</div>
-          </Card>
-        </div>
-      )}
-
-      {/* 成员卡片 —— 接收方自己的卡片占整行宽度（因要内嵌 ChatBox），其他成员正常 grid */}
-      <div className="coop-session-shell coop-session-shell--main">
-        {/* 我的卡片（占整行，底部可展开 ChatBox） */}
-        {(() => {
-          const myCard = members.find((m: any) => m.targetUserId === currentUserId);
-          if (!myCard) return null;
-          const meta = memberStatusMeta(myCard.status);
-          const Icon = meta.icon;
-          // running / approved 都算"已接手"：可以展开 ChatBox 继续干活
-          const showChatBox = ["approved", "running"].includes(myCard.status);
-          return (
-            <Card className="coop-session-card coop-session-member-card coop-session-member-card--mine">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex-1 min-w-0">
-                  <div className="coop-session-member-name">
-                    {myCard.targetUserName || myCard.targetEmail || `#${myCard.targetUserId}`}
-                    <span className="coop-session-me-pill">我</span>
+      <div className={`coop-session-shell coop-session-shell--main ${sideOpen ? "" : "coop-session-shell--side-collapsed"}`}>
+        <div className={`coop-group-layout ${sideOpen ? "" : "coop-group-layout--side-collapsed"}`}>
+          <section className="coop-group-main" aria-label="群消息">
+            {!sideOpen ? (
+              <button
+                type="button"
+                className="coop-side-toggle coop-side-toggle--floating"
+                onClick={() => setSideOpen(true)}
+                aria-label="显示群成员和群空间"
+                title="显示群成员和群空间"
+              >
+                <PanelRightOpen className="w-4 h-4" />
+                <span>群空间</span>
+              </button>
+            ) : null}
+            <div className="coop-group-thread">
+              {session.originMessage ? (
+                <article className={`coop-group-message ${isCreator ? "coop-group-message--mine" : ""}`}>
+                  <div className="coop-group-message__avatar">发</div>
+                  <div className="coop-group-message__body">
+                    <div className="coop-group-message__meta">
+                      <span>{creatorDisplayName}</span>
+                      <span>发起任务</span>
+                    </div>
+                    <div className="coop-group-message__bubble">
+                      <div className="coop-session-body-text"><ChatMarkdown content={session.originMessage} /></div>
+                    </div>
                   </div>
-                  <div className="coop-session-member-org">
-                    {formatMemberOrg(myCard)}
+                </article>
+              ) : null}
+
+              {groupMessages.map((message) => (
+                <article
+                  className={`coop-group-message ${message.actorUserId === currentUserId ? "coop-group-message--mine" : ""}`}
+                  key={`group-${message.id}`}
+                >
+                  <div className="coop-group-message__avatar">{String(message.name || "?").slice(0, 1)}</div>
+                  <div className="coop-group-message__body">
+                    <div className="coop-group-message__meta">
+                      <span>{message.name}</span>
+                      <span>{message.createdAt ? new Date(message.createdAt).toLocaleString("zh-CN", { hour12: false }) : "群消息"}</span>
+                    </div>
+                    <div className="coop-group-message__bubble">
+                      <div className="coop-session-body-text"><ChatMarkdown content={message.text} /></div>
+                      <AttachmentList attachments={message.attachments || []} />
+                    </div>
+                  </div>
+                </article>
+              ))}
+
+              {completedMembers.map((member: any) => (
+                <article
+                  className={`coop-group-message ${member.targetUserId === currentUserId ? "coop-group-message--mine" : ""}`}
+                  key={member.requestId}
+                >
+                  <div className="coop-group-message__avatar">{String(member.targetUserName || member.targetEmail || "?").slice(0, 1)}</div>
+                  <div className="coop-group-message__body">
+                    <div className="coop-group-message__meta">
+                      <span>{member.targetUserName || member.targetEmail || `#${member.targetUserId}`}</span>
+                      <span>确认发送了智能体结果</span>
+                    </div>
+                    <div className="coop-group-message__bubble">
+                      <div className="coop-session-result-box coop-session-result-box--message">
+                        <ChatMarkdown content={member.resultSummary} />
+                      </div>
+                      <AttachmentList attachments={attachmentsByRequestId.get(member.requestId) || []} />
+                    </div>
+                  </div>
+                </article>
+              ))}
+
+              {session.status === "published" && session.finalSummary ? (
+                <article className="coop-group-message coop-group-message--final">
+                  <div className="coop-group-message__avatar"><CheckCircle2 className="w-4 h-4" /></div>
+                  <div className="coop-group-message__body">
+                    <div className="coop-group-message__meta">
+                      <span>协作最终汇总</span>
+                      {(session as any).publishedAt ? (
+                        <span>{new Date((session as any).publishedAt).toLocaleString("zh-CN", { hour12: false })}</span>
+                      ) : null}
+                    </div>
+                    <div className="coop-group-message__bubble">
+                      <div className="coop-session-final-box"><ChatMarkdown content={session.finalSummary} /></div>
+                    </div>
+                  </div>
+                </article>
+              ) : null}
+
+              {!session.originMessage && groupMessages.length === 0 && completedMembers.length === 0 && !session.finalSummary ? (
+                <div className="coop-group-empty">描述你想让大家协作处理的任务，第一条消息会作为协作开场。</div>
+              ) : null}
+            </div>
+
+            {agentMode ? (
+              <div className="coop-inline-agent-panel">
+                <div className="coop-inline-agent-panel__head">
+                  <div>
+                    <div className="coop-session-card-title">我的智能体</div>
+                    <div className="coop-session-meta">输入框当前会发送给智能体，确认草稿后再发到群里。</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {agentStreaming ? (
+                      <Button size="sm" variant="outline" className="coop-agent-panel-button" onClick={() => agentAbortRef.current?.abort()}>
+                        <Square className="w-3 h-3 mr-1" /> 停止
+                      </Button>
+                    ) : null}
+                    <Button size="sm" variant="ghost" className="coop-agent-panel-button" onClick={() => setAgentMode(false)}>收起</Button>
                   </div>
                 </div>
-                <span className={`badge ${meta.badgeClass} inline-flex items-center gap-1 shrink-0`}>
-                  <Icon className="w-3 h-3" /> {meta.label}
-                </span>
+                <div className="coop-inline-agent-panel__body">
+                  {agentDraft ? (
+                    <article className="coop-group-message coop-group-message--mine coop-group-message--agent-draft">
+                      <div className="coop-group-message__avatar"><Sparkles className="w-4 h-4" /></div>
+                      <div className="coop-group-message__body">
+                        <div className="coop-group-message__meta">
+                          <span>我的智能体</span>
+                          <span>{agentStreaming ? "生成中" : "草稿"}</span>
+                        </div>
+                        <div className="coop-group-message__bubble">
+                          <div className="coop-inline-agent-draft">
+                            <ChatMarkdown content={agentDraft} />
+                          </div>
+                          <AttachmentList attachments={agentAttachments} />
+                        </div>
+                      </div>
+                    </article>
+                  ) : (
+                    <div className="coop-group-empty coop-group-empty--small">
+                      {agentStreaming ? "智能体正在生成..." : "在下方输入框里写给智能体的要求，然后点击发送。"}
+                    </div>
+                  )}
+                </div>
+                <div className="coop-inline-agent-panel__actions">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="coop-agent-panel-button"
+                    onClick={copyAgentDraft}
+                    disabled={!agentDraft.trim()}
+                  >
+                    <Copy className="w-3 h-3 mr-1" /> 复制
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="coop-agent-panel-button coop-agent-panel-button--primary text-white"
+                    style={{ background: "var(--oc-success)" }}
+                    onClick={sendAgentDraftToGroup}
+                    disabled={!agentDraft.trim() || agentStreaming || sendGroupMessageMut.isPending}
+                  >
+                    发送到群
+                  </Button>
+                </div>
               </div>
-              <div className="coop-session-section-label">分配给我的子任务</div>
-              <div className="coop-session-task-box">{myCard.taskSummary || "—"}</div>
-              {/* pending → 接手 / 修改 / 拒绝 */}
-              {myCard.status === "pending" ? (
-                <InvitationActions
-                  requestId={myCard.requestId}
-                  originalSubtask={myCard.taskSummary || ""}
-                  onAgree={(modified) => agreeMut.mutate({ requestId: myCard.requestId, modifiedSubtask: modified })}
-                  onReject={(reason) => rejectMut.mutate({ requestId: myCard.requestId, reason })}
-                  busy={agreeMut.isPending || rejectMut.isPending}
-                />
-              ) : null}
-              {/* 接手后（approved/running）→ 内嵌 CoopChatBox */}
-              {showChatBox ? (
-                <CoopChatBox
-                  sessionId={sessionId}
-                  requestId={myCard.requestId}
-                  subtask={myCard.taskSummary || ""}
-                  coopTitle={session.title || "协作任务"}
-                  onSubmitted={() => refetch()}
-                />
-              ) : null}
-              {/* 已提交 */}
-              {myCard.status === "completed" && myCard.resultSummary ? (
-                <>
-                  <div className="coop-session-result-box">
-                    {myCard.resultSummary}
-                  </div>
-                  <AttachmentList attachments={attachmentsByRequestId.get(myCard.requestId) || []} />
-                </>
-              ) : null}
-            </Card>
-          );
-        })()}
+            ) : null}
 
-        {/* 其他成员卡片（不含我，3 列 grid） */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {members.filter((m: any) => m.targetUserId !== currentUserId).map((m) => {
-            const meta = memberStatusMeta(m.status);
-            const Icon = meta.icon;
-            return (
-              <Card key={m.requestId} className="coop-session-card coop-session-member-card">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="coop-session-member-name truncate">{m.targetUserName || m.targetEmail || `#${m.targetUserId}`}</div>
-                    <div className="coop-session-member-org">
-                      {formatMemberOrg(m)}
-                    </div>
-                  </div>
-                  <span className={`badge ${meta.badgeClass} inline-flex items-center gap-1 shrink-0`}>
-                    <Icon className="w-3 h-3" /> {meta.label}
+            <div className="coop-group-composer">
+              <ChatInput
+                value={groupInput}
+                onChange={setGroupInput}
+                onSend={() => sendGroupMessage()}
+                disabled={sendGroupMessageMut.isPending || agentStreaming}
+                placeholder={
+                  agentMode
+                    ? "输入给智能体的要求..."
+                    : !session.originMessage && groupMessages.length === 0
+                      ? "描述你想让大家协作处理的任务..."
+                      : "输入群消息..."
+                }
+                maxLength={4000}
+                historyStorageKey={`coop_group_input_${sessionId}`}
+                messages={[]}
+                showUtilityButtons={false}
+                leftControls={agentMode && selectedComposerSkill ? (
+                  <span className="lingxia-composer-skill-chip" title={`本轮优先使用：${selectedComposerSkill.label}`}>
+                    <Wand2 size={13} strokeWidth={1.8} />
+                    <span>{selectedComposerSkill.label}</span>
+                    <button
+                      type="button"
+                      aria-label="取消选择技能"
+                      onClick={() => setSelectedComposerSkillId("")}
+                    >
+                      <X size={12} strokeWidth={1.8} />
+                    </button>
                   </span>
-                </div>
-                <div className="coop-session-section-label">子任务</div>
-                <div className="coop-session-task-box">{m.taskSummary || "—"}</div>
-                {/* 完成后的结果 */}
-                {m.status === "completed" && m.resultSummary ? (
-                  <>
-                    <div className="coop-session-result-box">
-                      {m.resultSummary}
-                    </div>
-                    <AttachmentList attachments={attachmentsByRequestId.get(m.requestId) || []} />
-                  </>
                 ) : null}
-              </Card>
-            );
-          })}
+                rightControls={(
+                  <>
+                    <Select
+                      value={selectedComposerSkillId || "__none"}
+                      onValueChange={(value) => setSelectedComposerSkillId(value === "__none" ? "" : value)}
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        aria-label="选择技能"
+                        className="lingxia-composer-skill-select focus:ring-0 focus:ring-offset-0"
+                        disabled={!agentMode || composerSkills.length === 0 || agentStreaming}
+                        title={!agentMode ? "开启智能体回复后选择技能" : composerSkills.length === 0 ? "当前智能体没有可用技能" : "选择本轮智能体回复优先使用的技能"}
+                      >
+                        <span className="lingxia-composer-skill-select__label">
+                          <Wand2 size={13} strokeWidth={1.8} />
+                          <span>技能</span>
+                        </span>
+                      </SelectTrigger>
+                      <SelectContent
+                        style={{
+                          background: "var(--oc-bg)",
+                          border: "1px solid var(--oc-border)",
+                          borderRadius: 10,
+                          minWidth: 260,
+                          maxWidth: 360,
+                          boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
+                          padding: "4px",
+                        }}
+                      >
+                        <SelectItem value="__none" className="lingxia-skill-select-item">
+                          <span style={{ color: "var(--oc-text-secondary)" }}>不指定技能</span>
+                        </SelectItem>
+                        {composerSkills.map((skill) => (
+                          <SelectItem key={skill.id} value={skill.id} className="lingxia-skill-select-item">
+                            <span className="lingxia-skill-select-item__main">
+                              <span className="lingxia-skill-select-item__name">{skill.label}</span>
+                              {skill.desc ? <span className="lingxia-skill-select-item__desc">{skill.desc}</span> : null}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <button
+                      type="button"
+                      className={`lingxia-toolbar-icon coop-agent-reply-button ${agentMode ? "is-active" : ""}`}
+                      onClick={() => setAgentMode((v) => !v)}
+                      disabled={!showAgentDraft}
+                      title={
+                        showAgentDraft
+                          ? agentMode ? "关闭智能体回复" : "智能体回复"
+                          : myCard
+                            ? "当前状态不能使用智能体回复"
+                            : "只有协作成员或发起人可以使用智能体回复"
+                      }
+                    >
+                      <Sparkles size={15} />
+                      <span>智能体回复</span>
+                    </button>
+                  </>
+                )}
+              />
+            </div>
+          </section>
+
+          {sideOpen ? (
+          <aside className="coop-group-side" aria-label="群空间">
+            <Card className="coop-session-card coop-group-space-card">
+              <div className="coop-side-card-head">
+                <div className="coop-session-card-title">群成员</div>
+                <button
+                  type="button"
+                  className="coop-side-toggle"
+                  onClick={() => setSideOpen(false)}
+                  aria-label="隐藏群成员和群空间"
+                  title="隐藏群成员和群空间"
+                >
+                  <PanelRightClose className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="coop-group-member-list">
+                {members.map((member: any) => {
+                  const name = member.targetUserName || member.targetEmail || `#${member.targetUserId}`;
+                  const role = formatMemberRole(member);
+                  const orgUnit = formatMemberOrg(member);
+                  return (
+                    <div className="coop-agent-card coop-group-member-card" key={member.requestId}>
+                      <div className="coop-agent-card__icon">
+                        <Bot size={16} />
+                      </div>
+                      <div className="coop-agent-card__body">
+                        <div className="coop-agent-card__name">
+                          {name}
+                          {member.targetUserId === currentUserId ? <span className="coop-session-me-pill">我</span> : null}
+                        </div>
+                        <div className="coop-agent-card__role">{orgUnit} - {role}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card className="coop-session-card coop-group-space-card">
+              <div className="coop-session-card-title flex items-center gap-2"><FolderOpen className="w-4 h-4" /> 群空间</div>
+              {sharedAttachments.length > 0 ? (
+                <div className="coop-group-files">
+                  {sharedAttachments.map((file: any, index: number) => (
+                    <a key={`${file.url}-${index}`} href={file.url} target="_blank" rel="noopener noreferrer" className="coop-session-attachment-link">
+                      <Download className="w-3 h-3 shrink-0" />
+                      <span className="flex-1 truncate">{file.name}</span>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="coop-group-empty coop-group-empty--small">暂无共享文件</div>
+              )}
+            </Card>
+
+            {isCreator ? <ConsolidationPanel sessionId={sessionId} session={session} members={members} onRefresh={refetch} /> : null}
+          </aside>
+          ) : null}
         </div>
 
-        {/* ── 已发布的最终结果（所有 member 都能看，发起人也能看）── */}
-        {session.status === "published" && session.finalSummary ? (
-          <Card className="coop-session-card coop-session-published-card">
-            <div className="flex items-center gap-2 mb-3">
-              <CheckCircle2 className="w-4 h-4" style={{ color: "var(--oc-success)" }} />
-              <div className="coop-session-card-title">协作最终汇总（已发布）</div>
-              {(session as any).publishedAt ? (
-                <span className="text-[11px] text-muted-foreground ml-auto">
-                  {new Date((session as any).publishedAt).toLocaleString("zh-CN", { hour12: false })}
-                </span>
-              ) : null}
-            </div>
-            <div className="coop-session-final-box">
-              {session.finalSummary}
-            </div>
-            {/* 发布者信息 */}
-            <div className="coop-session-meta mt-2">
-              发布人：{isCreator ? "我（发起人）" : `#${session.creatorUserId}`}
-            </div>
-          </Card>
-        ) : null}
-
-        {/* ── Step 5: 发起人汇总/发布面板（仅发起人能编辑/发布/解散）── */}
-        {isCreator ? <ConsolidationPanel sessionId={sessionId} session={session} members={members} onRefresh={refetch} /> : null}
       </div>
     </div>
   );
@@ -344,10 +776,8 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
     onError: (e) => toast.error(e.message || "关闭失败"),
   });
 
-  const TERMINAL = new Set(["completed", "rejected", "failed", "cancelled"]);
-  const allTerminal = members.every((m: any) => TERMINAL.has(m.status));
   const anyCompleted = members.some((m: any) => m.status === "completed");
-  const readyToConsolidate = allTerminal && anyCompleted;
+  const readyToConsolidate = anyCompleted;
   const isPublished = session.status === "published";
   const isClosed = session.status === "closed" || session.status === "dissolved";
 
@@ -384,12 +814,12 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
         <div>
           <div className="coop-session-card-title">汇总 · 发布</div>
           <div className="coop-session-meta mt-0.5">
-            {isPublished ? "已发布，全员可见" : isClosed ? "协作已关闭" : readyToConsolidate ? "成员全部完成，可以汇总" : "等待成员完成执行..."}
+            {isPublished ? "已发布，全员可见" : isClosed ? "协作已关闭" : readyToConsolidate ? "已有成员回复，可以汇总" : "等待成员回复..."}
           </div>
         </div>
         <div className="flex gap-2">
           {!isClosed ? (
-            <Button size="sm" variant="ghost" className="text-foreground" onClick={() => setCloseDialogOpen(true)} disabled={closeMut.isPending}>
+            <Button size="sm" variant="ghost" className="coop-session-close-button" onClick={() => setCloseDialogOpen(true)} disabled={closeMut.isPending}>
               关闭/解散
             </Button>
           ) : null}
@@ -454,42 +884,5 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
         </>
       ) : null}
     </Card>
-  );
-}
-
-// ── 被邀请者同意/拒绝 UI ──
-function InvitationActions({ requestId, originalSubtask, onAgree, onReject, busy }: {
-  requestId: number;
-  originalSubtask: string;
-  onAgree: (modified?: string) => void;
-  onReject: (reason?: string) => void;
-  busy: boolean;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [modified, setModified] = useState(originalSubtask);
-
-  return (
-    <div className="coop-session-invitation-actions">
-      {editing ? (
-        <div className="space-y-2">
-          <Textarea
-            value={modified}
-            onChange={(e) => setModified(e.target.value)}
-            className="coop-session-textarea text-xs min-h-[60px]"
-            placeholder="修改子任务内容..."
-          />
-          <div className="flex gap-2">
-            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setEditing(false); setModified(originalSubtask); }}>取消</Button>
-            <Button size="sm" className="h-7 text-xs" onClick={() => { onAgree(modified !== originalSubtask ? modified : undefined); setEditing(false); }} disabled={busy}>确认同意</Button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex gap-2">
-          <Button size="sm" className="h-7 text-xs text-white" style={{ background: "var(--oc-success)" }} onClick={() => onAgree()} disabled={busy}>接手 →</Button>
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEditing(true)} disabled={busy}>修改子任务</Button>
-          <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:bg-destructive/10" onClick={() => onReject()} disabled={busy}>拒绝</Button>
-        </div>
-      )}
-    </div>
   );
 }

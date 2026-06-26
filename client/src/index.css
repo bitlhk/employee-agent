@@ -461,8 +461,289 @@
 /* ── 协作工作台 ───────────────────────────────────────── */
 .coop-workbench {
   width: 100%;
-  max-width: 1180px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
+}
+
+.coop-dashboard-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 16px;
+  align-items: start;
+}
+
+.coop-dashboard-main {
+  min-width: 0;
+}
+
+.coop-dashboard-side {
+  min-width: 0;
+}
+
+.coop-side-tab {
+  width: fit-content;
+  max-width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  margin-bottom: 12px;
+  border: 1px solid color-mix(in oklab, var(--banking-brand-red) 28%, transparent);
+  border-radius: var(--banking-radius-md);
+  background: var(--banking-brand-red-subtle);
+  color: var(--banking-brand-red);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.coop-side-tab span {
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in oklab, currentColor 10%, transparent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.coop-agents-panel .coop-create-action {
+  width: 100%;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.coop-agents-panel {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  height: calc(100vh - 180px);
+  max-height: 760px;
+  min-height: 360px;
+  flex-direction: column;
+  padding: 14px;
+  border: 1px solid var(--oc-border);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--oc-card) 78%, transparent);
+}
+
+.coop-agents-panel__eyebrow {
+  margin-bottom: 3px;
+  color: var(--oc-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.coop-agents-panel__desc {
+  margin: 10px 0 12px;
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.coop-agents-panel__empty {
+  min-height: 180px;
+  padding: 18px 12px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--oc-text-secondary) 6%, transparent);
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.coop-agent-list-wrap {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.coop-agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.coop-agent-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in oklab, var(--oc-border) 78%, transparent);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--oc-card) 90%, transparent);
+}
+
+.coop-agent-card--selectable {
+  width: 100%;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+
+.coop-agent-card--selectable:hover,
+.coop-agent-card--selectable[data-selected="true"] {
+  border-color: color-mix(in oklab, var(--banking-brand-red) 28%, var(--oc-border));
+  background: color-mix(in oklab, var(--banking-brand-red) 7%, var(--oc-card));
+}
+
+.coop-agent-card--selectable:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--banking-brand-red) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.coop-agent-card__check {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--oc-text-tertiary);
+}
+
+.coop-agent-card--selectable[data-selected="true"] .coop-agent-card__check {
+  color: var(--banking-brand-red);
+}
+
+.coop-agent-card__icon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--banking-brand-red-subtle);
+  color: var(--banking-brand-red);
+}
+
+.coop-agent-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.coop-agent-card__name {
+  overflow: hidden;
+  color: var(--banking-text);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coop-agent-card__role {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coop-agent-card__action {
+  height: 28px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--oc-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--banking-text);
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background .15s, border-color .15s;
+}
+
+.coop-agent-card__action:hover {
+  border-color: color-mix(in oklab, var(--banking-brand-red) 24%, transparent);
+  background: var(--banking-brand-red-subtle);
+  color: var(--banking-brand-red);
+}
+
+.coop-selected-agents {
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px dashed color-mix(in oklab, var(--oc-border) 85%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--oc-bg) 38%, transparent);
+}
+
+.coop-selected-agents__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--banking-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.coop-selected-agents__head button {
+  border: 0;
+  background: transparent;
+  color: var(--oc-text-secondary);
+  padding: 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.coop-selected-agents__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.coop-selected-agents__chips span {
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--banking-brand-red) 9%, transparent);
+  color: var(--banking-text);
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coop-selected-agents p {
+  margin: 7px 0 0;
+  color: var(--oc-text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.coop-agents-panel__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.coop-agents-panel__actions .page-primary-action,
+.coop-agents-panel__actions .page-secondary-action {
+  width: 100%;
+  min-height: 34px;
 }
 
 .coop-office-home {
@@ -673,63 +954,6 @@
   line-height: 1.6;
 }
 
-.coop-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.coop-summary-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 70px;
-  padding: 12px;
-  border: 1px solid var(--oc-border);
-  border-radius: 12px;
-  background: color-mix(in oklab, var(--oc-card) 78%, transparent);
-}
-
-.coop-summary-item__icon {
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  color: var(--oc-text-secondary);
-  background: color-mix(in oklab, var(--oc-text-secondary) 8%, transparent);
-}
-
-.coop-summary-item[data-tone="warning"] .coop-summary-item__icon {
-  color: var(--oc-warning);
-  background: color-mix(in oklab, var(--oc-warning) 14%, transparent);
-}
-
-.coop-summary-item[data-tone="info"] .coop-summary-item__icon {
-  color: var(--oc-info);
-  background: color-mix(in oklab, var(--oc-info) 12%, transparent);
-}
-
-.coop-summary-item[data-tone="accent"] .coop-summary-item__icon {
-  color: var(--banking-brand-red);
-  background: var(--banking-brand-red-subtle);
-}
-
-.coop-summary-item__value {
-  font-size: 18px;
-  line-height: 1.1;
-  font-weight: 700;
-  color: var(--banking-text);
-}
-
-.coop-summary-item__label {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--oc-text-secondary);
-}
-
 .coop-workbench__list-head {
   display: flex;
   align-items: center;
@@ -738,32 +962,57 @@
   margin-bottom: 12px;
 }
 
+.coop-workbench__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.coop-create-action {
+  min-height: 32px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
 .coop-filter-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .coop-filter-tab {
-  height: 30px;
-  display: inline-flex;
+  height: 32px;
+  display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid var(--oc-border);
+  gap: 8px;
+  padding: 0 12px;
+  border-radius: var(--banking-radius-md);
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--oc-text-secondary);
-  font-size: 12px;
+  color: var(--banking-text-muted);
+  cursor: pointer;
+  font-size: 13px;
   font-weight: 500;
   transition: background .15s, border-color .15s, color .15s;
+  white-space: nowrap;
 }
 
-.coop-filter-tab:hover,
 .coop-filter-tab[data-active="true"] {
-  border-color: color-mix(in oklab, var(--banking-brand-red) 24%, transparent);
   background: var(--banking-brand-red-subtle);
+  border-color: color-mix(in oklab, var(--banking-brand-red) 28%, transparent);
   color: var(--banking-brand-red);
+  font-weight: 700;
+}
+
+.coop-filter-tab:hover:not([data-active="true"]) {
+  background: var(--banking-card);
+  border-color: var(--banking-border);
+  color: var(--banking-text);
 }
 
 .coop-filter-tab span {
@@ -777,6 +1026,18 @@
   font-size: 11px;
 }
 
+.coop-refresh-button {
+  border-color: var(--oc-border) !important;
+  background: transparent !important;
+  color: var(--banking-text) !important;
+}
+
+.coop-refresh-button:hover:not(:disabled) {
+  border-color: var(--oc-border-strong) !important;
+  background: color-mix(in oklab, var(--oc-text-secondary) 8%, transparent) !important;
+  color: var(--banking-text) !important;
+}
+
 .coop-task-table {
   border: 1px solid var(--oc-border);
   border-radius: 12px;
@@ -787,14 +1048,19 @@
 .coop-task-table__head,
 .coop-task-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1.6fr) 128px 130px minmax(180px, 1fr) 104px 144px;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1.55fr) 76px minmax(0, .9fr) 78px minmax(0, .8fr) 104px 32px;
+  gap: 8px;
   align-items: center;
+}
+
+.coop-task-table__head > *,
+.coop-task-row > * {
+  min-width: 0;
 }
 
 .coop-task-table__head {
   min-height: 38px;
-  padding: 0 14px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--oc-border);
   color: var(--oc-text-secondary);
   font-size: 12px;
@@ -809,7 +1075,7 @@
 .coop-task-row {
   position: relative;
   min-height: 74px;
-  padding: 13px 14px;
+  padding: 13px 12px;
   cursor: pointer;
   border-bottom: 1px solid color-mix(in oklab, var(--oc-border) 72%, transparent);
   transition: background .15s, box-shadow .15s;
@@ -861,10 +1127,22 @@
 .coop-task-row__meta,
 .coop-task-row__date,
 .coop-task-row__progress-label,
+.coop-task-row__next,
 .coop-task-row__role {
   color: var(--oc-text-secondary);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.coop-task-row__next {
+  color: var(--banking-text);
+  font-weight: 500;
+}
+
+.coop-task-row__date {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .coop-task-row__meta {
@@ -903,13 +1181,13 @@
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: center;
+  min-width: 0;
 }
 
 .coop-task-row__more {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -922,6 +1200,7 @@
 .coop-task-row__more:hover {
   background: color-mix(in oklab, var(--oc-text-secondary) 8%, transparent);
   color: var(--banking-text);
+  border-color: var(--oc-border-strong);
 }
 
 .coop-row-menu {
@@ -930,6 +1209,7 @@
   right: 0;
   z-index: 50;
   min-width: 164px;
+  max-width: min(220px, calc(100vw - 32px));
   padding: 5px;
   border: 1px solid var(--oc-border);
   border-radius: var(--banking-radius-md);
@@ -970,6 +1250,14 @@
 }
 
 @media (max-width: 1100px) {
+  .coop-dashboard-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .coop-agents-panel {
+    position: static;
+    height: min(560px, calc(100vh - 180px));
+    max-height: none;
+  }
   .coop-task-table__head {
     display: none;
   }
@@ -981,9 +1269,6 @@
   .coop-task-row__actions {
     justify-content: flex-start;
   }
-  .coop-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 680px) {
@@ -993,8 +1278,8 @@
     align-items: stretch;
     flex-direction: column;
   }
-  .coop-summary-grid {
-    grid-template-columns: 1fr;
+  .coop-workbench__actions {
+    justify-content: flex-start;
   }
 }
 
@@ -5254,6 +5539,95 @@ html:has(:root[data-theme-mode="light"]) body {
   background: rgba(0,0,0,0.06) !important;
 }
 
+.lingxia-composer-skill-select {
+  height: 28px;
+  min-width: 0;
+  padding: 0 7px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--oc-text-secondary);
+  font-size: var(--oc-text-sm);
+  font-weight: var(--oc-weight-normal);
+}
+.lingxia-composer-skill-select:hover {
+  background: rgba(128,128,128,0.12);
+  color: var(--oc-text-primary);
+}
+.lingxia-composer-skill-select__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.lingxia-composer-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 190px;
+  height: 24px;
+  padding: 0 6px 0 8px;
+  border: 1px solid color-mix(in oklab, var(--oc-accent) 30%, var(--oc-border));
+  border-radius: 999px;
+  color: var(--oc-text-primary);
+  background: color-mix(in oklab, var(--oc-accent) 10%, transparent);
+  font-size: 12px;
+  line-height: 1;
+}
+.lingxia-composer-skill-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lingxia-composer-skill-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--oc-text-secondary);
+  cursor: pointer;
+}
+.lingxia-composer-skill-chip button:hover {
+  background: rgba(128,128,128,0.16);
+  color: var(--oc-text-primary);
+}
+.lingxia-skill-select-item {
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.lingxia-skill-select-item__main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.lingxia-skill-select-item__name {
+  max-width: 300px;
+  overflow: hidden;
+  color: var(--oc-text-primary);
+  font-size: var(--oc-text-sm);
+  font-weight: var(--oc-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lingxia-skill-select-item__desc {
+  max-width: 300px;
+  overflow: hidden;
+  color: var(--oc-text-tertiary);
+  font-size: 11px;
+  font-weight: var(--oc-weight-normal);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 发送按钮 */
 .lingxia-send-btn {
   display: flex;
@@ -6259,8 +6633,382 @@ body[data-admin-light="true"] .admin-collaboration-tab .divide-y > :not([hidden]
 }
 
 .coop-session-shell--main {
+  max-width: none;
   padding-top: 16px;
-  padding-bottom: 28px;
+  padding-bottom: 16px;
+  padding-right: 24px;
+}
+
+.coop-group-layout {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  height: calc(100vh - 100px);
+  min-height: 560px;
+}
+
+.coop-group-main,
+.coop-group-side {
+  min-width: 0;
+}
+
+.coop-group-main {
+  position: relative;
+  display: flex;
+  width: min(100%, 900px);
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.coop-group-side {
+  position: fixed;
+  top: 84px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  width: 280px;
+  display: flex;
+  max-height: none;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.coop-group-thread {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 4px 4px 12px;
+  overflow-y: auto;
+}
+
+.coop-group-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.coop-group-message--mine {
+  flex-direction: row-reverse;
+}
+
+.coop-group-message__avatar,
+.coop-group-member__avatar {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--banking-brand-red-subtle);
+  color: var(--banking-brand-red);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.coop-group-message--final .coop-group-message__avatar {
+  background: var(--banking-ok-subtle);
+  color: var(--banking-ok);
+}
+
+.coop-group-message__body {
+  min-width: 0;
+  max-width: min(78%, 760px);
+  flex: 0 1 auto;
+}
+
+.coop-group-message__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+}
+
+.coop-group-message__meta span:first-child {
+  color: var(--banking-text);
+  font-weight: 600;
+}
+
+.coop-group-message--mine .coop-group-message__meta {
+  justify-content: flex-end;
+}
+
+.coop-group-message__bubble {
+  width: auto;
+  max-width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--oc-border);
+  border-radius: 14px;
+  border-top-left-radius: 4px;
+  background: color-mix(in oklab, var(--oc-bg) 34%, transparent);
+}
+
+.coop-group-message--mine .coop-group-message__bubble {
+  border-top-left-radius: 14px;
+  border-top-right-radius: 4px;
+  background: color-mix(in oklab, var(--oc-accent) 7%, var(--oc-card));
+}
+
+.coop-group-message--agent-draft .coop-group-message__avatar {
+  background: color-mix(in oklab, var(--oc-accent) 14%, transparent);
+  color: var(--oc-accent);
+}
+
+.coop-session-result-box--message {
+  max-height: none;
+  margin-top: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.coop-group-empty {
+  padding: 24px 12px;
+  color: var(--oc-text-secondary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.coop-group-empty--small {
+  padding: 14px 8px;
+  font-size: 12px;
+}
+
+.coop-group-composer {
+  flex-shrink: 0;
+  margin-top: 12px;
+}
+
+.coop-group-composer > div {
+  width: 100%;
+  margin-bottom: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  box-sizing: border-box;
+}
+
+.coop-agent-reply-button {
+  width: auto;
+  gap: 4px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.coop-agent-reply-button.is-active {
+  background: color-mix(in oklab, var(--oc-accent) 14%, transparent);
+  color: var(--oc-accent);
+}
+
+.coop-agent-reply-button span {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.coop-inline-agent-panel {
+  flex-shrink: 0;
+  margin-top: 10px;
+  border: 1px solid color-mix(in oklab, var(--oc-accent) 22%, var(--oc-border));
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--oc-card) 82%, transparent);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, .06);
+  overflow: hidden;
+  animation: coop-agent-slide-in .16s ease-out;
+}
+
+.coop-inline-agent-panel__head,
+.coop-inline-agent-panel__actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.coop-inline-agent-panel__head {
+  border-bottom: 1px solid var(--oc-border);
+}
+
+.coop-inline-agent-panel__body {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+
+.coop-inline-agent-panel__actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--oc-border);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.coop-inline-agent-draft {
+  color: var(--banking-text);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.coop-agent-panel-button {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.coop-agent-panel-button:not(.coop-agent-panel-button--primary):hover:not(:disabled) {
+  background: color-mix(in oklab, var(--oc-text-secondary) 8%, transparent) !important;
+  border-color: var(--oc-border-strong) !important;
+  color: var(--banking-text) !important;
+}
+
+.coop-agent-panel-button--primary:hover:not(:disabled) {
+  filter: brightness(.96);
+}
+
+@keyframes coop-agent-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.coop-group-space-card {
+  padding: 12px;
+}
+
+.coop-side-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.coop-side-toggle {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--oc-text-secondary);
+  background: transparent;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.coop-side-toggle:hover {
+  border-color: var(--oc-border);
+  background: color-mix(in oklab, var(--oc-text-secondary) 8%, transparent);
+  color: var(--banking-text);
+}
+
+.coop-side-toggle--floating {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 2;
+  width: auto;
+  gap: 5px;
+  padding: 0 9px;
+  background: color-mix(in oklab, var(--oc-card) 92%, transparent);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, .08);
+  font-size: 12px;
+}
+
+.coop-session-close-button {
+  color: var(--banking-text) !important;
+  border: 1px solid transparent;
+}
+
+.coop-session-close-button:hover:not(:disabled) {
+  border-color: var(--oc-border-strong);
+  background: color-mix(in oklab, var(--oc-text-secondary) 8%, transparent) !important;
+  color: var(--banking-text) !important;
+}
+
+.coop-group-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.coop-group-member-card {
+  width: 100%;
+}
+
+.coop-group-member {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.coop-group-member__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.coop-group-member__name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--banking-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.coop-group-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.coop-agent-draft-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, .36);
+}
+
+.coop-agent-draft-panel {
+  width: min(760px, calc(100vw - 48px));
+  max-height: calc(100vh - 72px);
+  overflow: auto;
+  border: 1px solid var(--oc-border);
+  border-radius: 16px;
+  background: var(--oc-panel);
+  box-shadow: 0 22px 70px rgba(15, 23, 42, .28);
+}
+
+.coop-agent-draft-panel__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--oc-border);
+  background: color-mix(in oklab, var(--oc-panel) 94%, transparent);
+  backdrop-filter: blur(10px);
 }
 
 .coop-session-card {

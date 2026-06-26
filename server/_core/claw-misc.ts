@@ -734,6 +734,85 @@ function addUsageEvent(params: {
   params.dailyAll[day] = (params.dailyAll[day] || 0) + 1;
 }
 
+function addJiuwenUsageEvents(params: {
+  byAdopt: Record<string, UsageBucket>;
+  dailyAll: Record<string, number>;
+  seen: Set<string>;
+  adoptId: string;
+  dbAgentId: string;
+  userId: number;
+}) {
+  const adoptId = String(params.adoptId || "").trim();
+  if (!adoptId || !isJiuwenClawAdoptId(adoptId)) return;
+  const sessionsDir = jiuwenClawSessionsDir(adoptId, params.dbAgentId);
+  let entries: ReturnType<typeof readdirSync> = [];
+  try {
+    entries = readdirSync(sessionsDir, { withFileTypes: true }) as any;
+  } catch {
+    return;
+  }
+
+  const maxSessions = Math.min(Math.max(Number(process.env.LINGXIA_USAGE_JIUWEN_MAX_SESSIONS || 2000), 1), 50000);
+  let scanned = 0;
+  for (const entry of entries as any[]) {
+    if (!entry.isDirectory()) continue;
+    if (scanned >= maxSessions) break;
+    const sessionId = safeJiuwenSessionId(entry.name);
+    if (!sessionId) continue;
+    const historyFile = jiuwenHistoryFileForSession(sessionsDir, sessionId);
+    if (!historyFile || !existsSync(historyFile)) continue;
+    const metadata = readJiuwenSessionMetadata(sessionsDir, sessionId);
+    const channelId = String(metadata?.channel_id || "");
+    if (channelId && channelId !== "web") continue;
+    scanned += 1;
+
+    let userMessageCount = 0;
+    let fallbackTs = normalizeJiuwenHistoryTimestamp(metadata?.last_message_at)
+      || normalizeJiuwenHistoryTimestamp(metadata?.created_at);
+    try {
+      if (!fallbackTs) fallbackTs = statSync(historyFile).mtimeMs;
+    } catch {}
+
+    try {
+      const lines = readFileSync(historyFile, "utf8").split("\n");
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (!line.trim() || !line.includes('"role"')) continue;
+        let event: any;
+        try { event = JSON.parse(line); } catch { continue; }
+        const role = String(event?.role || event?.message?.role || "");
+        if (role !== "user") continue;
+        const text = stripPlatformLanguagePolicy(jiuwenHistoryContent(event)).trim();
+        if (!text) continue;
+        const tsMs = normalizeJiuwenHistoryTimestamp(event?.timestamp || event?.created_at || event?.time) || fallbackTs;
+        if (!tsMs) continue;
+        userMessageCount += 1;
+        addUsageEvent({
+          byAdopt: params.byAdopt,
+          dailyAll: params.dailyAll,
+          seen: params.seen,
+          key: ["jiuwen", adoptId, sessionId, event?.id || index].join("|"),
+          adoptId,
+          ts: new Date(tsMs).toISOString(),
+          userId: params.userId,
+        });
+      }
+    } catch {}
+
+    if (userMessageCount === 0 && fallbackTs) {
+      addUsageEvent({
+        byAdopt: params.byAdopt,
+        dailyAll: params.dailyAll,
+        seen: params.seen,
+        key: ["jiuwen-session", adoptId, sessionId].join("|"),
+        adoptId,
+        ts: new Date(fallbackTs).toISOString(),
+        userId: params.userId,
+      });
+    }
+  }
+}
+
 function runtimeAgentIdFromSessionKey(sessionKey: string): string {
   const match = /^agent:([^:]+):/.exec(String(sessionKey || ""));
   return match?.[1] || "";
@@ -1818,6 +1897,9 @@ export function registerMiscRoutes(app: express.Express) {
       // 不经过 employee-agent 的聊天接口，所以需要从 trajectory 里补统计。
       let userMap: Record<number, string> = {};
       const agentToAdopt: Record<string, { adoptId: string; userId: number }> = {};
+      const adoptionRows: Array<{ adoptId: string; agentId: string; userId: number; runtime: string }> = [];
+      const adoptRuntimeMap: Record<string, string> = {};
+      const currentAdoptIds = new Set<string>();
       try {
         const { getDb } = await import("../db");
         const { users, clawAdoptions } = await import("../../drizzle/schema");
@@ -1829,13 +1911,61 @@ export function registerMiscRoutes(app: express.Express) {
             adoptId: clawAdoptions.adoptId,
             agentId: clawAdoptions.agentId,
             userId: clawAdoptions.userId,
+            runtime: clawAdoptions.runtime,
           }).from(clawAdoptions);
           for (const claw of claws) {
             const adoptId = String(claw.adoptId || "").trim();
             const userId = Number(claw.userId || 0);
             const configuredAgentId = String(claw.agentId || "").trim();
+            const runtime = String(claw.runtime || "").trim() || (isJiuwenClawAdoptId(adoptId) ? "jiuwenswarm" : "openclaw");
+            adoptionRows.push({ adoptId, agentId: configuredAgentId, userId, runtime });
+            if (adoptId) currentAdoptIds.add(adoptId);
+            if (adoptId) adoptRuntimeMap[adoptId] = runtime;
             if (configuredAgentId) agentToAdopt[configuredAgentId] = { adoptId, userId };
             if (adoptId) agentToAdopt[`trial_${adoptId}`] = { adoptId, userId };
+          }
+        }
+      } catch {}
+
+      for (const claw of adoptionRows) {
+        if (claw.runtime !== "jiuwenswarm" && !isJiuwenClawAdoptId(claw.adoptId)) continue;
+        addJiuwenUsageEvents({
+          byAdopt,
+          dailyAll,
+          seen,
+          adoptId: claw.adoptId,
+          dbAgentId: claw.agentId,
+          userId: claw.userId,
+        });
+      }
+
+      try {
+        const jiuwenLogPath = APP_ROOT + "/logs/jiuwenclaw-exec.log";
+        if (existsSync(jiuwenLogPath)) {
+          const maxLines = Math.min(Math.max(Number(process.env.LINGXIA_USAGE_JIUWEN_LOG_MAX_LINES || 20000), 100), 500000);
+          const jiuwenLines = readFileSync(jiuwenLogPath, "utf8").split("\n").filter(Boolean).slice(-maxLines);
+          for (const line of jiuwenLines) {
+            try {
+              const d = JSON.parse(line);
+              if (d?.event !== "chat_stream_request") continue;
+              const adoptId = String(d?.adoptId || "").trim();
+              if (!adoptId || !isJiuwenClawAdoptId(adoptId)) continue;
+              addUsageEvent({
+                byAdopt,
+                dailyAll,
+                seen,
+                key: [
+                  "jiuwen-log",
+                  adoptId,
+                  d?.clientRunId || "",
+                  d?.sessionId || "",
+                  d?.ts || "",
+                ].join("|"),
+                adoptId,
+                ts: d?.ts || "",
+                userId: d?.userId || 0,
+              });
+            } catch {}
           }
         }
       } catch {}
@@ -1876,11 +2006,13 @@ export function registerMiscRoutes(app: express.Express) {
 
       // 构建排行
       const adoptions = Object.entries(byAdopt)
+        .filter(([adoptId]) => currentAdoptIds.has(adoptId))
         .map(([adoptId, stat]) => ({
           adoptId,
           total: stat.total,
           userId: stat.userId,
           userName: userMap[stat.userId] || String(stat.userId),
+          runtime: adoptRuntimeMap[adoptId] || (isJiuwenClawAdoptId(adoptId) ? "jiuwenswarm" : "openclaw"),
           lastActivity: stat.lastTs,
           recent7d: Object.entries(stat.days)
             .filter(([d]) => d >= new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10))

@@ -183,7 +183,7 @@ export const coopRouter = router({
 
   // ── 接收方：提交协作子任务结果（手动版，区别于 mock 自动跑）─────
   //   - 权限：当前用户必须是 request 的 targetUserId
-  //   - 状态：必须在 running / approved（pending 必须先同意）
+  //   - 状态：群聊式协作允许 pending / approved / running 直接提交
   //   - payload.attachments 是 [{name, url, source: 'chat'|'task-xxx', size?}]
   //   - skipMemoryWrite: true 时记入 event payload，下游 memory-extractor 跳过此对话
   submitResult: activeCoopProcedure
@@ -216,7 +216,7 @@ export const coopRouter = router({
       if (r.targetUserId !== ctx.user!.id) {
         throw new TRPCError({ code: "FORBIDDEN", message: "not your request" });
       }
-      if (!["running", "approved"].includes(r.status)) {
+      if (!["pending", "running", "approved"].includes(r.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `cannot submit on status=${r.status}` });
       }
 
@@ -330,6 +330,33 @@ export const coopRouter = router({
       if (!ses) throw new TRPCError({ code: "NOT_FOUND" });
       const events = await listCoopEventsSince(input.sessionId, input.sinceId, input.limit);
       return { events, latestId: events.length > 0 ? Number(events[events.length - 1].id) : input.sinceId };
+    }),
+
+  // ── 群消息：当前 session 发起人或成员可发送普通群消息 ─────
+  sendMessage: protectedProcedure
+    .input(z.object({
+      sessionId: z.string().min(1).max(80),
+      text: z.string().min(1).max(10000),
+      attachments: z.array(z.object({
+        name: z.string().min(1).max(300),
+        url: z.string().min(1).max(2000),
+        source: z.enum(["chat", "task", "agent_workspace"]).default("chat"),
+        size: z.number().int().nonnegative().optional(),
+        adoptId: z.string().max(80).optional(),
+        path: z.string().max(1000).optional(),
+      })).max(50).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const ses = await getCoopSession(input.sessionId, ctx.user!.id);
+      if (!ses) throw new TRPCError({ code: "NOT_FOUND", message: "协作不存在或无权访问" });
+      const { appendCoopEvent } = await import("../db/coop");
+      await appendCoopEvent({
+        sessionId: input.sessionId,
+        eventType: "group_message",
+        actorUserId: ctx.user!.id,
+        payload: { text: input.text.trim(), attachments: input.attachments || [] },
+      });
+      return { ok: true };
     }),
 
     // ── 整合：调 LLM 生成汇总草稿（发起人触发，不写入 DB）────

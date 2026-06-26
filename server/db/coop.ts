@@ -13,7 +13,6 @@ import {
   clawAdoptions,
   users,
   lxGroups,
-  registrations,
   lxCollabUserProfiles,
 } from "../../drizzle/schema";
 import { getDb } from "./connection";
@@ -38,8 +37,8 @@ export type CreateCoopSessionParams = {
 };
 
 /**
- * 创建一个 coop session + N 条 claw_collab_requests（status=pending）
- * + 对应的 session_created / member_invited 事件
+ * 创建一个 coop session + N 条 claw_collab_requests。
+ * 群聊式协作里，真实用户的 pending 表示“已入群但未回复”，不再表示待批准。
  */
 export async function createCoopSession(params: CreateCoopSessionParams) {
   const db = await getDb();
@@ -71,7 +70,7 @@ export async function createCoopSession(params: CreateCoopSessionParams) {
     title: params.title,
     originMessage: params.originMessage,
     consolidationPromptPreset: params.consolidationPromptPreset?.trim() || null,
-    status: "inviting",
+    status: "running",
     memberCount: params.members.length,
   });
 
@@ -178,6 +177,17 @@ export async function getCoopSession(sessionId: string, viewerUserId: number) {
   const session = sessionRows[0];
   if (!session) return null;
 
+  const creatorRows = await db
+    .select({
+      creatorUserName: sql<string | null>`COALESCE(${lxCollabUserProfiles.realName}, ${users.name}, ${users.email})`,
+      creatorEmail: users.email,
+    })
+    .from(users)
+    .leftJoin(lxCollabUserProfiles, eq(lxCollabUserProfiles.userId, users.id))
+    .where(eq(users.id, session.creatorUserId))
+    .limit(1);
+  const creator = creatorRows[0] || null;
+
   const members = await db
     .select({
       requestId: clawCollabRequests.id,
@@ -193,15 +203,15 @@ export async function getCoopSession(sessionId: string, viewerUserId: number) {
       targetEmail: users.email,
       targetGroupId: users.groupId,
       targetGroupName: lxGroups.name,
-      targetOrgName: sql<string | null>`COALESCE(${lxCollabUserProfiles.organizationName}, ${users.organization}, ${registrations.company})`,
+      targetOrgName: sql<string | null>`COALESCE(${lxCollabUserProfiles.organizationName}, ${users.organization})`,
       targetDepartmentName: lxCollabUserProfiles.departmentName,
       targetTeamName: lxCollabUserProfiles.teamName,
+      targetRoleTemplate: sql<string | null>`NULL`,
     })
     .from(clawCollabRequests)
     .leftJoin(users, eq(users.id, clawCollabRequests.targetUserId))
     .leftJoin(lxCollabUserProfiles, eq(lxCollabUserProfiles.userId, clawCollabRequests.targetUserId))
     .leftJoin(lxGroups, eq(lxGroups.id, users.groupId))
-    .leftJoin(registrations, eq(registrations.email, users.email))
     .where(eq(clawCollabRequests.sessionId, sessionId))
     .orderBy(clawCollabRequests.subtaskIndex);
 
@@ -217,6 +227,11 @@ export async function getCoopSession(sessionId: string, viewerUserId: number) {
 
   return {
     session,
+    creator: {
+      userId: session.creatorUserId,
+      name: creator?.creatorUserName || creator?.creatorEmail || null,
+      email: creator?.creatorEmail || null,
+    },
     members,
     events: events.reverse(),
     viewerRole: access.value.role as "creator" | "member" | "admin",
@@ -303,17 +318,17 @@ export async function listMentionCandidates(params: {
         userEmail: users.email,
         groupId: users.groupId,
         groupName: lxGroups.name,
-        orgName: sql<string | null>`COALESCE(${lxCollabUserProfiles.organizationName}, ${users.organization}, ${registrations.company})`,
+        orgName: sql<string | null>`COALESCE(${lxCollabUserProfiles.organizationName}, ${users.organization})`,
         departmentName: lxCollabUserProfiles.departmentName,
         teamName: lxCollabUserProfiles.teamName,
         userName: sql<string | null>`COALESCE(${lxCollabUserProfiles.realName}, ${users.name}, ${users.email})`,
         adoptId: clawAdoptions.adoptId,
+        agentRoleTemplate: clawAdoptions.roleTemplate,
         adoptionId: clawAdoptions.id,
         adoptionStatus: clawAdoptions.status,
       })
       .from(users)
       .leftJoin(lxGroups, eq(lxGroups.id, users.groupId))
-      .leftJoin(registrations, eq(registrations.email, users.email))
       .innerJoin(
         lxCollabUserProfiles,
         and(
@@ -326,7 +341,8 @@ export async function listMentionCandidates(params: {
         clawAdoptions,
         and(
           eq(clawAdoptions.userId, users.id),
-          inArray(clawAdoptions.status, ['creating', 'active', 'expiring'])
+          inArray(clawAdoptions.status, ['creating', 'active', 'expiring']),
+          sql`${clawAdoptions.adoptId} LIKE 'lgj-%'`
         )
       )
       .where(ne(users.id, params.viewerUserId))

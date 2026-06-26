@@ -67,11 +67,6 @@ const INDUSTRY_LABELS: Record<string, string> = {
 const formatStatus = (status?: string) =>
   STATUS_OPTIONS.find((s) => s.value === status)?.label || status || "-";
 
-const formatExpiry = (row: any) => {
-  if (!row?.expiresAt || Number(row?.ttlDays || 0) <= 0) return "长期有效";
-  return new Date(row.expiresAt).toLocaleDateString("zh-CN");
-};
-
 const STATUS_COLORS: Record<string, string> = {
   total: "#6366f1",
   active: "#22c55e",
@@ -781,26 +776,26 @@ export default function ClawAdmin() {
       </header>
 
       {/* Body */}
-      <main className="mx-auto w-full max-w-[1440px] p-6">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-          <aside className="claw-admin-sidebar sticky top-6 max-h-[calc(100vh-3rem)] self-start overflow-y-auto rounded-2xl border border-gray-200 bg-white/90 p-3 shadow-sm">
-            <div className="px-3 py-2">
+      <main className="mx-auto w-full max-w-[1440px] p-4 sm:p-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="grid min-w-0 gap-4 lg:gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <aside className="claw-admin-sidebar self-start overflow-hidden rounded-2xl border border-gray-200 bg-white/90 p-3 shadow-sm lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
+            <div className="px-3 py-2 max-lg:hidden">
               <div className="claw-admin-sidebar-kicker text-xs font-medium uppercase tracking-[0.18em] text-gray-400">Console</div>
               <div className="claw-admin-sidebar-title mt-1 text-sm font-semibold text-gray-900">管理导航</div>
             </div>
-            <TabsList className="mt-2 grid h-auto gap-1 bg-transparent p-0">
+            <TabsList className="flex h-auto gap-1 overflow-x-auto bg-transparent p-0 pb-1 lg:mt-2 lg:grid lg:overflow-visible lg:pb-0">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 return (
                   <TabsTrigger
                     key={item.value}
                     value={item.value}
-                    className="claw-admin-nav-item group h-auto justify-start rounded-xl border border-transparent px-3 py-3 text-left text-gray-600 transition"
+                    className="claw-admin-nav-item group h-auto min-w-[128px] flex-none justify-start rounded-xl border border-transparent px-3 py-2.5 text-left text-gray-600 transition lg:min-w-0 lg:py-3"
                   >
                     <Icon className="claw-admin-nav-icon mr-3 h-4 w-4 shrink-0" />
                     <span className="min-w-0">
                       <span className="block text-sm font-medium leading-none">{item.label}</span>
-                      <span className="mt-1 block truncate text-[11px] font-normal text-gray-400 group-data-[state=active]:text-red-500">{item.description}</span>
+                      <span className="mt-1 hidden truncate text-[11px] font-normal text-gray-400 group-data-[state=active]:text-red-500 sm:block">{item.description}</span>
                     </span>
                   </TabsTrigger>
                 );
@@ -914,7 +909,6 @@ export default function ClawAdmin() {
                       <th className="p-3 text-left font-medium text-muted-foreground">状态</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">权限档</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">岗位</th>
-                      <th className="p-3 text-left font-medium text-muted-foreground">有效期</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">操作</th>
                     </tr>
                   </thead>
@@ -973,11 +967,7 @@ export default function ClawAdmin() {
                               ))}
                             </SelectContent>
                           </Select>
-                          <div className="mt-1 text-[10px] text-muted-foreground">
-                            {INDUSTRY_LABELS[String(row.industry || "general")] || "通用"}
-                          </div>
                         </td>
-                        <td className="p-3 text-xs text-muted-foreground">{formatExpiry(row)}</td>
                         <td className="p-3">
                           <div className="flex items-center gap-1">
                             {row.status !== "active" && (
@@ -1050,29 +1040,6 @@ export default function ClawAdmin() {
                       <SelectItem value="internal">Internal</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-
-                <div className="h-px bg-border/50" />
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-sm text-gray-700">默认有效期</Label>
-                    <p className="text-xs mt-0.5 text-muted-foreground">0 表示长期有效，适合企业内部员工默认使用</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      className="w-20 text-center"
-                      defaultValue={configData?.defaultTtlDays ?? 0}
-                      min={0}
-                      max={365}
-                      onBlur={(e) => {
-                        const v = parseInt(e.target.value);
-                        if (v >= 0 && v <= 365) setConfigMutation.mutate({ defaultTtlDays: v });
-                      }}
-                    />
-                    <span className="text-xs text-muted-foreground">天</span>
-                  </div>
                 </div>
 
                 <div className="h-px bg-border/50" />
