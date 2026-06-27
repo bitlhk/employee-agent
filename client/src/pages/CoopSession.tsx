@@ -168,10 +168,28 @@ export default function CoopSession() {
     }
   }, [location]);
 
+  const viewerSessionAdoptId = useMemo(() => {
+    const sessionData = data as any;
+    const creatorAdoptId = String(sessionData?.session?.creatorAdoptId || "").trim();
+    if (sessionData?.viewerIsCreator && creatorAdoptId) {
+      return creatorAdoptId;
+    }
+
+    const viewerUserId = String(sessionData?.viewerUserId || "").trim();
+    if (!viewerUserId) {
+      return "";
+    }
+
+    const member = (sessionData?.members || []).find(
+      (item: any) => String(item?.targetUserId || "").trim() === viewerUserId
+    );
+    return String(member?.targetAdoptId || "").trim();
+  }, [data]);
+
   // 拿当前用户的 adoptId，返回时跳 /claw/{adoptId}（即"我的智能体"主页 + 协作 tab）
   // 注意：App.tsx 里 / 是 <ClawHome /> 创建页，/claw/:adoptId 才是 <Home /> 含「我的协作」
   const { data: myClawForBack } = trpc.claw.me.useQuery(undefined, { retry: false });
-  const myAdoptIdForBack = sourceAdoptId || ((myClawForBack as any)?.adoption?.adoptId as string | undefined);
+  const myAdoptIdForBack = sourceAdoptId || viewerSessionAdoptId || ((myClawForBack as any)?.adoption?.adoptId as string | undefined);
   const { data: lingxiaSkills } = trpc.claw.listSkills.useQuery(
     { adoptId: myAdoptIdForBack || "" },
     { enabled: Boolean(myAdoptIdForBack), retry: false }
