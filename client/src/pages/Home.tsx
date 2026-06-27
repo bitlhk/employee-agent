@@ -620,7 +620,8 @@ export default function Home() {
         sessionStorage.removeItem("home_initial_page");
         if (v === "agentLab") return "chat";
         if (v === "docs") return "workspace";
-        if (v === "meeting") return "office";
+        if (v === "meeting") return "meeting";
+        if (v === "office") return "chat";
         return v as PageKey;
       }
     } catch {}

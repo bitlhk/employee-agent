@@ -379,16 +379,6 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
 
   return (
     <div className="skills-market skills-mcp">
-      <div className="skills-market-hero settings-card">
-        <div className="skills-market-hero__icon"><Wrench size={18} /></div>
-        <div className="min-w-0">
-          <div className="skills-market-hero__title">MCP工具</div>
-          <div className="skills-market-hero__desc">
-            这里展示平台接入的数据源与业务 MCP。公共能力用 public 标记，内部系统和工作流用 internal 标记；安装、密钥、网络和权限由平台统一治理。
-          </div>
-        </div>
-      </div>
-
       <div className="skills-header">
         <div className="skills-summary skills-muted-text text-xs">
           共 {items.length} 类能力 · {availableGroups} 类可用 · {availableServers}/{configuredServers} 个服务已启用

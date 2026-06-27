@@ -1,5 +1,4 @@
 import {
-  BriefcaseBusiness,
   CalendarClock,
   FolderTree,
   MessageSquareText,
@@ -7,10 +6,10 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { SessionList, type SessionListConversation } from "./SessionList";
 
-export type PageKey = "chat" | "skills" | "weixin" | "agent" | "workspace" | "office" | "schedule" | "collab" | "meeting" | "settings";
+export type PageKey = "chat" | "skills" | "weixin" | "agent" | "workspace" | "schedule" | "collab" | "meeting" | "settings";
 
 type NavItem = { key: PageKey; label: string; icon: any; adminOnly?: boolean };
 
@@ -20,12 +19,8 @@ const primaryItems: NavItem[] = [
   { key: "chat", label: "聊天", icon: MessageSquareText },
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "collab", label: "协作", icon: Users },
-  { key: "workspace", label: "文件", icon: FolderTree },
-];
-
-const workbenchItems: NavItem[] = [
-  { key: "office", label: "办公空间", icon: BriefcaseBusiness },
   { key: "schedule", label: "定时任务", icon: CalendarClock },
+  { key: "workspace", label: "工作空间", icon: FolderTree },
 ];
 
 export function Sidebar({
@@ -63,27 +58,7 @@ export function Sidebar({
   sessionsLoading?: boolean;
   footer?: ReactNode;
 }) {
-  const [openMenu, setOpenMenu] = useState<"settings" | "workbench" | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!openMenu) return;
-    const onPointerDown = (event: MouseEvent | PointerEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) return;
-      setOpenMenu(null);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpenMenu(null);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [openMenu]);
-
-  const renderItem = (it: NavItem, compact = false) => {
+  const renderItem = (it: NavItem) => {
           const Icon = it.icon;
           const active = activePage === it.key;
           return (
@@ -99,46 +74,6 @@ export function Sidebar({
               </button>
             </div>
           );
-  };
-
-  const renderBottomMenu = (
-    key: "settings" | "workbench",
-    label: string,
-    icon: any,
-    active: boolean,
-    children: React.ReactNode,
-  ) => {
-    const Icon = icon;
-    const open = openMenu === key;
-    return (
-      <div className="relative" ref={open ? menuRef : undefined}>
-        <button
-          type="button"
-          title={label}
-          onClick={() => setOpenMenu(open ? null : key)}
-          className={`sidebar-item sidebar-icon-button flex items-center justify-center relative ${active || open ? "active" : ""}`}
-          style={{ width: 34, height: 34, padding: 0 }}
-        >
-          <Icon size={16} strokeWidth={1.7} className="sidebar-item-icon" />
-        </button>
-        {open ? (
-          <div
-            className="absolute left-0 bottom-[42px] z-50"
-            style={{
-              width: 190,
-              padding: 6,
-              borderRadius: 12,
-              border: "1px solid var(--oc-border-subtle)",
-              background: "var(--oc-bg-surface)",
-              boxShadow: "0 16px 34px rgba(0,0,0,0.16)",
-            }}
-          >
-            <div style={{ padding: "5px 8px 7px", fontSize: 11, color: "var(--oc-text-tertiary)" }}>{label}</div>
-            {children}
-          </div>
-        ) : null}
-      </div>
-    );
   };
 
   return (
@@ -179,11 +114,6 @@ export function Sidebar({
           >
             <Settings2 size={16} strokeWidth={1.7} className="sidebar-item-icon" />
           </button>
-          {renderBottomMenu("workbench", "工作台", BriefcaseBusiness, activePage === "office" || activePage === "schedule", (
-            <div className="space-y-1">
-              {workbenchItems.map((item) => renderItem(item))}
-            </div>
-          ))}
         </div>
         {!collapsed && footer ? <div className="ml-auto min-w-0">{footer}</div> : null}
       </div>

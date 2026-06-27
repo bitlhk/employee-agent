@@ -17,7 +17,6 @@ const Login = lazy(() => import("./pages/Login"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const TaskWorkbenchLab = lazy(() => import("./pages/TaskWorkbenchLab"));
-const OfficeLab = lazy(() => import("./pages/OfficeLab"));
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -71,12 +70,6 @@ function Router() {
             <TaskWorkbenchLab />
           </AdminRoute>
         </Route>
-        <Route path={"/office-lab"}>
-          <AdminRoute>
-            <OfficeLab />
-          </AdminRoute>
-        </Route>
-
         {/* ── 协作 session 窗口（V2）── */}
         <Route path={"/coop/new"}>
           <CoopNew />

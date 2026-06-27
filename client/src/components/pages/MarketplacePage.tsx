@@ -361,16 +361,6 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
   return (
     <div className="skills-market">
       {dialog}
-      <div className="skills-market-hero settings-card">
-        <div className="skills-market-hero__icon"><Store size={18} /></div>
-        <div className="min-w-0">
-          <div className="skills-market-hero__title">技能广场</div>
-          <div className="skills-market-hero__desc">
-            从技能广场安装的技能会进入“我的技能”，并同步到当前员工智能体运行时。
-          </div>
-        </div>
-      </div>
-
       <div className="skills-market-toolbar">
         <div className="skills-search skills-market-search">
           <Search size={14} className="skills-search-icon" />
