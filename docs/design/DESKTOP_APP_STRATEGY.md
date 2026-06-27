@@ -212,7 +212,7 @@ runtime profile that points to our existing local OpenClaw environment:
 ```
 Profile: Local OpenClaw
 Mode: SSH tunnel
-Host: work.linggan.top or 111.119.236.165
+Host: work.example.com or 203.0.113.10
 Remote gateway: 127.0.0.1:18789
 Agent ID: preset from the current local OpenClaw agent
 ```

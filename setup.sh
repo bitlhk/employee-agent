@@ -38,7 +38,7 @@ Options:
   --yes                          Accept defaults for non-dangerous prompts.
   --overwrite-env                Replace existing .env.
   --port <port>                  App port, default 5180.
-  --host <ip-or-host>            HTTP host, e.g. 111.119.236.165.
+  --host <ip-or-host>            HTTP host, e.g. 203.0.113.10.
   --domain <domain>              HTTPS domain, e.g. ai.company.com.
   --frontend-url <url>           Full frontend URL. Overrides --host/--domain.
   --db-mode <mode>               compose | existing | mysql-auto. Default: compose interactive, mysql-auto auto.

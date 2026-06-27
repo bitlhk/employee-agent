@@ -37,7 +37,7 @@ loadLocalEnv();
 
 const HOST = process.env.CREDENTIAL_WORKSPACE_MCP_HOST || "127.0.0.1";
 const PORT = Number(process.env.CREDENTIAL_WORKSPACE_MCP_PORT || 17898);
-const UPSTREAM = (process.env.CRED_UPSTREAM_URL || "http://1.92.221.155:8005").replace(/\/+$/, "");
+const UPSTREAM = (process.env.CRED_UPSTREAM_URL || "http://127.0.0.1:8005").replace(/\/+$/, "");
 const TOKEN = process.env.CRED_UPSTREAM_TOKEN || "";
 const SERVICE_ROOTS = (process.env.CREDENTIAL_JIUWEN_SERVICE_ROOTS
   || "/root/.jiuwenswarm/service_linggan_shanghai,/root/.jiuwenswarm/service_linggan,/home/ubuntu/.jiuwenswarm/service_linggan")
@@ -53,7 +53,7 @@ const MAX_FILE_BYTES = Number(process.env.CREDENTIAL_MAX_FILE_BYTES || 10 * 1024
 const IMAGE_MAX_WIDTH = Number(process.env.CREDENTIAL_IMAGE_MAX_WIDTH || 1280);
 const IMAGE_JPEG_QUALITY = Number(process.env.CREDENTIAL_IMAGE_JPEG_QUALITY || 82);
 const UPSTREAM_IMAGE_FIELD = process.env.CREDENTIAL_UPSTREAM_IMAGE_FIELD || "images";
-const UPSTREAM_IMAGE_FORMAT = process.env.CREDENTIAL_UPSTREAM_IMAGE_FORMAT || "data_uri";
+const UPSTREAM_IMAGE_FORMAT = process.env.CREDENTIAL_UPSTREAM_IMAGE_FORMAT || "base64";
 
 const TASK_TO_UPSTREAM_TOOL = {
   classify: process.env.CREDENTIAL_UPSTREAM_CLASSIFY_TOOL || "classification",

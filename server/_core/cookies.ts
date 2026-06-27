@@ -52,7 +52,7 @@ export function getSessionCookieOptions(
 
   // 跨子域共享登录态（通过 COOKIE_DOMAIN 环境变量配置）
   const host = req.hostname || "";
-  const cookieDomain = process.env.COOKIE_DOMAIN; // e.g. ".linggan.top"
+  const cookieDomain = process.env.COOKIE_DOMAIN; // e.g. ".example.com"
   const domain = cookieDomain && host.endsWith(cookieDomain.replace(/^\./, "")) ? cookieDomain : undefined;
 
   return {

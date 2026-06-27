@@ -30,7 +30,7 @@ bash /tmp/install-employee-agent.sh --host <服务器IP或域名>
 bash /tmp/install-employee-agent.sh \
   --dir "$HOME/employee-agent" \
   --port 5180 \
-  --host 111.119.236.165 \
+  --host 203.0.113.10 \
   --db-mode mysql-auto
 ```
 

@@ -204,7 +204,7 @@ export function MeetingNotesPage({ adoptId, onBack }: MeetingNotesPageProps) {
 
   const startRecording = useCallback(async () => {
     if (!canRecord) {
-      setError("浏览器录音需要 HTTPS，请使用 zs.linggan.top 打开。");
+      setError("浏览器录音需要 HTTPS，请使用 HTTPS 域名打开。");
       setStatus("error");
       return;
     }

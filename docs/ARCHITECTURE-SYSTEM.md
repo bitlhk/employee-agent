@@ -108,7 +108,7 @@
 |------|------|----------|
 | 灵感门户 | 官网首页、产品介绍、注册登录 | `pages/Home.tsx` `pages/Login.tsx` |
 | 租户管理 | 领养灵虾、实例创建、套餐权限(starter/plus/internal) | `claw-provision.sh` `routers/claw.ts` `ClawHome.tsx` |
-| 接入路由 | 子域名模式(*.demo.linggan.top) / 路径模式(/claw/:adoptId) | `index.ts` 路由 + Nginx 配置 |
+| 接入路由 | 子域名模式(*.demo.example.com) / 路径模式(/claw/:adoptId) | `index.ts` 路由 + Nginx 配置 |
 | 品牌定制 | 多租户 logo/主题/名称 | `brand.ts` `useBrand.ts` |
 | 多端触达 | Web UI(React SPA)、微信桥、企微/飞书/Webhook | WS/SSE/tRPC 三协议入口 |
 
@@ -220,7 +220,7 @@ Runtime 层记忆（③ · 会话/Agent 维度）
 ### 新用户完整流程
 
 ```
-访问 linggan.top → 注册账号 → 登录
+访问你的部署域名 → 注册账号 → 登录
   → 领养灵虾 → claw-provision.sh 创建 per-user agent
   → 分配 adoptId (lgc-xxx) → 创建 workspace 目录
   → 进入控制台 → WebSocket 连接 → 开始对话

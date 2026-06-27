@@ -225,7 +225,7 @@ async function fetchHtml(url: URL, timeoutMs: number) {
       redirect: "follow",
       signal: controller.signal,
       headers: {
-        "user-agent": "EmployeeAgentManagedBrowser/0.1 (+https://linggan.top)",
+        "user-agent": "EmployeeAgentManagedBrowser/0.1",
         "accept": "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.5",
       },
     });

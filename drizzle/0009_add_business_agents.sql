@@ -21,4 +21,4 @@ INSERT IGNORE INTO `business_agents`
 VALUES
   ('task-ppt','PPT 生成','多轮对话生成 PPT，完成后可下载','local',NULL,NULL,NULL,'task-ppt','📊',1,1),
   ('task-code','代码助手','在沙箱中执行代码，安全隔离','local',NULL,NULL,NULL,'task-code','💻',1,2),
-  ('task-finance','金融投顾','DCF/LBO 建模、竞争分析、行业研究报告','remote','http://198.51.100.10:19789','public-skill-demo-2026','main',NULL,'📈',1,3);
+  ('task-finance','金融投顾','DCF/LBO 建模、竞争分析、行业研究报告','remote','http://198.51.100.10:19789',NULL,'main',NULL,'📈',1,3);

@@ -60,8 +60,8 @@
   "allowedOrigins": [
     "http://localhost:18789",
     "http://127.0.0.1:18789",
-    "https://www.linggan.top",
-    "https://ling-claw.demo.linggan.top"
+    "https://www.example.com",
+    "https://ling-claw.demo.example.com"
   ]
 }
 ```

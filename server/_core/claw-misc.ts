@@ -1559,12 +1559,15 @@ export function registerMiscRoutes(app: express.Express) {
   // ── Logout all sessions/cookies ───────────────────────
   app.post("/api/auth/logout-all", async (req, res) => {
     try {
+      const cookieDomain = process.env.COOKIE_DOMAIN || "";
       const clearOpts = [
         { path: "/" },
-        { domain: process.env.COOKIE_DOMAIN || ".linggan.top", path: "/" },
-        { domain: (process.env.COOKIE_DOMAIN || ".linggan.top").replace(/^\./, ""), path: "/" },
-        { domain: `www.${(process.env.COOKIE_DOMAIN || ".linggan.top").replace(/^\./, "")}`, path: "/" },
-      ] as const;
+        ...(cookieDomain ? [
+          { domain: cookieDomain, path: "/" },
+          { domain: cookieDomain.replace(/^\./, ""), path: "/" },
+          { domain: `www.${cookieDomain.replace(/^\./, "")}`, path: "/" },
+        ] : []),
+      ];
 
       for (const opt of clearOpts) {
         try { res.clearCookie(COOKIE_NAME, { ...opt, httpOnly: true, secure: true, sameSite: "none" as const }); } catch {}
@@ -1573,7 +1576,7 @@ export function registerMiscRoutes(app: express.Express) {
 
       // lock sso-bridge for 3 minutes to avoid immediate auto-login after logout
       res.cookie("logout_lock", "1", {
-        domain: process.env.COOKIE_DOMAIN || ".linggan.top",
+        ...(cookieDomain ? { domain: cookieDomain } : {}),
         httpOnly: true,
         path: "/",
         sameSite: "none",
@@ -1606,27 +1609,29 @@ export function registerMiscRoutes(app: express.Express) {
   // ── SSO bridge ────────────────────────────────────────
   app.get("/api/embed/sso-bridge", async (req, res) => {
     try {
-      const nextRaw = typeof req.query.next === "string" ? req.query.next : (process.env.FRONTEND_URL || (process.env.FRONTEND_URL || "https://www.linggan.top/"));
+      const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5180/";
+      const cookieDomain = process.env.COOKIE_DOMAIN || "";
+      const nextRaw = typeof req.query.next === "string" ? req.query.next : frontendUrl;
       let nextUrl: URL;
       try {
         nextUrl = new URL(nextRaw);
       } catch {
-        return res.redirect((process.env.FRONTEND_URL || (process.env.FRONTEND_URL || "https://www.linggan.top/")));
+        return res.redirect(frontendUrl);
       }
 
       // only allow configured domain destinations
-      if (!nextUrl.hostname.endsWith((process.env.COOKIE_DOMAIN || ".linggan.top").replace(/^\./, ""))) {
-        return res.redirect((process.env.FRONTEND_URL || (process.env.FRONTEND_URL || "https://www.linggan.top/")));
+      if (cookieDomain && !nextUrl.hostname.endsWith(cookieDomain.replace(/^\./, ""))) {
+        return res.redirect(frontendUrl);
       }
 
       // If user just logged out, skip auto-bridge to avoid immediate re-login loop
       if ((req as any).cookies?.logout_lock === "1") {
-        return res.redirect((process.env.FRONTEND_URL || (process.env.FRONTEND_URL || "https://www.linggan.top/")));
+        return res.redirect(frontendUrl);
       }
 
       const context = await createContext({ req, res, info: {} as any });
       if (!context.user) {
-        return res.redirect((process.env.FRONTEND_URL || (process.env.FRONTEND_URL || "https://www.linggan.top/")));
+        return res.redirect(frontendUrl);
       }
 
       const { sdk } = await import("./sdk");
@@ -1638,7 +1643,7 @@ export function registerMiscRoutes(app: express.Express) {
 
       // shared cookie for subdomains
       res.cookie(COOKIE_NAME, token, {
-        domain: process.env.COOKIE_DOMAIN || ".linggan.top",
+        ...(cookieDomain ? { domain: cookieDomain } : {}),
         httpOnly: true,
         path: "/",
         sameSite: "none",
@@ -1647,7 +1652,7 @@ export function registerMiscRoutes(app: express.Express) {
 
       return res.redirect(nextUrl.toString());
     } catch (e) {
-      return res.redirect((process.env.FRONTEND_URL || (process.env.FRONTEND_URL || "https://www.linggan.top/")));
+      return res.redirect(process.env.FRONTEND_URL || "http://localhost:5180/");
     }
   });
 

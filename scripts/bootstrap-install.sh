@@ -51,7 +51,7 @@ Options:
 
 Examples:
   bash bootstrap-install.sh
-  bash bootstrap-install.sh --host 111.119.236.165 --dir "$HOME/employee-agent"
+  bash bootstrap-install.sh --host 203.0.113.10 --dir "$HOME/employee-agent"
   bash bootstrap-install.sh --db-mode existing --skip-mysql
 EOF
 }

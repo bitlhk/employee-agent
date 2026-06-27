@@ -389,7 +389,7 @@ export const clawRouter = router({
         ...c,
         entryUrl: String(c?.entryUrl || "")
           .replace("http://", "https://")
-          .replace(".demo.linggantest.top", ".demo.linggan.top"),
+          .replace(".demo.linggantest.top", `.${process.env.DEMO_ROUTE_DOMAIN || "demo.example.com"}`),
         roleTemplate: String(c?.roleTemplate || "general-assistant"),
         industry: String(c?.industry || "general"),
         runtime: String(c?.runtime || resolveClawRuntime(c?.adoptId)),
@@ -1767,7 +1767,7 @@ export const clawRouter = router({
             ...existing,
             entryUrl: String((existing as any).entryUrl || "")
               .replace("http://", "https://")
-              .replace(".demo.linggantest.top", ".demo.linggan.top"),
+              .replace(".demo.linggantest.top", `.${process.env.DEMO_ROUTE_DOMAIN || "demo.example.com"}`),
           };
           return {
             success: true,
@@ -1792,8 +1792,7 @@ export const clawRouter = router({
         }
         const runtimeAdapter = getRoleRuntimeAdapter(provisionPlan.runtime);
         const ttlDays = 0;
-        // 测试主页统一直达生产 demo 域名，避免落到 linggantest 域
-        const baseDomain = process.env.DEMO_ROUTE_DOMAIN || "demo.linggan.top";
+        const baseDomain = process.env.DEMO_ROUTE_DOMAIN || "demo.example.com";
         const entryScheme = (await getSystemConfigValue("claw_demo_entry_scheme", "https")).trim() || "https";
 
         const suffix = randomRuntimeSuffix();

@@ -476,8 +476,8 @@ export async function publishDemoRoutingNow(updatedBy?: number): Promise<{ ok: b
   let nginxBackupPath = "";
 
   try {
-    const demoDomain = process.env.DEMO_ROUTE_DOMAIN || "demo.linggan.top";
-    const siteDomain = process.env.SITE_DOMAIN || "www.linggan.top";
+    const demoDomain = process.env.DEMO_ROUTE_DOMAIN || "demo.example.com";
+    const siteDomain = process.env.SITE_DOMAIN || "www.example.com";
     nginxSitePath = process.env.NGINX_SITE_PATH || "/etc/nginx/sites-available/finance-ai-landing";
     const envPath = process.env.DEPLOY_ENV_PATH || "/opt/finance-ai-landing-new/finance-ai-landing/.env.deploy";
 

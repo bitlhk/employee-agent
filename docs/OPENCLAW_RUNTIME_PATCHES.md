@@ -165,7 +165,7 @@ Post-upgrade status:
 - Codex/GPT-5.5 model call works.
 - `bond_quote_parse` and `group_insurance_audit` streamable-http MCPs expose tools.
 - `credential_skills` fails because its adapter upstream
-  `http://1.92.221.155:8005` is unreachable; this is not an OpenClaw 2026.6.8
+  `http://127.0.0.1:8005` is unreachable; this is not an OpenClaw 2026.6.8
   regression.
 
 The Codex runtime bundle changed file names. The WSS assistant delta patch now

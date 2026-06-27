@@ -29,7 +29,7 @@ loadLocalEnv();
 
 const HOST = process.env.CRED_ADAPTER_HOST || "127.0.0.1";
 const PORT = Number(process.env.CRED_ADAPTER_PORT || 17896);
-const UPSTREAM = (process.env.CRED_UPSTREAM_URL || "http://1.92.221.155:8005").replace(/\/+$/, "");
+const UPSTREAM = (process.env.CRED_UPSTREAM_URL || "http://127.0.0.1:8005").replace(/\/+$/, "");
 const TOKEN = process.env.CRED_UPSTREAM_TOKEN || "";
 
 // 递归剥除 JSON-RPC 消息中非法的 error:null（含批量响应）

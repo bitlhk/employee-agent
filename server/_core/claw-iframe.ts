@@ -459,7 +459,7 @@ export function registerIframeRoutes(app: express.Express) {
       res.removeHeader("X-Frame-Options");
       // 设置 CSP frame-ancestors（收紧为可配置白名单）
       // system_config key: iframe_frame_ancestors
-      // value 示例："'self' http://115.120.10.127:9528 http://www.linggan.top"
+      // value 示例："'self' http://203.0.113.10:9528 https://www.example.com"
       const frameAncestors = await getSystemConfigValue(
         "iframe_frame_ancestors",
         `'self' ${req.protocol}://${req.get("host")}`

@@ -28,7 +28,7 @@ export function registerBusinessRoutes(app: express.Express) {
   const TENANT_SECRET_LOCAL = process.env.TENANT_SECRET || "linggan-tenant-2026-default-change-me";
   const REMOTE_FILE_SERVICE_PORT = 19798;
   // file-service 自己的 auth token，跟 bizAgent.apiToken（agent backend token）不同
-  const FILE_SERVICE_TOKEN = "public-skill-demo-2026";
+  const FILE_SERVICE_TOKEN = process.env.FILE_SERVICE_TOKEN || "";
   function parseAgentUiConfig(raw: unknown): Record<string, any> {
     if (!raw || typeof raw !== "string") return {};
     try {

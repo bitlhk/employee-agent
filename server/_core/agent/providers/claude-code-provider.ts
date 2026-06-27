@@ -11,7 +11,7 @@ import {
 } from "./http-utils";
 
 const REMOTE_FILE_SERVICE_PORT = 19798;
-const DEFAULT_FILE_SERVICE_TOKEN = "public-skill-demo-2026";
+const DEFAULT_FILE_SERVICE_TOKEN = "";
 
 type ClaudeCodeProviderOptions = {
   buildTenantContext?: (userId: number, agentId: string) => TenantContext;
