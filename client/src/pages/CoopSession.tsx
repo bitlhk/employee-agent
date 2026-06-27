@@ -199,6 +199,14 @@ export default function CoopSession() {
     () => composerSkills.find((skill) => skill.id === selectedComposerSkillId) || null,
     [composerSkills, selectedComposerSkillId]
   );
+  const handleComposerSkillChange = (value: string) => {
+    if (value === "__none") {
+      setSelectedComposerSkillId("");
+      return;
+    }
+    setSelectedComposerSkillId(value);
+    setAgentMode(true);
+  };
   useEffect(() => {
     if (selectedComposerSkillId && !composerSkills.some((skill) => skill.id === selectedComposerSkillId)) {
       setSelectedComposerSkillId("");
@@ -706,14 +714,20 @@ export default function CoopSession() {
                   <>
                     <Select
                       value={selectedComposerSkillId || "__none"}
-                      onValueChange={(value) => setSelectedComposerSkillId(value === "__none" ? "" : value)}
+                      onValueChange={handleComposerSkillChange}
                     >
                       <SelectTrigger
                         size="sm"
                         aria-label="选择技能"
                         className="lingxia-composer-skill-select focus:ring-0 focus:ring-offset-0"
-                        disabled={!agentMode || composerSkills.length === 0 || agentStreaming}
-                        title={!agentMode ? "开启智能体回复后选择技能" : composerSkills.length === 0 ? "当前智能体没有可用技能" : "选择本轮智能体回复优先使用的技能"}
+                        disabled={!showAgentDraft || composerSkills.length === 0 || agentStreaming}
+                        title={
+                          !showAgentDraft
+                            ? "只有协作成员或发起人可以选择技能"
+                            : composerSkills.length === 0
+                              ? "当前智能体没有可用技能"
+                              : "选择后将使用智能体回复"
+                        }
                       >
                         <span className="lingxia-composer-skill-select__label">
                           <Wand2 size={13} strokeWidth={1.8} />
