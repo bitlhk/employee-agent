@@ -635,7 +635,8 @@ export default function Home() {
       setMentionedUsers([]);
       setLingxiaInput("");
       toast.success("已发起协作");
-      setLocationCoop(`/coop/${r.sessionId}`);
+      const suffix = resolvedAdoptId ? `?fromAdoptId=${encodeURIComponent(resolvedAdoptId)}` : "";
+      setLocationCoop(`/coop/${r.sessionId}${suffix}`);
     },
     onError: (e) => toast.error(e.message || "协作创建失败"),
   });

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
-import { Loader2, ArrowLeft, CheckCircle2, Users as UsersIcon, Paperclip, Download, Sparkles, FolderOpen, Square, Copy, PanelRightClose, PanelRightOpen, Bot, Wand2, X } from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle2, Users as UsersIcon, Paperclip, Download, Sparkles, FolderOpen, Square, Copy, PanelRightClose, PanelRightOpen, Bot, Wand2, X, Pencil, Check } from "lucide-react";
 import { toast } from "sonner";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
@@ -138,7 +138,7 @@ function AttachmentList({ attachments }: { attachments: EventAttachment[] }) {
 
 export default function CoopSession() {
   const [, params] = useRoute("/coop/:sessionId");
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const sessionId = params?.sessionId || "";
   const [groupInput, setGroupInput] = useState("");
   const [agentMode, setAgentMode] = useState(false);
@@ -147,6 +147,8 @@ export default function CoopSession() {
   const [agentStreaming, setAgentStreaming] = useState(false);
   const [sideOpen, setSideOpen] = useState(true);
   const [selectedComposerSkillId, setSelectedComposerSkillId] = useState("");
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const agentAbortRef = useRef<AbortController | null>(null);
 
   // 拉 session 详情（每 3 秒 refetch 一次作为轮询）
@@ -155,10 +157,21 @@ export default function CoopSession() {
     { enabled: Boolean(sessionId), refetchInterval: 3000 }
   );
 
+  const sourceAdoptId = useMemo(() => {
+    try {
+      const search = location.includes("?")
+        ? location.slice(location.indexOf("?"))
+        : window.location.search;
+      return String(new URLSearchParams(search).get("fromAdoptId") || "").trim();
+    } catch {
+      return "";
+    }
+  }, [location]);
+
   // 拿当前用户的 adoptId，返回时跳 /claw/{adoptId}（即"我的智能体"主页 + 协作 tab）
   // 注意：App.tsx 里 / 是 <ClawHome /> 创建页，/claw/:adoptId 才是 <Home /> 含「我的协作」
   const { data: myClawForBack } = trpc.claw.me.useQuery(undefined, { retry: false });
-  const myAdoptIdForBack = (myClawForBack as any)?.adoption?.adoptId as string | undefined;
+  const myAdoptIdForBack = sourceAdoptId || ((myClawForBack as any)?.adoption?.adoptId as string | undefined);
   const { data: lingxiaSkills } = trpc.claw.listSkills.useQuery(
     { adoptId: myAdoptIdForBack || "" },
     { enabled: Boolean(myAdoptIdForBack), retry: false }
@@ -182,9 +195,20 @@ export default function CoopSession() {
   const sendGroupMessageMut = trpc.coop.sendMessage.useMutation({
     onSuccess: () => {
       setGroupInput("");
+      refetch();
       eventsQ.refetch();
     },
     onError: (error) => toast.error(error.message || "发送失败"),
+  });
+  const updateTitleMut = trpc.coop.updateTitle.useMutation({
+    onSuccess: (result) => {
+      setTitleEditing(false);
+      setTitleDraft(result.title || "");
+      toast.success("协作名称已更新");
+      refetch();
+      eventsQ.refetch();
+    },
+    onError: (error) => toast.error(error.message || "修改失败"),
   });
   // 按 requestId 索引附件列表
   const attachmentsByRequestId = useMemo(() => {
@@ -233,6 +257,7 @@ export default function CoopSession() {
   const creatorDisplayName = isCreator
     ? "我"
     : (creatorInfo?.name || creatorInfo?.email || `发起人 #${session.creatorUserId}`);
+  const displayTitle = String(session.title || "").trim() || "未命名协作";
   const sessionStatus = sessionStatusMeta(session.status);
   const myCard = members.find((m: any) => m.targetUserId === currentUserId);
   const completedMembers = members.filter((m: any) => m.status === "completed" && m.resultSummary);
@@ -400,6 +425,21 @@ export default function CoopSession() {
     }
   };
 
+  const startTitleEdit = () => {
+    if (!isCreator) return;
+    setTitleDraft(displayTitle);
+    setTitleEditing(true);
+  };
+
+  const saveTitleEdit = () => {
+    const title = titleDraft.trim();
+    if (!title) {
+      toast.error("协作名称不能为空");
+      return;
+    }
+    updateTitleMut.mutate({ sessionId, title });
+  };
+
   return (
     <div className="coop-session-themed">
       {/* 顶部 Header */}
@@ -420,7 +460,36 @@ export default function CoopSession() {
           <div className="coop-session-header__main">
             <div className="coop-session-title-row">
               <UsersIcon className="coop-session-title-icon" />
-              <h1 className="coop-session-title">{session.title || "协作任务"}</h1>
+              {titleEditing ? (
+                <div className="coop-session-title-editor">
+                  <input
+                    value={titleDraft}
+                    onChange={(event) => setTitleDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") saveTitleEdit();
+                      if (event.key === "Escape") setTitleEditing(false);
+                    }}
+                    maxLength={120}
+                    autoFocus
+                    className="coop-session-title-input"
+                  />
+                  <button type="button" className="coop-title-action" onClick={saveTitleEdit} disabled={updateTitleMut.isPending} title="保存名称">
+                    {updateTitleMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  </button>
+                  <button type="button" className="coop-title-action" onClick={() => setTitleEditing(false)} disabled={updateTitleMut.isPending} title="取消">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="coop-session-title-display">
+                  <h1 className="coop-session-title">{displayTitle}</h1>
+                  {isCreator ? (
+                    <button type="button" className="coop-title-action" onClick={startTitleEdit} title="修改协作名称">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  ) : null}
+                </div>
+              )}
               <span className={`badge ${sessionStatus.badgeClass}`}>{sessionStatus.label}</span>
             </div>
             <div className="coop-session-meta">

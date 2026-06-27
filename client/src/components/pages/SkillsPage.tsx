@@ -93,12 +93,14 @@ type SkillTab = (typeof SKILL_TAB_KEYS)[number];
 type SourceFilter = "all" | SourceKind;
 type StateFilter = "all" | "ready" | "attention" | "disabled";
 const SKILL_TAB_CACHE_KEY = "employee-agent:skills:last-tab";
-const MCP_TOOLS_CACHE_PREFIX = "employee-agent:mcp-tools:v2:";
+const MCP_TOOLS_CACHE_PREFIX = "employee-agent:mcp-tools:v3:";
 
 type McpServerStatus = "available" | "disabled" | "missing";
+type McpLiveStatus = "live" | "fallback" | "unavailable" | "unsupported";
 type McpToolSummary = {
   name: string;
   description: string;
+  source?: "live" | "fallback";
 };
 type McpToolChild = {
   id: string;
@@ -110,6 +112,10 @@ type McpToolChild = {
   status: McpServerStatus;
   existsOnDisk?: boolean;
   tools?: McpToolSummary[];
+  toolSource?: "live" | "fallback";
+  liveStatus?: McpLiveStatus;
+  liveCheckedAt?: string | null;
+  liveError?: string | null;
 };
 type McpToolGroup = {
   id: string;
@@ -122,6 +128,7 @@ type McpToolGroup = {
   serverCount: number;
   children: McpToolChild[];
   recommendedSkills?: string[];
+  liveStatus?: McpLiveStatus;
 };
 type McpToolsResponse = {
   items: McpToolGroup[];
@@ -129,6 +136,11 @@ type McpToolsResponse = {
     groups: number;
     configuredServers: number;
     availableServers: number;
+  };
+  live?: {
+    enabled: boolean;
+    checkedAt?: string;
+    ttlMs?: number;
   };
 };
 
@@ -267,8 +279,21 @@ function mcpStatusTone(status: McpServerStatus): "ok" | "warn" | "neutral" {
 
 function mcpStatusLabel(status: McpServerStatus) {
   if (status === "available") return "可用";
-  if (status === "disabled") return "已停用";
+  if (status === "disabled") return "暂不可用";
   return "未接入";
+}
+
+function mcpLiveStatusLabel(status?: McpLiveStatus) {
+  if (status === "live") return "实时";
+  if (status === "unavailable") return "连接失败";
+  if (status === "unsupported") return "未探测";
+  return "配置";
+}
+
+function mcpLiveStatusTone(status?: McpLiveStatus): "ok" | "warn" | "neutral" {
+  if (status === "live") return "ok";
+  if (status === "unavailable") return "warn";
+  return "neutral";
 }
 
 function mcpScopeOf(item: McpToolGroup): "public" | "internal" | "platform" {
@@ -287,17 +312,20 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
   const [items, setItems] = useState<McpToolGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [openGroupIds, setOpenGroupIds] = useState<Set<string>>(new Set());
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
 
-  const loadMcpTools = async (options?: { silent?: boolean }) => {
+  const loadMcpTools = async (options?: { silent?: boolean; force?: boolean }) => {
     if (!adoptId) return;
     const silent = Boolean(options?.silent);
     if (!silent) setLoading(true);
     try {
-      const data = await fetchJson<McpToolsResponse>(`/api/claw/mcp-tools/status?adoptId=${encodeURIComponent(adoptId)}`);
+      const force = options?.force ? "&force=1" : "";
+      const data = await fetchJson<McpToolsResponse>(`/api/claw/mcp-tools/status?adoptId=${encodeURIComponent(adoptId)}${force}`);
       const nextItems = Array.isArray(data.items) ? data.items : [];
       setItems(nextItems);
+      setLastCheckedAt(data.live?.checkedAt || new Date().toISOString());
       try {
-        window.localStorage.setItem(mcpToolsCacheKey(adoptId), JSON.stringify(nextItems));
+        window.localStorage.setItem(mcpToolsCacheKey(adoptId), JSON.stringify({ items: nextItems, lastCheckedAt: data.live?.checkedAt || null }));
       } catch {}
     } catch (e: any) {
       if (!silent && items.length === 0) {
@@ -318,9 +346,11 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
     try {
       const cached = window.localStorage.getItem(mcpToolsCacheKey(adoptId));
       const parsed = cached ? JSON.parse(cached) : null;
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      const cachedItems = Array.isArray(parsed) ? parsed : parsed?.items;
+      if (Array.isArray(cachedItems) && cachedItems.length > 0) {
         hadCache = true;
-        setItems(parsed);
+        setItems(cachedItems);
+        setLastCheckedAt(parsed?.lastCheckedAt || null);
         setLoading(false);
       }
     } catch {}
@@ -362,8 +392,9 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
       <div className="skills-header">
         <div className="skills-summary skills-muted-text text-xs">
           共 {items.length} 类能力 · {availableGroups} 类可用 · {availableServers}/{configuredServers} 个服务已启用
+          {lastCheckedAt ? ` · ${new Date(lastCheckedAt).toLocaleTimeString("zh-CN", { hour12: false })} 刷新` : ""}
         </div>
-        <button className="skills-btn" onClick={() => void loadMcpTools()} disabled={loading}>
+        <button className="skills-btn" onClick={() => void loadMcpTools({ force: true })} disabled={loading}>
           <RefreshCw size={14} /> 刷新
         </button>
       </div>
@@ -400,6 +431,9 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
                     </span>
                     <span className="skills-mcp-group__status">
                       <span className={`skills-chip skills-mcp-scope skills-mcp-scope--${scope}`}>{mcpScopeLabel(scope)}</span>
+                      <span className={`skills-chip ${pillToneClass(mcpLiveStatusTone(item.liveStatus))}`}>
+                        {mcpLiveStatusLabel(item.liveStatus)}
+                      </span>
                       <span className={`skills-chip ${pillToneClass(mcpStatusTone(item.status))}`}>
                         {mcpStatusLabel(item.status)} {item.availableCount}/{item.serverCount}
                       </span>
@@ -416,9 +450,13 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
                           </span>
                           <span className="skills-mcp-flat__meta">
                             <span className="skills-mcp-child__server">{flatChild.serverId}</span>
+                            <span className={`skills-chip ${pillToneClass(mcpLiveStatusTone(flatChild.liveStatus))}`}>{mcpLiveStatusLabel(flatChild.liveStatus)}</span>
                             <span className={`skills-chip ${pillToneClass(mcpStatusTone(flatChild.status))}`}>{mcpStatusLabel(flatChild.status)}</span>
                           </span>
                         </div>
+                        {flatChild.liveError && (
+                          <div className="skills-muted-text text-xs">实时探测失败，当前展示配置回退：{flatChild.liveError}</div>
+                        )}
                         <div className="skills-mcp-tools">
                           {flatTools.map((tool) => (
                             <div key={`${flatChild.id}:${tool.name}`} className="skills-mcp-tool">
@@ -445,11 +483,15 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
                                 </span>
                                 <span className="skills-mcp-child__meta">
                                   <span className="skills-mcp-child__server">{child.serverId}</span>
+                                  <span className={`skills-chip ${pillToneClass(mcpLiveStatusTone(child.liveStatus))}`}>{mcpLiveStatusLabel(child.liveStatus)}</span>
                                   <span className={`skills-chip ${pillToneClass(childTone)}`}>{mcpStatusLabel(child.status)}</span>
                                 </span>
                               </div>
 
                               <div className="skills-mcp-child__panel" aria-hidden="false">
+                                {child.liveError && (
+                                  <div className="skills-muted-text text-xs">实时探测失败，当前展示配置回退：{child.liveError}</div>
+                                )}
                                 <div className="skills-mcp-tools">
                                   {tools.map((tool) => (
                                     <div key={`${child.id}:${tool.name}`} className="skills-mcp-tool">

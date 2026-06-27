@@ -498,6 +498,8 @@ function CoopOfficeHome({
 export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
   const [, setLocationCoop] = useLocation();
   const [mode, setMode] = useState<PageMode>("list");
+  const coopSessionPath = (sessionId: string) =>
+    _adoptId ? `/coop/${sessionId}?fromAdoptId=${encodeURIComponent(_adoptId)}` : `/coop/${sessionId}`;
 
   if (mode === "create") {
     return (
@@ -513,7 +515,7 @@ export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
             </div>
           </div>
           <CoopNewForm
-            onDone={(sid) => setLocationCoop(`/coop/${sid}`)}
+            onDone={(sid) => setLocationCoop(coopSessionPath(sid))}
             onCancel={() => setMode("list")}
           />
         </div>
@@ -525,6 +527,7 @@ export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
     <PageContainer title="协作工作台" icon={<Users size={18} />}>
       <div className="coop-workbench">
         <CoopWorkbenchDashboard
+          adoptId={_adoptId}
           onCreate={() => setMode("create")}
         />
       </div>
@@ -532,7 +535,7 @@ export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
   );
 }
 
-function CoopWorkbenchDashboard({ onCreate }: { onCreate?: () => void }) {
+function CoopWorkbenchDashboard({ adoptId, onCreate }: { adoptId?: string; onCreate?: () => void }) {
   const [, setLocationCoop] = useLocation();
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const wlQ = trpc.coop.isWhitelisted.useQuery();
@@ -542,11 +545,14 @@ function CoopWorkbenchDashboard({ onCreate }: { onCreate?: () => void }) {
   );
   const { data: myClawData } = trpc.claw.me.useQuery(undefined, { retry: false });
   const creatorAdoptId = (myClawData as any)?.adoption?.adoptId || (myClawData as any)?.adoptId || "lgc-creator";
+  const sourceAdoptId = adoptId || creatorAdoptId;
+  const coopSessionPath = (sessionId: string) =>
+    sourceAdoptId ? `/coop/${sessionId}?fromAdoptId=${encodeURIComponent(sourceAdoptId)}` : `/coop/${sessionId}`;
   const createMut = trpc.coop.create.useMutation({
     onSuccess: (r) => {
       setSelectedIds([]);
       toast.success("协作已创建");
-      setLocationCoop(`/coop/${r.sessionId}`);
+      setLocationCoop(coopSessionPath(r.sessionId));
     },
     onError: (error) => toast.error(error.message || "协作创建失败"),
   });
@@ -584,7 +590,7 @@ function CoopWorkbenchDashboard({ onCreate }: { onCreate?: () => void }) {
   return (
     <div className="coop-dashboard-layout">
       <div className="coop-dashboard-main">
-        <CoopSessionsWorkbench />
+        <CoopSessionsWorkbench adoptId={sourceAdoptId} />
       </div>
       <div className="coop-dashboard-side">
         <div className="coop-side-tab" aria-label="可协作智能体数量">
@@ -709,8 +715,10 @@ function CoopAgentsPanel({
   );
 }
 
-function CoopSessionsWorkbench() {
+function CoopSessionsWorkbench({ adoptId }: { adoptId?: string }) {
   const [, setLoc] = useLocation();
+  const coopSessionPath = (sessionId: string) =>
+    adoptId ? `/coop/${sessionId}?fromAdoptId=${encodeURIComponent(adoptId)}` : `/coop/${sessionId}`;
   const { confirm, dialog } = useConfirmDialog();
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const { data: sessions, isLoading, isFetching, refetch } = trpc.coop.listMySessions.useQuery({ limit: 80 }, {
@@ -907,7 +915,7 @@ function CoopSessionsWorkbench() {
                   key={session.id}
                   className="coop-task-row"
                   data-action={flags.needMyAction || flags.readyToConsolidate ? "true" : "false"}
-                  onClick={() => setLoc(`/coop/${session.id}`)}
+                  onClick={() => setLoc(coopSessionPath(session.id))}
                   role="row"
                 >
                   <div className="coop-task-row__title-cell">
@@ -947,7 +955,7 @@ function CoopSessionsWorkbench() {
                     </button>
                     {openMenuId === session.id ? (
                       <div className="coop-row-menu" data-coop-menu role="menu" aria-label="协作任务操作">
-                        <button type="button" className="coop-row-menu__item" onClick={() => { setOpenMenuId(null); setLoc(`/coop/${session.id}`); }}>
+                        <button type="button" className="coop-row-menu__item" onClick={() => { setOpenMenuId(null); setLoc(coopSessionPath(session.id)); }}>
                           <ExternalLink size={14} />
                           打开协作
                         </button>

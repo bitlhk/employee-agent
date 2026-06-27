@@ -25,6 +25,12 @@ import { requireActiveCoopProfile } from "../db/coop-identity";
 import { consolidateCoopSession } from "../_core/coop-orchestrator";
 import { notifyCoopEvent } from "../_core/coop-notify";
 
+function deriveCoopTitle(text: string): string {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return "未命名协作";
+  return clean.length > 48 ? `${clean.slice(0, 48)}...` : clean;
+}
+
 function coopAccessMessage(kind: string): string {
   switch (kind) {
     case "profile_missing":
@@ -108,6 +114,36 @@ export const coopRouter = router({
       const r = await getCoopSession(input.sessionId, ctx.user!.id);
       if (!r) throw new TRPCError({ code: "NOT_FOUND" });
       return r;
+    }),
+
+  // ── 发起人：修改协作标题 ───────────────────────────
+  updateTitle: protectedProcedure
+    .input(z.object({
+      sessionId: z.string().min(1).max(80),
+      title: z.string().min(1).max(120),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const title = deriveCoopTitle(input.title);
+      const ses = await getCoopSession(input.sessionId, ctx.user!.id);
+      if (!ses) throw new TRPCError({ code: "NOT_FOUND", message: "协作不存在或无权访问" });
+      if ((ses.session as any).creatorUserId !== ctx.user!.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "只有发起人可以修改协作名称" });
+      }
+
+      const { getDb } = await import("../db");
+      const { lxCoopSessions } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const { appendCoopEvent } = await import("../db/coop");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.update(lxCoopSessions).set({ title }).where(eq(lxCoopSessions.id, input.sessionId));
+      await appendCoopEvent({
+        sessionId: input.sessionId,
+        eventType: "session_renamed",
+        actorUserId: ctx.user!.id,
+        payload: { title },
+      });
+      return { ok: true, title };
     }),
 
   // ── 我的协作列表（发起 + 参与） ────────────────────
@@ -356,6 +392,19 @@ export const coopRouter = router({
         actorUserId: ctx.user!.id,
         payload: { text: input.text.trim(), attachments: input.attachments || [] },
       });
+      const currentTitle = String((ses.session as any).title || "").trim();
+      if (!currentTitle || currentTitle === "未命名协作") {
+        const { getDb } = await import("../db");
+        const { lxCoopSessions } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const db = await getDb();
+        if (db) {
+          await db
+            .update(lxCoopSessions)
+            .set({ title: deriveCoopTitle(input.text) })
+            .where(eq(lxCoopSessions.id, input.sessionId));
+        }
+      }
       return { ok: true };
     }),
 

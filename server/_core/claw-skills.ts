@@ -571,6 +571,157 @@ function readAllowedToolNames(config: Record<string, any>): Set<string> {
   return names;
 }
 
+type McpLiveTool = {
+  name: string;
+  description: string;
+};
+
+type McpLiveStatus = {
+  serverId: string;
+  status: "live" | "unavailable" | "unsupported";
+  tools: McpLiveTool[];
+  checkedAt: string;
+  error?: string;
+};
+
+const MCP_TOOLS_LIVE_TTL_MS = 45_000;
+const mcpToolsLiveCache = new Map<string, { expiresAt: number; value: McpLiveStatus }>();
+
+function normalizeMcpTransport(raw: any): string {
+  return String(raw?.transport || raw?.type || "").trim().toLowerCase();
+}
+
+function normalizeMcpUrl(raw: any): string {
+  return String(raw?.url || raw?.endpoint || "").trim();
+}
+
+function normalizeMcpHeaders(raw: any): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const source = raw?.headers && typeof raw.headers === "object" ? raw.headers : {};
+  for (const [key, value] of Object.entries(source)) {
+    if (!key) continue;
+    headers[key] = String(value ?? "").replace(/\$\{([A-Z0-9_]+)\}/g, (_, name) => {
+      if (name === "OPENCLAW_AGENT_ID") return "";
+      return process.env[name] || "";
+    });
+  }
+  return headers;
+}
+
+function readMcpToolInclude(raw: any): Set<string> | null {
+  const include = raw?.toolFilter?.include;
+  if (!Array.isArray(include)) return null;
+  const names = include.map((item: any) => String(item || "").trim()).filter(Boolean);
+  return names.length > 0 ? new Set(names) : null;
+}
+
+function parseMcpToolsListPayload(text: string): McpLiveTool[] {
+  const payload = String(text || "").trim();
+  if (!payload) return [];
+  const candidates: string[] = [];
+  if (payload.includes("\ndata:") || payload.startsWith("data:")) {
+    const dataLines = payload
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line.startsWith("data:"))
+      .map(line => line.slice(5).trim())
+      .filter(Boolean);
+    candidates.push(...dataLines.reverse());
+  }
+  candidates.push(payload);
+  for (const candidate of candidates) {
+    try {
+      const json = JSON.parse(candidate);
+      const tools = json?.result?.tools || json?.tools || json?.data?.tools;
+      if (!Array.isArray(tools)) continue;
+      return tools
+        .map((tool: any) => ({
+          name: String(tool?.name || "").trim(),
+          description: String(tool?.description || "").trim(),
+        }))
+        .filter(tool => tool.name);
+    } catch {
+      continue;
+    }
+  }
+  return [];
+}
+
+async function fetchMcpLiveStatus(serverId: string, raw: any, options: { force?: boolean } = {}): Promise<McpLiveStatus> {
+  const now = Date.now();
+  const checkedAt = new Date(now).toISOString();
+  const cacheKey = `${serverId}:${normalizeMcpUrl(raw)}`;
+  const cached = mcpToolsLiveCache.get(cacheKey);
+  if (!options.force && cached && cached.expiresAt > now) return cached.value;
+
+  const transport = normalizeMcpTransport(raw);
+  const url = normalizeMcpUrl(raw);
+  if (!url || (transport && transport !== "url" && transport !== "streamable-http" && transport !== "http")) {
+    const value: McpLiveStatus = { serverId, status: "unsupported", tools: [], checkedAt };
+    mcpToolsLiveCache.set(cacheKey, { expiresAt: now + MCP_TOOLS_LIVE_TTL_MS, value });
+    return value;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2500);
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        connection: "close",
+        ...normalizeMcpHeaders(raw),
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      signal: controller.signal,
+    });
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    let tools = parseMcpToolsListPayload(text);
+    const include = readMcpToolInclude(raw);
+    if (include) tools = tools.filter(tool => include.has(tool.name));
+    const value: McpLiveStatus = {
+      serverId,
+      status: "live",
+      tools,
+      checkedAt,
+    };
+    mcpToolsLiveCache.set(cacheKey, { expiresAt: now + MCP_TOOLS_LIVE_TTL_MS, value });
+    return value;
+  } catch (e: any) {
+    const value: McpLiveStatus = {
+      serverId,
+      status: "unavailable",
+      tools: [],
+      checkedAt,
+      error: e?.name === "AbortError" ? "timeout" : String(e?.message || e || "fetch failed"),
+    };
+    mcpToolsLiveCache.set(cacheKey, { expiresAt: now + MCP_TOOLS_LIVE_TTL_MS, value });
+    return value;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchMcpLiveStatuses(
+  servers: Record<string, any>,
+  allowedServerIds: Set<string>,
+  options: { force?: boolean } = {}
+): Promise<Record<string, McpLiveStatus>> {
+  const entries = Object.entries(servers).filter(
+    ([serverId, raw]) => allowedServerIds.has(serverId) && !Boolean((raw as any)?.disabled)
+  );
+  const result: Record<string, McpLiveStatus> = {};
+  const concurrency = 4;
+  for (let i = 0; i < entries.length; i += concurrency) {
+    const chunk = entries.slice(i, i + concurrency);
+    const rows = await Promise.all(chunk.map(([serverId, raw]) => fetchMcpLiveStatus(serverId, raw, options)));
+    for (const row of rows) result[row.serverId] = row;
+  }
+  return result;
+}
+
 function readSkillMarkdownCandidate(
   dir?: string
 ): { text: string; source: "runtime" | "source" } | null {
@@ -620,9 +771,14 @@ function mcpServerExistsOnDisk(serverId: string, raw: any): boolean {
   return existsSync(path.join(OPENCLAW_HOME, "mcp", serverId));
 }
 
-export function listMcpToolGroups(options: { allowedServerIds?: Set<string> | null; invocationCounts?: Record<string, { total: number; tools: Record<string, number> }> | null } = {}) {
+export function listMcpToolGroups(options: {
+  allowedServerIds?: Set<string> | null;
+  invocationCounts?: Record<string, { total: number; tools: Record<string, number> }> | null;
+  liveStatuses?: Record<string, McpLiveStatus> | null;
+} = {}) {
   const allowedServerIds = options.allowedServerIds || null;
   const invocationCounts = options.invocationCounts || {};
+  const liveStatuses = options.liveStatuses || {};
   const config = readOpenClawConfig();
   const servers = readOpenClawMcpServers(config);
   const allowedToolNames = readAllowedToolNames(config);
@@ -664,7 +820,16 @@ export function listMcpToolGroups(options: { allowedServerIds?: Set<string> | nu
         ? child.tools.map(tool => String(tool?.name || "").trim()).filter(Boolean)
         : [];
       const invocationCount = visibleServerIds.reduce((sum, serverId) => sum + Number(invocationCounts[serverId]?.total || 0), 0);
-      const tools = Array.isArray(child.tools)
+      const liveRows = visibleServerIds
+        .map(serverId => liveStatuses[serverId])
+        .filter(Boolean);
+      const liveTools = liveRows
+        .filter(row => row.status === "live")
+        .flatMap(row => row.tools || []);
+      const hasLiveProbe = liveRows.length > 0;
+      const hasLiveSuccess = liveRows.some(row => row.status === "live");
+      const hasLiveFailure = liveRows.some(row => row.status === "unavailable");
+      const fallbackTools = Array.isArray(child.tools)
         ? child.tools.map((tool: any) => {
           const toolName = String(tool?.name || "").trim();
           const toolInvocationCount = visibleServerIds.reduce(
@@ -674,17 +839,43 @@ export function listMcpToolGroups(options: { allowedServerIds?: Set<string> | nu
           return { ...tool, invocationCount: toolInvocationCount };
         })
         : child.tools;
+      const liveToolNames = new Set<string>();
+      const tools = liveTools.length > 0
+        ? liveTools
+          .filter(tool => {
+            if (liveToolNames.has(tool.name)) return false;
+            liveToolNames.add(tool.name);
+            return true;
+          })
+          .map(tool => {
+            const toolInvocationCount = visibleServerIds.reduce(
+              (sum, serverId) => sum + Number(invocationCounts[serverId]?.tools?.[tool.name] || 0),
+              0
+            );
+            return { ...tool, invocationCount: toolInvocationCount, source: "live" };
+          })
+        : fallbackTools;
       const pluginToolsConfigured =
         toolNames.length > 0 && toolNames.every(toolName => allowedToolNames.has(toolName));
       const configured = aliasServers.some(server => server.configured) || pluginToolsConfigured;
       const enabled = aliasServers.some(
         server => server.configured && server.enabled
       ) || pluginToolsConfigured;
-      const status = enabled
+      const status = enabled && (!hasLiveProbe || hasLiveSuccess)
         ? "available"
-        : configured
+        : configured || hasLiveFailure
           ? "disabled"
           : "missing";
+      const liveStatus = hasLiveSuccess
+        ? "live"
+        : hasLiveFailure
+          ? "unavailable"
+          : hasLiveProbe
+            ? "unsupported"
+            : "fallback";
+      const liveErrors = liveRows
+        .filter(row => row.error)
+        .map(row => `${row.serverId}: ${row.error}`);
       return {
         id: child.id,
         name: child.name,
@@ -696,6 +887,10 @@ export function listMcpToolGroups(options: { allowedServerIds?: Set<string> | nu
         existsOnDisk: aliasServers.some(server => server.existsOnDisk) || pluginToolsConfigured,
         invocationCount,
         tools,
+        toolSource: liveTools.length > 0 ? "live" : "fallback",
+        liveStatus,
+        liveCheckedAt: liveRows.map(row => row.checkedAt).sort().pop() || null,
+        liveError: liveErrors[0] || null,
       };
     });
     const availableCount = children.filter(
@@ -718,6 +913,13 @@ export function listMcpToolGroups(options: { allowedServerIds?: Set<string> | nu
       configuredCount,
       serverCount: children.length,
       invocationCount: children.reduce((sum, child: any) => sum + Number(child.invocationCount || 0), 0),
+      liveStatus: children.some((child: any) => child.liveStatus === "live")
+        ? "live"
+        : children.some((child: any) => child.liveStatus === "unavailable")
+          ? "unavailable"
+          : children.some((child: any) => child.liveStatus === "unsupported")
+            ? "unsupported"
+            : "fallback",
       children,
     };
   }).filter(group => group.children.length > 0);
@@ -912,18 +1114,44 @@ export function registerSkillRoutes(app: express.Express) {
       if (!claw) return;
       const roleTemplate = String((claw as any).roleTemplate || "general-assistant");
       const effectiveAssets = await resolveEffectiveRoleAssets(roleTemplate);
+      const force = String(req.query.force || "") === "1";
       const allowedServerIds = new Set([
         ...effectiveAssets.mcpServers.default,
         ...effectiveAssets.mcpServers.optional,
       ]);
+      const config = readOpenClawConfig();
+      const servers = readOpenClawMcpServers(config);
+      const liveStatuses = await fetchMcpLiveStatuses(servers, allowedServerIds, { force }).catch(
+        (e) => {
+          console.warn("[mcp tools] live probe failed", e);
+          return {} as Record<string, McpLiveStatus>;
+        }
+      );
       const invocationCounts = await listMcpInvocationCounts(Array.from(allowedServerIds)).catch(
         () => ({} as Record<string, { total: number; tools: Record<string, number> }>)
       );
+      const payload = listMcpToolGroups({ allowedServerIds, invocationCounts, liveStatuses });
       res.json({
-        ...listMcpToolGroups({ allowedServerIds, invocationCounts }),
+        ...payload,
         roleTemplate,
         filtered: true,
         allowedServerIds: Array.from(allowedServerIds).sort(),
+        live: {
+          enabled: true,
+          ttlMs: MCP_TOOLS_LIVE_TTL_MS,
+          checkedAt: new Date().toISOString(),
+          serverStatuses: Object.fromEntries(
+            Object.entries(liveStatuses).map(([serverId, status]) => [
+              serverId,
+              {
+                status: status.status,
+                toolCount: status.tools.length,
+                checkedAt: status.checkedAt,
+                error: status.error || null,
+              },
+            ])
+          ),
+        },
       });
     } catch (e) {
       console.error("[mcp tools] status failed", e);
