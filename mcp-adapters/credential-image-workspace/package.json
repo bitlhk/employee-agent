@@ -8,5 +8,7 @@
     "check": "node --check credential-image-workspace-adapter.mjs",
     "start": "node credential-image-workspace-adapter.mjs"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
 }

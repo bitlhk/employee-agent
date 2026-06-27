@@ -10,9 +10,13 @@ import { createServer } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MCP_PROTOCOL_VERSION = "2025-03-26";
+const SERVICE_NAME = "credential-image-workspace-adapter";
+const SERVICE_VERSION = "0.1.0";
 
 function loadLocalEnv() {
   for (const name of [".env", "credential-image-workspace-adapter.env"]) {
@@ -73,6 +77,10 @@ const TOOLS = [
           description: "凭证类型，未知可填 auto。",
           default: "auto",
         },
+        credential_type: {
+          type: "string",
+          description: "可选，上游凭证识别服务要求的凭证类型。未提供时使用 document_type。",
+        },
         task: {
           type: "string",
           enum: ["extract_fields", "classify", "generate_prompt"],
@@ -105,20 +113,6 @@ const TOOLS = [
 function json(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
-}
-
-async function readBody(req) {
-  const chunks = [];
-  for await (const c of req) chunks.push(c);
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-function rpcResult(id, result) {
-  return { jsonrpc: "2.0", id, result };
-}
-
-function rpcError(id, code, message, data) {
-  return { jsonrpc: "2.0", id, error: { code, message, ...(data ? { data } : {}) } };
 }
 
 function contentText(data) {
@@ -228,9 +222,12 @@ async function encodeFile(file, args) {
 }
 
 function buildUpstreamArguments(args, encoded, fileMeta) {
+  const documentType = args.document_type || args.credential_type || "auto";
+  const credentialType = args.credential_type || documentType;
   return {
     [UPSTREAM_IMAGE_FIELD]: [encoded.payload],
-    document_type: args.document_type || "auto",
+    document_type: documentType,
+    credential_type: credentialType,
     task: args.task || "extract_fields",
     question: args.question || "",
     source: {
@@ -311,38 +308,57 @@ async function callTool(name, args, headers) {
   };
 }
 
-async function handleJsonRpc(body, headers) {
-  const { jsonrpc, id, method, params } = body || {};
-  if (jsonrpc !== "2.0") return rpcError(id ?? null, -32600, "Invalid Request: jsonrpc version must be 2.0");
-  try {
-    switch (method) {
-      case "initialize":
-        return rpcResult(id, {
-          protocolVersion: MCP_PROTOCOL_VERSION,
-          capabilities: { tools: {} },
-          serverInfo: { name: "credential-image-workspace-adapter", version: "0.1.0" },
-        });
-      case "notifications/initialized":
-        return null;
-      case "tools/list":
-        return rpcResult(id, { tools: TOOLS });
-      case "tools/call": {
-        const name = params?.name;
-        const args = params?.arguments || {};
-        const tool = TOOLS.find(t => t.name === name);
-        if (!tool) return rpcError(id, -32602, `Invalid params: tool '${name}' not found`);
-        const result = await callTool(name, args, headers);
-        return rpcResult(id, contentText(result));
-      }
-      default:
-        return rpcError(id, -32601, `Method not found: ${method}`);
+function createMcpServer(headers) {
+  const server = new Server(
+    { name: SERVICE_NAME, version: SERVICE_VERSION },
+    {
+      capabilities: { tools: {} },
+      instructions: "Workspace-scoped credential image extraction MCP adapter.",
+    },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const startedAt = Date.now();
+    const { name, arguments: args } = request.params;
+    try {
+      const result = await callTool(name, args || {}, headers);
+      console.log(JSON.stringify({
+        method: name,
+        agentId: result.agentId || "",
+        status: "ok",
+        elapsed: Date.now() - startedAt,
+      }));
+      return contentText(result);
+    } catch (err) {
+      const message = err?.message || String(err);
+      console.error(JSON.stringify({
+        method: name,
+        status: "error",
+        elapsed: Date.now() - startedAt,
+        error: message,
+      }));
+      return {
+        content: [{ type: "text", text: JSON.stringify({ ok: false, error: message }) }],
+        isError: true,
+      };
     }
-  } catch (e) {
-    return rpcError(id, -32000, e?.message || String(e));
-  }
+  });
+
+  return server;
 }
 
-const server = createServer(async (req, res) => {
+const httpServer = createServer(async (req, res) => {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization,x-jiuwen-channel-id,x-linggan-agent-id,x-openclaw-agent-id,x-request-id",
+    });
+    res.end();
+    return;
+  }
+
   if (req.method === "GET" && req.url === "/health") {
     let upstream = "unknown";
     try {
@@ -353,7 +369,8 @@ const server = createServer(async (req, res) => {
     }
     json(res, 200, {
       status: "ok",
-      name: "credential-image-workspace-adapter",
+      name: SERVICE_NAME,
+      version: SERVICE_VERSION,
       port: PORT,
       upstream,
       serviceRoots: SERVICE_ROOTS,
@@ -364,23 +381,36 @@ const server = createServer(async (req, res) => {
     json(res, 404, { error: "not found" });
     return;
   }
+  const mcpServer = createMcpServer(req.headers);
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   try {
-    const raw = await readBody(req);
-    const body = raw ? JSON.parse(raw) : {};
-    const result = Array.isArray(body)
-      ? (await Promise.all(body.map(item => handleJsonRpc(item, req.headers)))).filter(Boolean)
-      : await handleJsonRpc(body, req.headers);
-    if (result === null) {
-      res.writeHead(204);
-      res.end();
-      return;
+    await mcpServer.connect(transport);
+    await transport.handleRequest(req, res);
+    res.on("close", () => {
+      transport.close().catch(() => {});
+      mcpServer.close().catch(() => {});
+    });
+  } catch (err) {
+    const message = err?.message || String(err);
+    console.error(`[${SERVICE_NAME}] request error`, message);
+    try {
+      await transport.close();
+      await mcpServer.close();
+    } catch {}
+    if (!res.headersSent) {
+      res.writeHead(500, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify({ ok: false, error: message }));
     }
-    json(res, 200, result);
-  } catch (e) {
-    json(res, 400, rpcError(null, -32700, `Parse error: ${e?.message || e}`));
   }
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`credential-image-workspace-adapter listening on http://${HOST}:${PORT} -> ${UPSTREAM}`);
+httpServer.keepAliveTimeout = 0;
+httpServer.headersTimeout = 5000;
+httpServer.requestTimeout = 130000;
+
+httpServer.listen(PORT, HOST, () => {
+  console.log(`[${SERVICE_NAME}] listening on http://${HOST}:${PORT}/mcp -> ${UPSTREAM}`);
 });

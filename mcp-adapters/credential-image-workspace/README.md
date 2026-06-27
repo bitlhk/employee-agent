@@ -2,7 +2,9 @@
 
 轻量 MCP adapter，用于企业 EA / JiuwenSwarm 场景下处理用户工作目录里的凭证图片。
 
-目标不是做通用文件服务，也不引入 OSS / file_id。工具只接受当前 Agent workspace 内的相对路径，adapter 在服务端本机读取文件、校验路径边界、必要时压缩图片，再把 base64/data URI 传给上游凭证识别 MCP 服务。
+目标不是做通用文件服务，也不引入 OSS / file_id。工具只接受当前 Agent workspace 内的相对路径，adapter 在服务端本机读取文件、校验路径边界、必要时压缩图片，再把 base64 传给上游凭证识别 MCP 服务。
+
+实现使用官方 MCP SDK 的 `StreamableHTTPServerTransport`，避免手写 JSON-RPC/HTTP 长连接处理导致 fd 泄漏。
 
 ## Tool
 
@@ -51,6 +53,14 @@ node credential-image-workspace-adapter.mjs
 ```
 
 默认监听 `127.0.0.1:17898`，MCP 入口为 `POST /mcp`，健康检查为 `GET /health`。
+
+直接调试 `/mcp` 时需要携带 MCP SDK 要求的 Accept 头：
+
+```bash
+curl -H 'Accept: application/json, text/event-stream' \
+  -H 'Content-Type: application/json' \
+  http://127.0.0.1:17898/mcp
+```
 
 ## JiuwenSwarm Registration
 
