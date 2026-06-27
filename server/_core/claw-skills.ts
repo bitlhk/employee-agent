@@ -424,6 +424,18 @@ const MCP_TOOL_CATALOG = [
           },
         ],
       },
+      {
+        id: "credential-image-workspace",
+        name: "工作目录凭证图片处理",
+        description: "读取当前 Agent 工作目录内的凭证图片或 PDF，安全转换后调用凭证识别服务。",
+        serverIds: ["credential_image_workspace"],
+        tools: [
+          {
+            name: "credential_image_extract_from_workspace",
+            description: "工作目录凭证处理：仅接受 workspace 相对路径，服务端校验边界后执行凭证分类、要素提取或提示词生成。",
+          },
+        ],
+      },
     ],
     recommendedSkills: ["credential-review"],
   },

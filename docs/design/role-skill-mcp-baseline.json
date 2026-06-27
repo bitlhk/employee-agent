@@ -191,6 +191,7 @@
             "kyc-doc-parse"
           ],
           "mcpServers": [
+            "credential_image_workspace",
             "credential_skills",
             "group_insurance_audit"
           ],
@@ -200,6 +201,7 @@
             "completeness-audit",
             "compliance-audit",
             "credential-extractor",
+            "credential_image_extract_from_workspace",
             "credential-prompt-generator",
             "group_insurance_audit_workflow",
             "image-analyzer",

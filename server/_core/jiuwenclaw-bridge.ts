@@ -189,6 +189,7 @@ export function inferMcpServerForJiuwenTool(toolName: string): string | null {
   if (name.startsWith("get_technical_") || name.startsWith("get_risk_")) return "wind_analytics_data";
   if (name.startsWith("insurance_telesales_")) return "insurance_telesales_recommend";
   if (name.startsWith("insurance_")) return "insurance_kb";
+  if (name.startsWith("credential_image_")) return "credential_image_workspace";
   if (name.startsWith("credential_")) return "credential_skills";
   if (name.startsWith("group_insurance_")) return "group_insurance_audit";
   if (name.startsWith("post_loan_")) return "post_loan_risk_data";
