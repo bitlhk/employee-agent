@@ -1,5 +1,5 @@
 import { BrandIcon } from "@/components/BrandIcon";
-import { memo, useMemo, useState, useRef } from "react";
+import { memo, useEffect, useMemo, useState, useRef } from "react";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { cleanLeakedToolTags } from "@/lib/clean-leaked-tags";
 import { formatModelName } from "@/lib/modelDisplay";
@@ -12,7 +12,7 @@ export type ToolCallEntry = {
   status: "running" | "done" | "error";
   durationMs?: number;
   ts: number;
-  executor?: "sandbox" | "native" | "none" | "gateway";
+  executor?: "sandbox" | "native" | "none" | "gateway" | "jiuwenswarm" | "timeout";
   truncated?: boolean;
   suppressedOriginalResult?: boolean;
   policyDenyReason?: string;
@@ -20,6 +20,48 @@ export type ToolCallEntry = {
   outputFiles?: Array<{ name: string; size: number; wsPath?: string }>;
   adoptId?: string;
   _gateway?: boolean;
+};
+
+export type MessageEventEntry =
+  | {
+      type: "text";
+      id?: string;
+      content: string;
+    }
+  | {
+      type: "tool_call";
+      id: string;
+      name: string;
+      arguments?: string;
+      result?: string;
+      status?: "running" | "done" | "error";
+      ts?: number;
+      durationMs?: number;
+      executor?: ToolCallEntry["executor"];
+      truncated?: boolean;
+      suppressedOriginalResult?: boolean;
+      policyDenyReason?: string;
+      auditId?: string;
+      outputFiles?: ToolCallEntry["outputFiles"];
+      adoptId?: string;
+      _gateway?: boolean;
+    }
+  | {
+      type: "permission_request";
+      id: string;
+      permission: JiuwenPermissionRequestCard;
+    };
+
+export type JiuwenPermissionRequestCard = {
+  requestId: string;
+  source: string;
+  title: string;
+  question: string;
+  command?: string;
+  toolName?: string;
+  options?: Array<{ label: string; description?: string; value?: string }>;
+  state?: "pending" | "submitting" | "approved" | "rejected" | "error";
+  error?: string;
 };
 
 type ChatMessageProps = {
@@ -32,11 +74,71 @@ type ChatMessageProps = {
   modelId: string;
   timeLabel: string;
   toolCalls?: ToolCallEntry[];
+  messageEvents?: MessageEventEntry[];
   showToolCalls?: boolean;
   usage?: { input: number; output: number };
   contextPercent?: number | null;
   onDelete?: () => void;
+  jiuwenPermission?: JiuwenPermissionRequestCard;
+  onJiuwenPermissionAnswer?: (request: JiuwenPermissionRequestCard, action: "allow_once" | "reject") => void;
 };
+
+function streamingMarkdownDelay(chars: number) {
+  if (chars > 12_000) return 450;
+  if (chars > 8_000) return 300;
+  return 160;
+}
+
+function useThrottledText(value: string, delayMs: number, enabled: boolean) {
+  const [throttled, setThrottled] = useState(value);
+  const lastUpdateRef = useRef(0);
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      if (timerRef.current != null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      setThrottled(value);
+      lastUpdateRef.current = Date.now();
+      return;
+    }
+
+    const now = Date.now();
+    const elapsed = now - lastUpdateRef.current;
+    const run = () => {
+      setThrottled(value);
+      lastUpdateRef.current = Date.now();
+      timerRef.current = null;
+    };
+
+    if (elapsed >= delayMs) {
+      if (timerRef.current != null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      run();
+    } else if (timerRef.current == null) {
+      timerRef.current = window.setTimeout(run, delayMs - elapsed);
+    }
+
+    return () => {
+      if (timerRef.current != null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [value, delayMs, enabled]);
+
+  return enabled ? throttled : value;
+}
+
+function repairStreamingMarkdown(content: string) {
+  const text = String(content || "");
+  const fenceCount = (text.match(/```/g) || []).length;
+  return fenceCount % 2 === 1 ? `${text}\n\`\`\`` : text;
+}
 
 // ── Gateway 内部工具内联状态（web_search / memory_search 等）──
 const GATEWAY_TOOL_META: Record<string, { icon: string; label: string }> = {
@@ -45,6 +147,12 @@ const GATEWAY_TOOL_META: Record<string, { icon: string; label: string }> = {
   memory_search: { icon: "🧠", label: "查找记忆" },
   read:          { icon: "📄", label: "读取文件" },
   thinking:      { icon: "💭", label: "深度思考" },
+  bash:          { icon: "⌘", label: "执行命令" },
+  shell:         { icon: "⌘", label: "执行命令" },
+  write:         { icon: "✎", label: "写入文件" },
+  edit:          { icon: "✎", label: "编辑文件" },
+  grep:          { icon: "⌕", label: "搜索文件" },
+  glob:          { icon: "⌕", label: "查找路径" },
 };
 
 function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; filePath: string; fileName: string }) {
@@ -187,6 +295,42 @@ function toolResultSnippet(tc: ToolCallEntry): string {
   return text.length > 78 ? `${text.slice(0, 78)}...` : text;
 }
 
+function CopyableToolBlock({ label, value, danger = false }: { label: string; value: string; danger?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const text = String(value || "");
+  const isLong = text.length > 900 || text.split("\n").length > 14;
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {}
+  };
+
+  return (
+    <div className="lingxia-toolcard__section">
+      <div className="lingxia-toolcard__section-head">
+        <div className="lingxia-toolcard__label">{label}</div>
+        <div className="lingxia-toolcard__section-actions">
+          {isLong ? (
+            <button type="button" className="lingxia-toolcard__mini-btn" onClick={() => setExpanded((current) => !current)}>
+              {expanded ? "收起" : "展开"}
+            </button>
+          ) : null}
+          <button type="button" className="lingxia-toolcard__mini-btn" onClick={copy}>
+            {copied ? "已复制" : "复制"}
+          </button>
+        </div>
+      </div>
+      <pre className={`lingxia-toolcard__pre ${danger ? "lingxia-toolcard__pre--danger" : ""}`} data-expanded={expanded ? "true" : "false"}>
+        {text || "(无输出)"}
+      </pre>
+    </div>
+  );
+}
+
 function ToolCallDetailBody({ tc }: { tc: ToolCallEntry }) {
   const isRunning = tc.status === "running";
   const isError = tc.status === "error";
@@ -195,17 +339,11 @@ function ToolCallDetailBody({ tc }: { tc: ToolCallEntry }) {
   return (
     <div className="lingxia-toolcard__body">
       {argsDisplay && (
-        <div className="lingxia-toolcard__section">
-          <div className="lingxia-toolcard__label">参数</div>
-          <pre className="lingxia-toolcard__pre">{argsDisplay}</pre>
-        </div>
+        <CopyableToolBlock label="参数" value={argsDisplay} />
       )}
 
       {!isRunning && (
-        <div className="lingxia-toolcard__section">
-          <div className="lingxia-toolcard__label">{isError ? "错误" : "结果"}</div>
-          <pre className="lingxia-toolcard__pre">{tc.result || "(无输出)"}</pre>
-        </div>
+        <CopyableToolBlock label={isError ? "错误" : "结果"} value={tc.result || "(无输出)"} danger={isError} />
       )}
 
       {tc.outputFiles && tc.outputFiles.length > 0 && (
@@ -330,7 +468,7 @@ function ToolCallCard({ tc }: { tc: ToolCallEntry }) {
         <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: 4, background: isRunning ? "rgba(239,68,68,0.12)" : isDone ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)", flexShrink: 0 }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isRunning ? "#ef4444" : isDone ? "#22c55e" : "#ef4444"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         </span>
-        <span className="lingxia-toolcard__title">{tc.name}</span>
+        <span className="lingxia-toolcard__title">{toolCallLabel(tc)}</span>
         <span className="lingxia-toolcard__status">
           {isRunning && <span className="animate-pulse">执行中…</span>}
           {isDone    && "✓"}
@@ -357,7 +495,17 @@ function ToolCallCard({ tc }: { tc: ToolCallEntry }) {
 }
 
 function toolCallLabel(tc: ToolCallEntry): string {
-  return GATEWAY_TOOL_META[tc.name]?.label || tc.name.replace(/[_-]+/g, " ");
+  const rawName = String(tc.name || "tool");
+  const lower = rawName.toLowerCase();
+  if (GATEWAY_TOOL_META[rawName]) return GATEWAY_TOOL_META[rawName].label;
+  if (GATEWAY_TOOL_META[lower]) return GATEWAY_TOOL_META[lower].label;
+  if (rawName === "[产出文件]" || lower.includes("workspace_files")) return "产出文件";
+  if (lower.includes("weather")) return "查询天气";
+  if (lower.includes("search")) return "检索信息";
+  if (lower.includes("skill")) return "调用技能";
+  if (lower.includes("mcp")) return "调用 MCP 工具";
+  if (lower.includes("bash") || lower.includes("shell")) return "执行命令";
+  return rawName.replace(/[_-]+/g, " ");
 }
 
 function toolCallDurationLabel(tc: ToolCallEntry): string {
@@ -488,6 +636,63 @@ function toolCallsRenderSignature(toolCalls?: ToolCallEntry[]): string {
     .join("|");
 }
 
+function toolCallFromMessageEvent(event: MessageEventEntry): ToolCallEntry | null {
+  if (event.type !== "tool_call") return null;
+  const id = String(event.id || "").trim();
+  const name = String(event.name || "").trim();
+  if (!id || !name) return null;
+  return {
+    id,
+    name,
+    arguments: String(event.arguments || "{}"),
+    result: event.result,
+    status: event.status || (event.result != null ? "done" : "running"),
+    ts: Number(event.ts || Date.now()),
+    durationMs: event.durationMs,
+    executor: event.executor,
+    truncated: event.truncated,
+    suppressedOriginalResult: event.suppressedOriginalResult,
+    policyDenyReason: event.policyDenyReason,
+    auditId: event.auditId,
+    outputFiles: event.outputFiles,
+    adoptId: event.adoptId,
+    _gateway: event._gateway,
+  };
+}
+
+function toolCallsFromMessageEvents(events?: MessageEventEntry[]): ToolCallEntry[] {
+  if (!Array.isArray(events) || events.length === 0) return [];
+  const byId = new Map<string, ToolCallEntry>();
+  for (const event of events) {
+    const toolCall = toolCallFromMessageEvent(event);
+    if (!toolCall) continue;
+    const existing = byId.get(toolCall.id);
+    byId.set(toolCall.id, existing ? { ...existing, ...toolCall } : toolCall);
+  }
+  return Array.from(byId.values());
+}
+
+function messageEventsRenderSignature(events?: MessageEventEntry[]): string {
+  if (!events?.length) return "";
+  return events
+    .map((event) => {
+      if (event.type === "tool_call") {
+        return [
+          event.type,
+          event.id,
+          event.name,
+          event.status || "",
+          event.durationMs ?? "",
+          event.result ? event.result.length : 0,
+          event.outputFiles?.length ?? 0,
+        ].join(":");
+      }
+      if (event.type === "permission_request") return `${event.type}:${event.id}:${event.permission.state || ""}`;
+      return `${event.type}:${event.content.length}`;
+    })
+    .join("|");
+}
+
 function ChatMessageInner({
   role,
   text,
@@ -498,11 +703,17 @@ function ChatMessageInner({
   modelId,
   timeLabel,
   toolCalls,
+  messageEvents,
   showToolCalls = true,
   usage,
   contextPercent,
   onDelete,
+  jiuwenPermission,
+  onJiuwenPermissionAnswer,
 }: ChatMessageProps) {
+  const eventToolCalls = toolCallsFromMessageEvents(messageEvents);
+  const effectiveToolCalls = toolCalls && toolCalls.length > 0 ? toolCalls : eventToolCalls;
+
   if (role === "user") {
     return (
       <div className="flex items-start gap-3 justify-end lingxia-msg-fade">
@@ -533,9 +744,9 @@ function ChatMessageInner({
       <div className="flex items-start gap-3 lingxia-ai-bubble-wrap lingxia-msg-fade">
         <div className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center lingxia-avatar-ai" style={{ marginTop: 2 }}><BrandIcon size={22} /></div>
         <div>
-          {showToolCalls && toolCalls && toolCalls.length > 0 && (
+          {showToolCalls && effectiveToolCalls.length > 0 && (
             <div className="mb-2">
-              <ToolCallTimeline toolCalls={toolCalls} />
+              <ToolCallTimeline toolCalls={effectiveToolCalls} />
             </div>
           )}
           <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-1.5 lingxia-bubble-ai lingxia-typing-dots" style={{ color: "var(--oc-text-tertiary)" }}>
@@ -552,6 +763,12 @@ function ChatMessageInner({
   const [ttsPlaying, setTtsPlaying] = useState(false);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
   const displayText = useMemo(() => cleanLeakedToolTags(text), [text]);
+  const streamingMarkdownText = useThrottledText(
+    displayText,
+    streamingMarkdownDelay(displayText.length),
+    Boolean(isLast && streaming),
+  );
+  const renderedDisplayText = isLast && streaming ? repairStreamingMarkdown(streamingMarkdownText) : displayText;
   const onCopyMarkdown = async () => {
     try {
       await navigator.clipboard.writeText(displayText);
@@ -564,9 +781,9 @@ function ChatMessageInner({
     <div className="flex items-start gap-3 lingxia-ai-bubble-wrap lingxia-msg-fade">
       <div className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center lingxia-avatar-ai" style={{ marginTop: 2 }}><BrandIcon size={22} /></div>
       <div>
-        {showToolCalls && toolCalls && toolCalls.length > 0 && (
+        {showToolCalls && effectiveToolCalls.length > 0 && (
           <div className="mb-2">
-            <ToolCallTimeline toolCalls={toolCalls} />
+            <ToolCallTimeline toolCalls={effectiveToolCalls} />
           </div>
         )}
         <div className="relative group">
@@ -591,14 +808,92 @@ function ChatMessageInner({
                 </button>
               </div>
             )}
-            {isLast && streaming ? (
-              <span className="whitespace-pre-wrap break-words">{displayText}</span>
-            ) : (
-              <ChatMarkdown content={displayText} />
-            )}
+            <ChatMarkdown content={renderedDisplayText} phase={isLast && streaming ? "streaming" : "final"} />
             {isLast && streaming && <span className="animate-pulse ml-0.5" style={{ color: "var(--oc-text-tertiary)" }}>▌</span>}
           </div>
         </div>
+        {jiuwenPermission && (
+          <div
+            className="mt-2 rounded-xl px-3 py-3 text-xs"
+            style={{
+              background: "color-mix(in oklab, var(--oc-card) 72%, transparent)",
+              border: "1px solid var(--oc-border)",
+              color: "var(--oc-text-primary)",
+              maxWidth: 720,
+            }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{jiuwenPermission.title || "权限审批"}</div>
+                <div className="mt-0.5 truncate" style={{ color: "var(--oc-text-secondary)" }}>
+                  {jiuwenPermission.toolName ? `工具：${jiuwenPermission.toolName}` : "JiuwenSwarm 请求授权后继续执行"}
+                </div>
+              </div>
+              <span
+                className="shrink-0 rounded-full px-2 py-0.5"
+                style={{
+                  background: "color-mix(in oklab, var(--oc-bg-secondary) 80%, transparent)",
+                  color: "var(--oc-text-tertiary)",
+                  fontSize: 11,
+                }}
+              >
+                {jiuwenPermission.state === "approved" ? "已允许" : jiuwenPermission.state === "rejected" ? "已拒绝" : jiuwenPermission.state === "submitting" ? "提交中" : "待确认"}
+              </span>
+            </div>
+            {jiuwenPermission.command ? (
+              <pre
+                className="mt-2 overflow-auto rounded-lg px-2.5 py-2"
+                style={{
+                  background: "color-mix(in oklab, var(--oc-bg) 78%, transparent)",
+                  border: "1px solid color-mix(in oklab, var(--oc-border) 72%, transparent)",
+                  color: "var(--oc-text-secondary)",
+                  maxHeight: 140,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {jiuwenPermission.command}
+              </pre>
+            ) : null}
+            {jiuwenPermission.error ? (
+              <div className="mt-2" style={{ color: "#ef4444" }}>{jiuwenPermission.error}</div>
+            ) : null}
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                disabled={jiuwenPermission.state === "submitting" || jiuwenPermission.state === "approved" || jiuwenPermission.state === "rejected"}
+                onClick={() => onJiuwenPermissionAnswer?.(jiuwenPermission, "allow_once")}
+                className="rounded-lg px-3 py-1.5"
+                style={{
+                  background: jiuwenPermission.state === "approved" ? "rgba(29,158,117,0.12)" : "var(--oc-text-primary)",
+                  color: jiuwenPermission.state === "approved" ? "#1d9e75" : "var(--oc-bg)",
+                  border: "1px solid transparent",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: jiuwenPermission.state === "submitting" || jiuwenPermission.state === "approved" || jiuwenPermission.state === "rejected" ? "default" : "pointer",
+                }}
+              >
+                {jiuwenPermission.state === "approved" ? "已允许" : jiuwenPermission.state === "submitting" ? "提交中..." : "本次允许"}
+              </button>
+              <button
+                type="button"
+                disabled={jiuwenPermission.state === "submitting" || jiuwenPermission.state === "approved" || jiuwenPermission.state === "rejected"}
+                onClick={() => onJiuwenPermissionAnswer?.(jiuwenPermission, "reject")}
+                className="rounded-lg px-3 py-1.5"
+                style={{
+                  background: "transparent",
+                  color: jiuwenPermission.state === "rejected" ? "#ef4444" : "var(--oc-text-secondary)",
+                  border: "1px solid var(--oc-border)",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: jiuwenPermission.state === "submitting" || jiuwenPermission.state === "approved" || jiuwenPermission.state === "rejected" ? "default" : "pointer",
+                }}
+              >
+                {jiuwenPermission.state === "rejected" ? "已拒绝" : "拒绝"}
+              </button>
+            </div>
+          </div>
+        )}
         {/* 时间戳行 + 朗读/删除 */}
         <p className="text-[10px] mt-1 px-1 font-mono flex items-center gap-1.5 flex-wrap" style={{ color: "var(--oc-text-tertiary)" }}>
           <span>
@@ -677,6 +972,8 @@ export const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.timeLabel === next.timeLabel &&
     prev.showToolCalls === next.showToolCalls &&
     toolCallsRenderSignature(prev.toolCalls) === toolCallsRenderSignature(next.toolCalls) &&
+    messageEventsRenderSignature(prev.messageEvents) === messageEventsRenderSignature(next.messageEvents) &&
+    JSON.stringify(prev.jiuwenPermission || null) === JSON.stringify(next.jiuwenPermission || null) &&
     prev.usage?.input === next.usage?.input &&
     prev.usage?.output === next.usage?.output &&
     prev.contextPercent === next.contextPercent

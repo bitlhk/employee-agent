@@ -6,6 +6,7 @@ import path from "path";
 import { strictLimiter } from "./security";
 import {
   APP_ROOT,
+  JIUWENCLAW_HOME,
   OPENCLAW_HOME,
   OPENCLAW_JSON_PATH,
   buildSessionRegistryScope,
@@ -32,7 +33,7 @@ type ChatHistoryToolCall = {
   result?: string;
   status: "running" | "done" | "error";
   ts: number;
-  executor?: "gateway";
+  executor?: "gateway" | "jiuwenswarm";
   _gateway?: boolean;
 };
 type ChatHistoryMessage = {
@@ -86,6 +87,28 @@ function stripPlatformLanguagePolicy(text: string): string {
     .replace(/\[[^\]]*Employee Agent Platform Language Policy\][\s\S]*?\[\/Employee Agent Platform Language Policy\]\s*/g, "")
     .replace(/^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}\s+GMT[+-]\d+\]\s*/g, "")
     .trim();
+}
+
+function stripEaJiuwenConversationContext(text: string): string {
+  return String(text || "")
+    .replace(
+      /^【EA平台会话上下文】\s*\ncurrentConversationId:\s*[^\n]*\ncurrentJiuwenSessionId:\s*[^\n]*\n如果本轮需要创建定时任务且投递到当前对话，请在 create_scheduled_task 参数中传 conversation_id=currentConversationId、session_id=currentJiuwenSessionId、delivery_channel=conversation。\s*\n*/g,
+      "",
+    )
+    .trim();
+}
+
+function stripEaSelectedSkillContext(text: string): string {
+  const value = String(text || "").trim();
+  if (!value.startsWith("【本轮已由用户在输入框选择技能 Chip】")) return value;
+  const marker = "\n用户问题：";
+  const idx = value.lastIndexOf(marker);
+  if (idx < 0) return value;
+  return value.slice(idx + marker.length).trim();
+}
+
+function stripEaJiuwenUserInternalContext(text: string): string {
+  return stripEaSelectedSkillContext(stripEaJiuwenConversationContext(text));
 }
 
 function textFromOpenClawContent(content: unknown, role: string): string {
@@ -391,6 +414,13 @@ function safeJiuwenSessionId(value: unknown): string {
   return /^[a-zA-Z0-9._-]{8,160}$/.test(sessionId) ? sessionId : "";
 }
 
+function isListableJiuwenWebSession(sessionId: string, adoptId: string): boolean {
+  const value = String(sessionId || "").trim();
+  if (!value.startsWith(`sess_${adoptId}_web_`)) return false;
+  if (value.includes("_conv_linggan_channel_")) return false;
+  return !/(?:^|[_-])(smoke|debug|test)(?:[_-]|$)/i.test(value);
+}
+
 function jiuwenHistoryFileForSession(sessionsDir: string, sessionId: string): string | null {
   const safeSessionId = safeJiuwenSessionId(sessionId);
   if (!safeSessionId) return null;
@@ -449,6 +479,63 @@ function mergeJiuwenAssistantText(previous: string, next: string, eventType: str
   return `${previous}${text}`;
 }
 
+function compactJiuwenToolPayload(value: unknown, max = 6000): string {
+  const text = compactHistoryJson(value, max);
+  return text.length > max ? `${text.slice(0, max)}\n...` : text;
+}
+
+function jiuwenToolCallFromEvent(event: any, timestamp: number, fallbackIndex: number): ChatHistoryToolCall | null {
+  const eventType = String(event?.event_type || event?.type || "").toLowerCase();
+  if (eventType !== "chat.tool_call") return null;
+  const nested = event?.tool_call && typeof event.tool_call === "object" ? event.tool_call : event;
+  const fn = nested?.function && typeof nested.function === "object" ? nested.function : {};
+  const name = String(nested?.name || nested?.toolName || nested?.tool_name || nested?.tool || fn?.name || "").trim();
+  if (!name) return null;
+  const id = String(nested?.tool_call_id || nested?.toolCallId || nested?.id || nested?.call_id || event?.tool_call_id || "").trim()
+    || `jiuwen-tool-${timestamp || Date.now()}-${fallbackIndex}`;
+  return {
+    id,
+    name,
+    arguments: compactJiuwenToolPayload(nested?.arguments ?? nested?.args ?? fn?.arguments ?? event?.arguments ?? event?.args ?? {}),
+    status: "running",
+    ts: timestamp || Date.now(),
+    executor: "jiuwenswarm",
+  };
+}
+
+function applyJiuwenToolResultToCalls(calls: ChatHistoryToolCall[], event: any, timestamp: number): ChatHistoryToolCall[] {
+  const eventType = String(event?.event_type || event?.type || "").toLowerCase();
+  if (eventType !== "chat.tool_result") return calls;
+  const nested = event?.tool_result && typeof event.tool_result === "object" ? event.tool_result : event;
+  const id = String(nested?.tool_call_id || nested?.toolCallId || nested?.id || nested?.call_id || event?.tool_call_id || "").trim();
+  const result = nested?.result ?? nested?.content ?? nested?.output ?? event?.result ?? event?.content ?? "";
+  const isError = Boolean(nested?.is_error || nested?.isError || nested?.error || nested?.status === "failed" || event?.error);
+  const resultText = result == null || result === "" ? "" : compactJiuwenToolPayload(result);
+  const updateAt = id ? calls.findIndex((call) => call.id === id) : [...calls].reverse().findIndex((call) => call.status === "running");
+  const idx = id ? updateAt : (updateAt >= 0 ? calls.length - 1 - updateAt : -1);
+  if (idx >= 0) {
+    const next = [...calls];
+    next[idx] = {
+      ...next[idx],
+      ...(resultText ? { result: resultText } : {}),
+      status: isError ? "error" : "done",
+    };
+    return next;
+  }
+  return [
+    ...calls,
+    {
+      id: id || `jiuwen-tool-result-${timestamp || Date.now()}-${calls.length}`,
+      name: String(nested?.name || nested?.toolName || nested?.tool_name || "tool_result"),
+      arguments: "{}",
+      ...(resultText ? { result: resultText } : {}),
+      status: isError ? "error" : "done",
+      ts: timestamp || Date.now(),
+      executor: "jiuwenswarm",
+    },
+  ];
+}
+
 export function extractJiuwenChatMessages(historyFile: string, maxMessages = 200): ChatHistoryMessage[] {
   if (!historyFile || !existsSync(historyFile)) return [];
   const messages: ChatHistoryMessage[] = [];
@@ -457,22 +544,36 @@ export function extractJiuwenChatMessages(historyFile: string, maxMessages = 200
     finalText: string;
     fallbackText: string;
     timestamp: number;
+    toolCalls: ChatHistoryToolCall[];
   }>();
-  const lines = readFileSync(historyFile, "utf8").split("\n");
-  for (const line of lines) {
-    if (!line.trim()) continue;
+  const rawHistory = readFileSync(historyFile, "utf8");
+  const trimmedHistory = rawHistory.trim();
+  let events: any[] | null = null;
+  if (trimmedHistory.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmedHistory);
+      if (Array.isArray(parsed)) events = parsed;
+    } catch {}
+  }
+  const rows = events || rawHistory.split("\n");
+  for (const row of rows) {
+    if (typeof row === "string" && !row.trim()) continue;
     let event: any;
-    try { event = JSON.parse(line); } catch { continue; }
+    if (typeof row === "string") {
+      try { event = JSON.parse(row); } catch { continue; }
+    } else {
+      event = row;
+    }
     const role = String(event?.role || event?.message?.role || "");
     if (role !== "user" && role !== "assistant") continue;
     const eventType = String(event?.event_type || event?.type || "").toLowerCase();
     const timestamp = normalizeJiuwenHistoryTimestamp(event?.timestamp || event?.created_at || event?.time);
     const text = role === "user"
-      ? stripPlatformLanguagePolicy(jiuwenHistoryContent(event)).trim()
+      ? stripEaJiuwenUserInternalContext(stripPlatformLanguagePolicy(jiuwenHistoryContent(event))).trim()
       : jiuwenHistoryContent(event).trim();
-    if (!text) continue;
 
     if (role === "user") {
+      if (!text) continue;
       messages.push({
         id: `jiuwen-${String(event?.id || messages.length)}`,
         role,
@@ -483,7 +584,6 @@ export function extractJiuwenChatMessages(historyFile: string, maxMessages = 200
       continue;
     }
 
-    if (!shouldUseJiuwenAssistantHistoryEvent(eventType)) continue;
     const requestId = String(event?.request_id || event?.id || `${timestamp}-${messages.length}`);
     let existing = assistantByRequest.get(requestId);
     if (!existing) {
@@ -492,9 +592,23 @@ export function extractJiuwenChatMessages(historyFile: string, maxMessages = 200
         finalText: "",
         fallbackText: "",
         timestamp,
+        toolCalls: [],
       };
       assistantByRequest.set(requestId, existing);
     }
+    const toolCall = jiuwenToolCallFromEvent(event, timestamp, existing.toolCalls.length);
+    if (toolCall) {
+      existing.toolCalls.push(toolCall);
+      if (!existing.timestamp && timestamp) existing.timestamp = timestamp;
+      continue;
+    }
+    if (eventType === "chat.tool_result") {
+      existing.toolCalls = applyJiuwenToolResultToCalls(existing.toolCalls, event, timestamp);
+      if (!existing.timestamp && timestamp) existing.timestamp = timestamp;
+      continue;
+    }
+    if (!text) continue;
+    if (!shouldUseJiuwenAssistantHistoryEvent(eventType)) continue;
     if (eventType === "chat.final") {
       existing.finalText = text;
     } else {
@@ -507,19 +621,21 @@ export function extractJiuwenChatMessages(historyFile: string, maxMessages = 200
 
   for (const entry of assistantByRequest.values()) {
     const text = entry.finalText || entry.fallbackText;
-    if (!text.trim()) continue;
+    const toolCalls = entry.toolCalls.map((call) => call.status === "running" ? { ...call, status: "done" as const } : call);
+    if (!text.trim() && toolCalls.length === 0) continue;
     messages.push({
       id: entry.id,
       role: "assistant",
       text,
       timeLabel: formatHistoryTimeLabel(entry.timestamp),
       timestamp: entry.timestamp,
+      ...(toolCalls.length > 0 ? { toolCalls } : {}),
     });
   }
 
   return dedupeHistoryMessages(
     messages
-      .filter((message) => normalizeHistoryText(message.text))
+      .filter((message) => normalizeHistoryText(message.text) || (message.toolCalls || []).length > 0)
       .sort((a, b) => {
         const at = typeof a.timestamp === "number" && Number.isFinite(a.timestamp) ? a.timestamp : 0;
         const bt = typeof b.timestamp === "number" && Number.isFinite(b.timestamp) ? b.timestamp : 0;
@@ -534,30 +650,38 @@ export function listJiuwenChatHistorySessions(args: {
   dbAgentId: string;
   limit: number;
 }): any[] {
-  const sessionsDir = jiuwenClawSessionsDir(args.adoptId, args.dbAgentId);
-  const sessionsRoot = path.resolve(sessionsDir);
-  let entries: ReturnType<typeof readdirSync> = [];
-  try {
-    entries = readdirSync(sessionsDir, { withFileTypes: true }) as any;
-  } catch {
-    return [];
-  }
-
+  const sessionDirs = [
+    jiuwenClawSessionsDir(args.adoptId, args.dbAgentId),
+    path.join(JIUWENCLAW_HOME, "agent", "sessions"),
+  ];
   const candidates: any[] = [];
-  for (const entry of entries as any[]) {
-    if (!entry.isDirectory()) continue;
-    const sessionId = safeJiuwenSessionId(entry.name);
-    if (!sessionId) continue;
-    const historyFile = jiuwenHistoryFileForSession(sessionsDir, sessionId);
-    if (!historyFile || !historyFile.startsWith(sessionsRoot + path.sep) || !existsSync(historyFile)) continue;
-    const metadata = readJiuwenSessionMetadata(sessionsDir, sessionId);
-    const channelId = String(metadata?.channel_id || "");
-    if (channelId && channelId !== "web") continue;
-    let st: ReturnType<typeof statSync> | null = null;
-    try { st = statSync(historyFile); } catch { st = null; }
-    const updatedAt = normalizeJiuwenHistoryTimestamp(metadata?.last_message_at) || Number(st?.mtimeMs || 0) || 0;
-    const createdAt = normalizeJiuwenHistoryTimestamp(metadata?.created_at) || Number(st?.birthtimeMs || updatedAt || 0) || updatedAt;
-    candidates.push({ sessionId, historyFile, metadata, updatedAt, createdAt });
+  const seen = new Set<string>();
+  for (const sessionsDir of sessionDirs) {
+    const sessionsRoot = path.resolve(sessionsDir);
+    let entries: ReturnType<typeof readdirSync> = [];
+    try {
+      entries = readdirSync(sessionsDir, { withFileTypes: true }) as any;
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries as any[]) {
+      if (!entry.isDirectory()) continue;
+      const sessionId = safeJiuwenSessionId(entry.name);
+      if (!sessionId || seen.has(sessionId)) continue;
+      if (!isListableJiuwenWebSession(sessionId, args.adoptId)) continue;
+      const historyFile = jiuwenHistoryFileForSession(sessionsDir, sessionId);
+      if (!historyFile || !historyFile.startsWith(sessionsRoot + path.sep) || !existsSync(historyFile)) continue;
+      const metadata = readJiuwenSessionMetadata(sessionsDir, sessionId);
+      const channelId = String(metadata?.channel_id || "");
+      if (channelId && channelId !== "web" && channelId !== args.adoptId) continue;
+      let st: ReturnType<typeof statSync> | null = null;
+      try { st = statSync(historyFile); } catch { st = null; }
+      const updatedAt = normalizeJiuwenHistoryTimestamp(metadata?.last_message_at) || Number(st?.mtimeMs || 0) || 0;
+      const createdAt = normalizeJiuwenHistoryTimestamp(metadata?.created_at) || Number(st?.birthtimeMs || updatedAt || 0) || updatedAt;
+      candidates.push({ sessionId, historyFile, metadata, updatedAt, createdAt });
+      seen.add(sessionId);
+    }
   }
 
   return candidates
@@ -590,14 +714,46 @@ export function resolveJiuwenHistorySession(args: {
 }): { conversationId: string; sessionId: string; historyFile: string; sessionsDir: string } | null {
   const sessionId = safeJiuwenSessionId(args.sessionKey);
   if (!sessionId) return null;
-  const sessionsDir = jiuwenClawSessionsDir(args.adoptId, args.dbAgentId);
-  const historyFile = jiuwenHistoryFileForSession(sessionsDir, sessionId);
-  if (!historyFile || !existsSync(historyFile)) return null;
+  const sessionDirs = [
+    jiuwenClawSessionsDir(args.adoptId, args.dbAgentId),
+    path.join(JIUWENCLAW_HOME, "agent", "sessions"),
+  ];
+  for (const sessionsDir of sessionDirs) {
+    const historyFile = jiuwenHistoryFileForSession(sessionsDir, sessionId);
+    if (!historyFile || !existsSync(historyFile)) continue;
+    return {
+      conversationId: jiuwenConversationIdFromSessionId(sessionId, args.adoptId),
+      sessionId,
+      historyFile,
+      sessionsDir,
+    };
+  }
+  return null;
+}
+
+function deleteJiuwenHistorySession(args: {
+  adoptId: string;
+  dbAgentId: string;
+  sessionKey: string;
+}): { conversationId: string; sessionId: string; deleted: number } | null {
+  const sessionId = safeJiuwenSessionId(args.sessionKey);
+  if (!sessionId || !isListableJiuwenWebSession(sessionId, args.adoptId)) return null;
+  const sessionDirs = [
+    jiuwenClawSessionsDir(args.adoptId, args.dbAgentId),
+    path.join(JIUWENCLAW_HOME, "agent", "sessions"),
+  ];
+  let deleted = 0;
+  for (const sessionsDir of sessionDirs) {
+    const sessionsRoot = path.resolve(sessionsDir);
+    const sessionDir = path.resolve(path.join(sessionsDir, sessionId));
+    if (!sessionDir.startsWith(sessionsRoot + path.sep) || !existsSync(sessionDir)) continue;
+    rmSync(sessionDir, { recursive: true, force: true });
+    deleted += 1;
+  }
   return {
     conversationId: jiuwenConversationIdFromSessionId(sessionId, args.adoptId),
     sessionId,
-    historyFile,
-    sessionsDir,
+    deleted,
   };
 }
 
@@ -944,6 +1100,143 @@ function summarizeChatHistorySession(args: {
   return summary;
 }
 
+export async function listClawChatHistorySessionRecords(args: {
+  adoptId: string;
+  claw: any;
+  limit?: number;
+  startedAt?: number;
+}) {
+  const startedAt = args.startedAt || Date.now();
+  const adoptId = String(args.adoptId || "").trim();
+  const claw = args.claw;
+  const limit = Math.min(Math.max(Number(args.limit || 50) || 50, 1), 100);
+  const dbAgentId = String((claw as any).agentId || "").trim();
+
+  if (isJiuwenClawAdoptId(adoptId)) {
+    const sessions = listJiuwenChatHistorySessions({ adoptId, dbAgentId, limit });
+    logIosLoadDebug("chat_history_sessions_done_jiuwen", {
+      adoptId,
+      runtimeAgentId: jiuwenClawAgentId(adoptId, dbAgentId),
+      returnedCount: sessions.length,
+      ms: Date.now() - startedAt,
+    });
+    return {
+      sessions,
+      meta: {
+        runtime: "jiuwenswarm",
+        timings: { totalMs: Date.now() - startedAt },
+      },
+    };
+  }
+
+  const trialAgentId = `trial_${adoptId}`;
+  const runtimeAgentId = existsSync(openClawAgentDir(trialAgentId)) ? trialAgentId : dbAgentId;
+  const sessionsPath = path.join(openClawAgentDir(runtimeAgentId), "sessions", "sessions.json");
+  if (!existsSync(sessionsPath)) {
+    logIosLoadDebug("chat_history_sessions_missing_index", {
+      adoptId,
+      runtimeAgentId,
+      sessionsPath,
+      ms: Date.now() - startedAt,
+    });
+    return { sessions: [], meta: { timings: { totalMs: Date.now() - startedAt } } };
+  }
+
+  const rawIndex = JSON.parse(readFileSync(sessionsPath, "utf8") || "{}") || {};
+  const rawIndexCount = Object.keys(rawIndex).length;
+  const byConversation = new Map<string, any>();
+  const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
+  const resolvedSessionsDir = path.resolve(sessionsDir);
+  const indexedSessionIds = new Set<string>();
+  for (const [sessionKey, raw] of Object.entries(rawIndex) as Array<[string, any]>) {
+    const parsed = parseWebSessionKey(sessionKey, runtimeAgentId);
+    if (!parsed) continue;
+    const sessionId = String(raw?.sessionId || "").trim();
+    if (!sessionId) continue;
+    indexedSessionIds.add(sessionId);
+    const sessionFile = String(raw?.sessionFile || path.join(sessionsDir, `${sessionId}.jsonl`));
+    const resolvedSessionFile = path.resolve(sessionFile);
+    if (!resolvedSessionFile.startsWith(resolvedSessionsDir + path.sep)) continue;
+    const updatedAt = Number(raw?.updatedAt || raw?.lastInteractionAt || raw?.endedAt || raw?.startedAt || 0) || 0;
+    const existing = byConversation.get(parsed.conversationId);
+    if (!existing || updatedAt > existing.updatedAt) {
+      byConversation.set(parsed.conversationId, {
+        conversationId: parsed.conversationId,
+        sessionKey,
+        sessionId,
+        sessionFile: resolvedSessionFile,
+        updatedAt,
+        createdAt: Number(raw?.sessionStartedAt || raw?.startedAt || updatedAt || 0) || updatedAt,
+        messageCount: 0,
+        title: "新对话",
+        preview: "",
+      });
+    }
+  }
+  for (const recovered of listRecoveredWebSessions({
+    sessionsDir,
+    runtimeAgentId,
+    indexedSessionIds,
+    limit,
+  })) {
+    if (!byConversation.has(recovered.conversationId)) {
+      byConversation.set(recovered.conversationId, recovered);
+    }
+  }
+
+  const summaryStartedAt = Date.now();
+  const summaryCache = readSessionSummaryCache(sessionsDir);
+  const summaryCacheStats = { hits: 0, misses: 0 };
+  const sessions = Array.from(byConversation.values())
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, limit)
+    .map((entry) => {
+      const summary = summarizeChatHistorySession({
+        sessionsDir,
+        entry,
+        cache: summaryCache,
+        stats: summaryCacheStats,
+      });
+      return {
+        conversationId: entry.conversationId,
+        sessionKey: entry.sessionKey,
+        sessionId: entry.sessionId,
+        title: summary.title,
+        preview: summary.preview,
+        searchText: summary.searchText || "",
+        messageCount: summary.messageCount,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+      };
+    })
+    .filter((entry) => entry.messageCount > 0);
+  if (summaryCacheStats.misses > 0) {
+    writeSessionSummaryCache(sessionsDir, summaryCache);
+  }
+
+  logIosLoadDebug("chat_history_sessions_done", {
+    adoptId,
+    runtimeAgentId,
+    rawIndexCount,
+    conversationCount: byConversation.size,
+    returnedCount: sessions.length,
+    summaryCacheHits: summaryCacheStats.hits,
+    summaryCacheMisses: summaryCacheStats.misses,
+    summaryMs: Date.now() - summaryStartedAt,
+    ms: Date.now() - startedAt,
+  });
+  return {
+    sessions,
+    meta: {
+      cache: summaryCacheStats,
+      timings: {
+        summaryMs: Date.now() - summaryStartedAt,
+        totalMs: Date.now() - startedAt,
+      },
+    },
+  };
+}
+
 export function registerMiscRoutes(app: express.Express) {
 
   // ── Runtime info ──────────────────────────────────────
@@ -1189,132 +1482,8 @@ export function registerMiscRoutes(app: express.Express) {
         return;
       }
 
-      const dbAgentId = String((claw as any).agentId || "").trim();
-      if (isJiuwenClawAdoptId(adoptId)) {
-        const sessions = listJiuwenChatHistorySessions({ adoptId, dbAgentId, limit });
-        logIosLoadDebug("chat_history_sessions_done_jiuwen", {
-          adoptId,
-          runtimeAgentId: jiuwenClawAgentId(adoptId, dbAgentId),
-          returnedCount: sessions.length,
-          ms: Date.now() - startedAt,
-        });
-        res.json({
-          sessions,
-          meta: {
-            runtime: "jiuwenswarm",
-            timings: { totalMs: Date.now() - startedAt },
-          },
-        });
-        return;
-      }
-
-      const trialAgentId = `trial_${adoptId}`;
-      const runtimeAgentId = existsSync(openClawAgentDir(trialAgentId)) ? trialAgentId : dbAgentId;
-      const sessionsPath = path.join(openClawAgentDir(runtimeAgentId), "sessions", "sessions.json");
-      if (!existsSync(sessionsPath)) {
-        logIosLoadDebug("chat_history_sessions_missing_index", {
-          adoptId,
-          runtimeAgentId,
-          sessionsPath,
-          ms: Date.now() - startedAt,
-        });
-        res.json({ sessions: [] });
-        return;
-      }
-
-      const rawIndex = JSON.parse(readFileSync(sessionsPath, "utf8") || "{}") || {};
-      const rawIndexCount = Object.keys(rawIndex).length;
-      const byConversation = new Map<string, any>();
-      const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
-      const resolvedSessionsDir = path.resolve(sessionsDir);
-      const indexedSessionIds = new Set<string>();
-      for (const [sessionKey, raw] of Object.entries(rawIndex) as Array<[string, any]>) {
-        const parsed = parseWebSessionKey(sessionKey, runtimeAgentId);
-        if (!parsed) continue;
-        const sessionId = String(raw?.sessionId || "").trim();
-        if (!sessionId) continue;
-        indexedSessionIds.add(sessionId);
-        const sessionFile = String(raw?.sessionFile || path.join(sessionsDir, `${sessionId}.jsonl`));
-        const resolvedSessionFile = path.resolve(sessionFile);
-        if (!resolvedSessionFile.startsWith(resolvedSessionsDir + path.sep)) continue;
-        const updatedAt = Number(raw?.updatedAt || raw?.lastInteractionAt || raw?.endedAt || raw?.startedAt || 0) || 0;
-        const existing = byConversation.get(parsed.conversationId);
-        if (!existing || updatedAt > existing.updatedAt) {
-          byConversation.set(parsed.conversationId, {
-            conversationId: parsed.conversationId,
-            sessionKey,
-            sessionId,
-            sessionFile: resolvedSessionFile,
-            updatedAt,
-            createdAt: Number(raw?.sessionStartedAt || raw?.startedAt || updatedAt || 0) || updatedAt,
-            messageCount: 0,
-            title: "新对话",
-            preview: "",
-          });
-        }
-      }
-      for (const recovered of listRecoveredWebSessions({
-        sessionsDir,
-        runtimeAgentId,
-        indexedSessionIds,
-        limit,
-      })) {
-        if (!byConversation.has(recovered.conversationId)) {
-          byConversation.set(recovered.conversationId, recovered);
-        }
-      }
-
-      const summaryStartedAt = Date.now();
-      const summaryCache = readSessionSummaryCache(sessionsDir);
-      const summaryCacheStats = { hits: 0, misses: 0 };
-      const sessions = Array.from(byConversation.values())
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, limit)
-        .map((entry) => {
-          const summary = summarizeChatHistorySession({
-            sessionsDir,
-            entry,
-            cache: summaryCache,
-            stats: summaryCacheStats,
-          });
-          return {
-            conversationId: entry.conversationId,
-            sessionKey: entry.sessionKey,
-            sessionId: entry.sessionId,
-            title: summary.title,
-            preview: summary.preview,
-            searchText: summary.searchText || "",
-            messageCount: summary.messageCount,
-            createdAt: entry.createdAt,
-            updatedAt: entry.updatedAt,
-          };
-        })
-        .filter((entry) => entry.messageCount > 0);
-      if (summaryCacheStats.misses > 0) {
-        writeSessionSummaryCache(sessionsDir, summaryCache);
-      }
-
-      logIosLoadDebug("chat_history_sessions_done", {
-        adoptId,
-        runtimeAgentId,
-        rawIndexCount,
-        conversationCount: byConversation.size,
-        returnedCount: sessions.length,
-        summaryCacheHits: summaryCacheStats.hits,
-        summaryCacheMisses: summaryCacheStats.misses,
-        summaryMs: Date.now() - summaryStartedAt,
-        ms: Date.now() - startedAt,
-      });
-      res.json({
-        sessions,
-        meta: {
-          cache: summaryCacheStats,
-          timings: {
-            summaryMs: Date.now() - summaryStartedAt,
-            totalMs: Date.now() - startedAt,
-          },
-        },
-      });
+      const payload = await listClawChatHistorySessionRecords({ adoptId, claw, limit, startedAt });
+      res.json(payload);
     } catch (error: any) {
       console.warn("[chat-history] list failed", error?.message || error);
       logIosLoadDebug("chat_history_sessions_error", {
@@ -1428,6 +1597,41 @@ export function registerMiscRoutes(app: express.Express) {
         ms: Date.now() - startedAt,
       });
       res.status(500).json({ error: "chat_history_messages_failed" });
+    }
+  });
+
+  app.delete("/api/claw/chat-history/session", async (req, res) => {
+    try {
+      const adoptId = String(req.body?.adoptId || "").trim();
+      const sessionKey = String(req.body?.sessionKey || "").trim();
+      if (!adoptId || !sessionKey) {
+        res.status(400).json({ error: "adoptId and sessionKey required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+
+      const dbAgentId = String((claw as any).agentId || "").trim();
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const result = deleteJiuwenHistorySession({ adoptId, dbAgentId, sessionKey });
+        if (!result) {
+          res.status(404).json({ error: "session_missing" });
+          return;
+        }
+        res.json({
+          ok: true,
+          runtime: "jiuwenswarm",
+          conversationId: result.conversationId,
+          sessionId: result.sessionId,
+          deleted: result.deleted,
+        });
+        return;
+      }
+
+      res.status(400).json({ error: "unsupported_runtime" });
+    } catch (error: any) {
+      console.warn("[chat-history] delete failed", error?.message || error);
+      res.status(500).json({ error: "chat_history_delete_failed" });
     }
   });
 

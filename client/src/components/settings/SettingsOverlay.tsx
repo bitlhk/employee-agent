@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
-import { Activity, AlertTriangle, Bell, Brain, CheckCircle2, Clock, Monitor, Palette, Radio, Settings2, X, XCircle } from "lucide-react";
-import { AgentPage } from "@/components/pages/AgentPage";
-import { ChannelsPage } from "@/components/pages/ChannelsPage";
+import { Monitor, Palette, Settings2, X } from "lucide-react";
 import { applySettings, getSettings, subscribeSettings } from "@/lib/settings";
 import type { UiSettings } from "@/types/settings";
 
-type SettingsTab = "appearance" | "health" | "notifications" | "memory" | "channels";
+type SettingsTab = "appearance";
 
 type DiagnosticStatus = "ok" | "warning" | "error" | "pending" | "skip";
 
@@ -66,15 +64,6 @@ const NAV_GROUPS: Array<{
     label: "偏好",
     items: [
       { key: "appearance", label: "外观", icon: Palette },
-      { key: "health", label: "健康诊断", icon: Activity },
-      { key: "notifications", label: "通知", icon: Bell, disabled: true },
-    ],
-  },
-  {
-    label: "智能体",
-    items: [
-      { key: "memory", label: "记忆", icon: Brain },
-      { key: "channels", label: "频道", icon: Radio },
     ],
   },
 ];
@@ -123,127 +112,7 @@ function AppearanceSettings() {
   );
 }
 
-function NotificationsPlaceholder() {
-  return (
-    <section className="settings-overlay-section">
-      <div className="settings-overlay-section__header">
-        <h2>通知</h2>
-        <p>浏览器通知和任务提醒偏好后续在这里统一管理。</p>
-      </div>
-      <div className="settings-overlay-card settings-overlay-empty">暂未开放</div>
-    </section>
-  );
-}
-
-function DiagnosticIcon({ status }: { status: DiagnosticStatus }) {
-  if (status === "ok") return <CheckCircle2 size={16} />;
-  if (status === "error") return <XCircle size={16} />;
-  if (status === "warning") return <AlertTriangle size={16} />;
-  return <Clock size={16} />;
-}
-
-function HealthDiagnosticRow({
-  label,
-  status,
-  title,
-  detail,
-}: {
-  label: string;
-  status: DiagnosticStatus;
-  title: string;
-  detail?: string;
-}) {
-  return (
-    <div className="settings-health-row" data-status={status}>
-      <div className="settings-health-row__icon"><DiagnosticIcon status={status} /></div>
-      <div className="settings-health-row__copy">
-        <div className="settings-health-row__top">
-          <span className="settings-health-row__label">{label}</span>
-          <span className="settings-health-row__status">{title}</span>
-        </div>
-        {detail ? <div className="settings-health-row__detail">{detail}</div> : null}
-      </div>
-    </div>
-  );
-}
-
-function HealthSettings({ diagnostics }: { diagnostics?: SettingsHealthDiagnostics }) {
-  const loadMetrics = diagnostics?.load?.metrics || [];
-  return (
-    <section className="settings-overlay-section settings-overlay-section--wide">
-      <div className="settings-overlay-section__header">
-        <h2>健康诊断</h2>
-        <p>集中查看当前工作台的连接、模型、OpenClaw、历史缓存和 MCP/技能加载状态。</p>
-      </div>
-
-      <div className="settings-overlay-card settings-health-card">
-        <div className="settings-overlay-card__label">运行状态</div>
-        <div className="settings-health-list">
-          <HealthDiagnosticRow
-            label="连接"
-            status={diagnostics?.connection?.status || "pending"}
-            title={diagnostics?.connection?.title || "正在检查"}
-            detail={diagnostics?.connection?.detail}
-          />
-          <HealthDiagnosticRow
-            label="模型"
-            status={diagnostics?.model?.status || "pending"}
-            title={diagnostics?.model?.title || "正在同步模型"}
-            detail={diagnostics?.model?.detail}
-          />
-          <HealthDiagnosticRow
-            label="OpenClaw"
-            status={diagnostics?.openclaw?.status || "pending"}
-            title={diagnostics?.openclaw?.title || "正在检查"}
-            detail={diagnostics?.openclaw?.detail}
-          />
-          <HealthDiagnosticRow
-            label="历史缓存"
-            status={diagnostics?.history?.status || "pending"}
-            title={diagnostics?.history?.title || "正在读取"}
-            detail={diagnostics?.history?.detail}
-          />
-          <HealthDiagnosticRow
-            label="MCP / 技能"
-            status={diagnostics?.mcp?.status || "pending"}
-            title={diagnostics?.mcp?.title || "正在加载"}
-            detail={diagnostics?.mcp?.detail}
-          />
-        </div>
-        {diagnostics?.openclaw?.issues?.length ? (
-          <div className="settings-health-issues">
-            {diagnostics.openclaw.issues.slice(0, 6).map((issue, index) => (
-              <div key={`${issue.code || "issue"}-${index}`} className="settings-health-issue">
-                <span>{issue.severity === "error" ? "错误" : "提醒"}</span>
-                <p>{issue.message || issue.code || "OpenClaw 配置需要检查"}</p>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="settings-overlay-card settings-health-card">
-        <div className="settings-overlay-card__label">
-          首屏请求耗时
-          {diagnostics?.load?.totalMs ? <span className="settings-health-total">{diagnostics.load.totalMs}ms</span> : null}
-        </div>
-        <div className="settings-health-metrics">
-          {loadMetrics.length === 0 ? (
-            <div className="settings-overlay-empty">正在收集首屏请求耗时</div>
-          ) : loadMetrics.map((metric) => (
-            <div key={metric.key} className="settings-health-metric" data-status={metric.status}>
-              <span>{metric.label}</span>
-              <strong>{metric.requestMs != null ? `${metric.requestMs}ms` : `${metric.elapsedMs}ms`}</strong>
-              <em>{metric.detail || metric.status}</em>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-export function SettingsOverlay({ open, onClose, adoptId, skills, defaultTab = "appearance", diagnostics }: SettingsOverlayProps) {
+export function SettingsOverlay({ open, onClose, defaultTab = "appearance" }: SettingsOverlayProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(defaultTab);
 
   useEffect(() => {
@@ -301,10 +170,6 @@ export function SettingsOverlay({ open, onClose, adoptId, skills, defaultTab = "
             <X size={18} />
           </button>
           {activeTab === "appearance" ? <AppearanceSettings /> : null}
-          {activeTab === "health" ? <HealthSettings diagnostics={diagnostics} /> : null}
-          {activeTab === "notifications" ? <NotificationsPlaceholder /> : null}
-          {activeTab === "memory" ? <AgentPage adoptId={adoptId} skills={skills} /> : null}
-          {activeTab === "channels" ? <ChannelsPage adoptId={adoptId} /> : null}
         </section>
       </div>
     </div>

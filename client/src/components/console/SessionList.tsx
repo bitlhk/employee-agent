@@ -1,5 +1,5 @@
-import { Check, MessageSquareText, MoreVertical, Pencil, Pin, PinOff, Plus, Search, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, ChevronDown, ChevronRight, MessageSquareText, MoreVertical, Pencil, Pin, PinOff, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export type SessionListConversation = {
   conversationId: string;
@@ -37,14 +37,6 @@ function normalizeText(value: string) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-function normalizeSearchText(value: string) {
-  return normalizeText(value).toLowerCase();
-}
-
-function compactSearchText(value: string) {
-  return normalizeSearchText(value).replace(/\s+/g, "");
-}
-
 function shortTitle(session: SessionListConversation) {
   return normalizeText(session.customTitle || session.title || "未命名会话");
 }
@@ -74,123 +66,69 @@ function groupForTimestamp(ts: number): SessionGroup {
 
 const GROUP_LABELS: Record<SessionGroup, string> = {
   pinned: "置顶",
-  today: "今天",
-  yesterday: "昨天",
-  week: "近 7 天",
-  earlier: "更早",
+  today: "",
+  yesterday: "",
+  week: "",
+  earlier: "",
 };
-
-function filterSessions(
-  sessions: SessionListConversation[],
-  query: string,
-  messageSearchProvider?: (conversationId: string, query: string) => string,
-) {
-  const q = normalizeSearchText(query);
-  const compactQ = compactSearchText(query);
-  if (!q) return sessions;
-  return sessions.filter((session) => {
-    const haystack = [
-      session.customTitle || "",
-      session.title || "",
-      session.preview || "",
-      session.searchText || "",
-      formatUpdatedAt(session.updatedAt),
-    ].join(" ");
-    const normalizedHaystack = normalizeSearchText(haystack);
-    const compactHaystack = compactSearchText(haystack);
-    if (normalizedHaystack.includes(q)) return true;
-    if (compactQ && compactHaystack.includes(compactQ)) return true;
-    return Boolean(messageSearchProvider?.(session.conversationId, query));
-  });
-}
-
-function highlightText(value: string, query: string): ReactNode {
-  const text = String(value || "");
-  const q = normalizeText(query);
-  if (!q) return text;
-  const lowerText = text.toLowerCase();
-  const lowerQuery = q.toLowerCase();
-  const parts: ReactNode[] = [];
-  let cursor = 0;
-  let index = lowerText.indexOf(lowerQuery);
-  while (index >= 0) {
-    if (index > cursor) parts.push(text.slice(cursor, index));
-    parts.push(
-      <mark key={`${index}-${parts.length}`} className="session-search-highlight">
-        {text.slice(index, index + q.length)}
-      </mark>,
-    );
-    cursor = index + q.length;
-    index = lowerText.indexOf(lowerQuery, cursor);
-  }
-  if (cursor < text.length) parts.push(text.slice(cursor));
-  return parts.length > 0 ? parts : text;
-}
-
-function searchSnippet(value: string, query: string): string {
-  const text = normalizeText(value);
-  const q = normalizeSearchText(query);
-  if (!text || !q) return "";
-  const lower = text.toLowerCase();
-  let idx = lower.indexOf(q);
-  if (idx < 0) {
-    const compactQ = compactSearchText(query);
-    if (!compactQ || !compactSearchText(text).includes(compactQ)) return "";
-    idx = 0;
-  }
-  const start = Math.max(0, idx - 18);
-  const end = Math.min(text.length, idx + q.length + 42);
-  return `${start > 0 ? "..." : ""}${text.slice(start, end)}${end < text.length ? "..." : ""}`;
-}
 
 export function SessionList({
   sessions = [],
   currentConversationId,
   sessionSwitchingId,
-  messageSearchProvider,
   onSwitchConversation,
   onDeleteConversation,
   onRenameConversation,
   onTogglePinConversation,
   onNewConversation,
   variant = "sidebar",
-  searchable = variant === "mobile",
   title = "历史会话",
   loading = false,
 }: SessionListProps) {
-  const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [menuId, setMenuId] = useState<string | null>(null);
+  const [menuPlacement, setMenuPlacement] = useState<"top" | "bottom">("bottom");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const [historyCollapsed, setHistoryCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("ea_history_sessions_collapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
   const rootRef = useRef<HTMLDivElement | null>(null);
   const isMobile = variant === "mobile";
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedQuery(query), 180);
-    return () => window.clearTimeout(timer);
-  }, [query]);
+    if (!menuId) return;
+    const closeMenu = () => setMenuId(null);
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && rootRef.current?.contains(target)) return;
+      closeMenu();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu();
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [menuId]);
 
-  const filteredSessions = useMemo(
-    () => filterSessions(sessions, debouncedQuery, messageSearchProvider),
-    [debouncedQuery, messageSearchProvider, sessions],
-  );
-  const searchActive = normalizeText(debouncedQuery).length > 0;
-  const searchResultCount = searchActive ? filteredSessions.length : sessions.length;
-  const messageSearchSnippets = useMemo(() => {
-    if (!searchActive || !messageSearchProvider) return new Map<string, string>();
-    const snippets = new Map<string, string>();
-    for (const session of filteredSessions) {
-      const snippet = messageSearchProvider(session.conversationId, debouncedQuery)
-        || searchSnippet(session.searchText || "", debouncedQuery);
-      if (snippet) snippets.set(session.conversationId, snippet);
-    }
-    return snippets;
-  }, [debouncedQuery, filteredSessions, messageSearchProvider, searchActive]);
+  useEffect(() => {
+    try {
+      localStorage.setItem("ea_history_sessions_collapsed", historyCollapsed ? "1" : "0");
+    } catch {}
+  }, [historyCollapsed]);
 
   const groupedSessions = useMemo(() => {
     const groups = new Map<SessionGroup, SessionListConversation[]>();
-    for (const session of filteredSessions) {
+    for (const session of sessions) {
       const key = session.pinnedAt ? "pinned" : groupForTimestamp(session.updatedAt || session.createdAt);
       const rows = groups.get(key) || [];
       rows.push(session);
@@ -205,7 +143,7 @@ export function SessionList({
           return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
         }),
       }));
-  }, [filteredSessions]);
+  }, [sessions]);
 
   const saveRename = (session: SessionListConversation) => {
     const title = normalizeText(draftTitle).slice(0, 60);
@@ -219,6 +157,21 @@ export function SessionList({
     setMenuId(null);
     setEditingId(session.conversationId);
     setDraftTitle(shortTitle(session));
+  };
+
+  const toggleRowMenu = (sessionId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    if (menuId === sessionId) {
+      setMenuId(null);
+      return;
+    }
+    const buttonRect = event.currentTarget.getBoundingClientRect();
+    const rootRect = rootRef.current?.getBoundingClientRect();
+    const lowerBound = rootRect ? Math.min(rootRect.bottom, window.innerHeight) : window.innerHeight;
+    const menuHeight = onRenameConversation && onTogglePinConversation && onDeleteConversation ? 118 : 88;
+    const gap = 8;
+    const spaceBelow = lowerBound - buttonRect.bottom;
+    setMenuPlacement(spaceBelow >= menuHeight + gap ? "bottom" : "top");
+    setMenuId(sessionId);
   };
 
   const skeletonRows = isMobile ? 5 : 7;
@@ -236,92 +189,51 @@ export function SessionList({
   return (
     <div ref={rootRef} className="flex min-h-0 flex-1 flex-col">
       <div className={isMobile ? "mb-2 flex items-center justify-between px-1" : "mt-4 mb-2 flex items-center justify-between px-0"}>
-        <span style={{ color: isMobile ? "var(--oc-text-primary)" : "var(--oc-sidebar-muted)", fontSize: isMobile ? 14 : 12, fontWeight: 500 }}>
-          {title}
-        </span>
-        {onNewConversation ? (
-          <button
-            type="button"
-            title="新建会话"
-            onClick={onNewConversation}
-            disabled={!!sessionSwitchingId}
-            className="rounded-md flex items-center justify-center"
-            style={{
-              width: isMobile ? 30 : 16,
-              height: isMobile ? 30 : 16,
-              border: isMobile ? "1px solid var(--oc-border-subtle)" : "none",
-              background: isMobile ? "var(--oc-bg)" : "transparent",
-              color: isMobile ? "var(--oc-text-primary)" : "var(--oc-sidebar-muted)",
-              opacity: sessionSwitchingId ? 0.45 : 1,
-              cursor: sessionSwitchingId ? "not-allowed" : "pointer",
-            }}
-          >
-            <Plus size={isMobile ? 15 : 16} />
-          </button>
-        ) : null}
-      </div>
-
-      {searchable ? (
-        <div
-          className="session-searchbar mb-2 flex items-center gap-2 rounded-md px-2"
+        <button
+          type="button"
+          onClick={() => setHistoryCollapsed((value) => !value)}
+          className="flex min-w-0 items-center gap-1 rounded-md"
+          title={historyCollapsed ? "显示历史会话" : "隐藏历史会话"}
           style={{
-            minHeight: 34,
-            border: "1px solid var(--oc-border-subtle)",
-            background: isMobile ? "var(--oc-bg)" : "rgba(255,255,255,0.03)",
+            color: isMobile ? "var(--oc-text-primary)" : "var(--oc-sidebar-muted)",
+            fontSize: isMobile ? 14 : 12,
+            fontWeight: 500,
+            padding: isMobile ? "4px 6px" : "2px 0",
           }}
         >
-          <Search size={14} style={{ color: "var(--oc-text-tertiary)", flexShrink: 0 }} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.nativeEvent as any).isComposing) return;
-              if (event.key === "Escape") {
-                if (!query) return;
-                event.preventDefault();
-                setQuery("");
-                setDebouncedQuery("");
-                setMenuId(null);
-                return;
-              }
-              if (event.key === "Enter") {
-                const first = filterSessions(sessions, query)[0];
-                if (!first || sessionSwitchingId) return;
-                event.preventDefault();
-                onSwitchConversation?.(first.conversationId);
-              }
-            }}
-            placeholder="搜索会话"
-            className="session-searchbar__input min-w-0 flex-1 bg-transparent text-sm"
-            style={{
-              color: "var(--oc-text-primary)",
-              border: 0,
-              borderColor: "transparent",
-              outline: "none",
-              boxShadow: "none",
-              WebkitTapHighlightColor: "transparent",
-            }}
-          />
-          {query ? (
+          {historyCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          <span className="truncate">{title}</span>
+        </button>
+        <div className="flex items-center gap-1">
+          {!historyCollapsed && sessions.length > 0 ? (
+            <span style={{ color: "var(--oc-text-tertiary)", fontSize: 11 }}>
+              {sessions.length}
+            </span>
+          ) : null}
+          {onNewConversation ? (
             <button
               type="button"
-              onClick={() => setQuery("")}
-              className="flex items-center justify-center rounded"
-              style={{ width: 22, height: 22, color: "var(--oc-text-tertiary)" }}
-              aria-label="清空搜索"
+              title="新建会话"
+              onClick={onNewConversation}
+              disabled={!!sessionSwitchingId}
+              className="rounded-md flex items-center justify-center"
+              style={{
+                width: isMobile ? 30 : 16,
+                height: isMobile ? 30 : 16,
+                border: isMobile ? "1px solid var(--oc-border-subtle)" : "none",
+                background: isMobile ? "var(--oc-bg)" : "transparent",
+                color: isMobile ? "var(--oc-text-primary)" : "var(--oc-sidebar-muted)",
+                opacity: sessionSwitchingId ? 0.45 : 1,
+                cursor: sessionSwitchingId ? "not-allowed" : "pointer",
+              }}
             >
-              <X size={13} />
+              <Plus size={isMobile ? 15 : 16} />
             </button>
           ) : null}
         </div>
-      ) : null}
+      </div>
 
-      {searchable && searchActive ? (
-        <div className="session-search-meta px-2 pb-2 text-[11px]" style={{ color: "var(--oc-text-tertiary)" }}>
-          {searchResultCount > 0 ? `找到 ${searchResultCount} 个会话 · Enter 打开第一条` : "没有匹配的会话"}
-        </div>
-      ) : null}
-
+      {!historyCollapsed ? (
       <div className="min-h-0 flex-1 overflow-y-auto stealth-scrollbar pr-1">
         {loading ? (
           <div className="space-y-2 px-2 py-2" aria-label="正在加载会话">
@@ -339,15 +251,11 @@ export function SessionList({
           <div className={isMobile ? "px-3 py-4 text-xs text-center" : "px-3 py-4 text-center"} style={{ color: "var(--oc-text-tertiary)", fontSize: 13 }}>
             暂无历史会话
           </div>
-        ) : filteredSessions.length === 0 ? (
-          <div className="px-3 py-4 text-center" style={{ color: "var(--oc-text-tertiary)", fontSize: 13 }}>
-            没有匹配的会话
-          </div>
         ) : (
           <div className={isMobile ? "space-y-2" : "space-y-0.5"}>
             {groupedSessions.map((group) => (
               <div key={group.key} className="space-y-0.5">
-                {isMobile || searchable ? (
+                {isMobile && GROUP_LABELS[group.key] ? (
                   <div className="px-2 pb-1 text-[11px]" style={{ color: "var(--oc-text-tertiary)" }}>
                     {GROUP_LABELS[group.key]}
                   </div>
@@ -359,8 +267,7 @@ export function SessionList({
                   const editing = editingId === session.conversationId;
                   const menuOpen = menuId === session.conversationId;
                   const pinned = Boolean(session.pinnedAt);
-                  const messageSnippet = messageSearchSnippets.get(session.conversationId) || "";
-                  const previewText = messageSnippet || session.preview || "";
+                  const previewText = session.preview || "";
                   return (
                     <div
                       key={session.conversationId}
@@ -424,13 +331,12 @@ export function SessionList({
                           </div>
                         ) : (
                           <div className="sidebar-item-label truncate" style={{ fontSize: isMobile ? 14 : 13, fontWeight: 400, color: isMobile ? "var(--oc-text-primary)" : undefined }}>
-                            {switching ? "正在切换..." : highlightText(shortTitle(session), debouncedQuery)}
+                            {switching ? "正在切换..." : shortTitle(session)}
                           </div>
                         )}
-                        {(isMobile || searchActive) && previewText ? (
+                        {isMobile && previewText ? (
                           <div className="mt-0.5 truncate text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
-                            {messageSnippet ? <span className="session-search-source">正文 </span> : null}
-                            {highlightText(previewText, debouncedQuery)}
+                            {previewText}
                           </div>
                         ) : null}
                         {isMobile ? (
@@ -451,7 +357,7 @@ export function SessionList({
                             type="button"
                             title="会话操作"
                             disabled={disabled}
-                            onClick={() => setMenuId(menuOpen ? null : session.conversationId)}
+                            onClick={(event) => toggleRowMenu(session.conversationId, event)}
                             className={`${isMobile || menuOpen ? "flex" : "hidden group-hover:flex"} items-center justify-center rounded-md`}
                             style={{
                               width: isMobile ? 30 : 22,
@@ -464,7 +370,15 @@ export function SessionList({
                             <MoreVertical size={isMobile ? 15 : 14} />
                           </button>
                           {menuOpen ? (
-                            <div className="session-row-menu" style={{ right: 0, top: isMobile ? 34 : 26 }}>
+                            <div
+                              className="session-row-menu"
+                              style={{
+                                right: 0,
+                                ...(menuPlacement === "top"
+                                  ? { bottom: isMobile ? 34 : 26 }
+                                  : { top: isMobile ? 34 : 26 }),
+                              }}
+                            >
                               {onTogglePinConversation ? (
                                 <button
                                   type="button"
@@ -508,6 +422,7 @@ export function SessionList({
           </div>
         )}
       </div>
+      ) : null}
     </div>
   );
 }

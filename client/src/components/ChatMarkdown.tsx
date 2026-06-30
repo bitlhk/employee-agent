@@ -1,4 +1,4 @@
-import { memo, useState, isValidElement } from "react";
+import { memo, useLayoutEffect, useRef, useState, isValidElement } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -167,10 +167,23 @@ function FencedCodeBlock({ code, className }: { code: string; className?: string
   );
 }
 
-type Props = { content: string };
+type Props = { content: string; phase?: "streaming" | "final" };
 
-function ChatMarkdownInner({ content }: Props) {
+function ChatMarkdownInner({ content, phase = "final" }: Props) {
+  const renderStartRef = useRef(0);
+  if (typeof performance !== "undefined") renderStartRef.current = performance.now();
   const normalizedContent = normalizeMarkdownContent(content);
+  useLayoutEffect(() => {
+    try {
+      if (localStorage.getItem("ea_markdown_perf") !== "1") return;
+      const elapsed = performance.now() - renderStartRef.current;
+      console.debug("[EA_MD_PERF]", {
+        phase,
+        chars: content.length,
+        ms: Number(elapsed.toFixed(2)),
+      });
+    } catch {}
+  }, [content, phase]);
   return (
     <div className="lingxia-markdown">
       <ReactMarkdown
@@ -280,4 +293,4 @@ function ChatMarkdownInner({ content }: Props) {
   );
 }
 
-export const ChatMarkdown = memo(ChatMarkdownInner, (prev, next) => prev.content === next.content);
+export const ChatMarkdown = memo(ChatMarkdownInner, (prev, next) => prev.content === next.content && prev.phase === next.phase);

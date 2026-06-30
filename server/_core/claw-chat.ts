@@ -66,12 +66,23 @@ async function buildSelectedSkillContext(adoptId: string, selectedSkillId: unkno
   if (!existsSync(skillFile)) return { ok: false, status: 400, error: "所选技能运行时文件不存在" };
 
   const label = String((skill as any)?.source?.displayName || (skill as any)?.displayName || (skill as any)?.label || skillId).trim() || skillId;
+  const skillContentLimit = Math.max(4000, Number(process.env.SELECTED_SKILL_CONTEXT_MAX_CHARS || 12000) || 12000);
+  let skillContent = "";
+  try {
+    skillContent = readFileSync(skillFile, "utf8").slice(0, skillContentLimit);
+  } catch {
+    return { ok: false, status: 400, error: "所选技能运行时文件读取失败" };
+  }
   const message = [
     "【本轮已由用户在输入框选择技能 Chip】",
     `selectedSkillId: ${skillId}`,
     `selectedSkillName: ${label}`,
     `selectedSkillFile: ${skillFile}`,
-    "要求：本轮必须优先使用 selectedSkillFile 指向的 SKILL.md；不要搜索或安装外部技能；请先读取/遵循该技能，再回答用户问题。",
+    "要求：本轮必须优先使用下方 EA 已注入的 SKILL.md 内容；不要搜索或安装外部技能；不要再调用 skill_tool/read_file 读取这个 SKILL.md；如技能需要额外 references/scripts，可按技能要求读取或执行。",
+    "",
+    "```markdown",
+    skillContent,
+    "```",
     "",
     `用户问题：${userMessage}`,
   ].join("\n");
@@ -122,12 +133,66 @@ function normalizeChatRuntimeMode(value: unknown): ChatRuntimeMode {
 }
 
 export function registerChatStreamRoutes(app: express.Express) {
+  app.post("/api/claw/jiuwen/permission-answer", clawChatLimiter, async (req, res) => {
+    let { adoptId, requestId, action, selectedOption, source, channel, conversationId, epochLabel, runtimeMode } = req.body || {};
+    if (!adoptId || !requestId) {
+      res.status(400).json({ error: "adoptId and requestId required" });
+      return;
+    }
+    if (!String(adoptId).startsWith("lgj-")) {
+      res.status(400).json({ error: "permission answer only supports JiuwenSwarm agents" });
+      return;
+    }
+
+    const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    let claw: any;
+    if (req.headers["x-internal-key"] === INTERNAL_KEY) {
+      const { getClawByAdoptId } = await import("../db");
+      claw = await getClawByAdoptId(String(adoptId));
+      if (!claw) { res.status(404).json({ error: "NOT_FOUND" }); return; }
+    } else {
+      claw = await requireClawOwner(req, res, String(adoptId));
+      if (!claw) return;
+    }
+
+    const normalizedAction = String(action || selectedOption || "").trim();
+    const answerLabel =
+      normalizedAction === "allow_once" || normalizedAction === "approve" || normalizedAction === "本次允许"
+        ? "本次允许"
+        : normalizedAction === "allow_always" || normalizedAction === "总是允许"
+          ? "总是允许"
+          : "拒绝";
+
+    const { answerJiuwenPermission } = await import("./jiuwenclaw-bridge");
+    const result = await answerJiuwenPermission(
+      {
+        adoptId: String(claw.adoptId),
+        agentId: String(claw.agentId || `jiuwen_${String(claw.adoptId)}`),
+        userId: Number(claw.userId),
+      },
+      {
+        permissionRequestId: String(requestId),
+        selectedOption: answerLabel,
+        source: String(source || "permission_interrupt"),
+        channel,
+        conversationId,
+        epochLabel,
+        runtimeMode: normalizeChatRuntimeMode(runtimeMode),
+      },
+    );
+
+    if (!result.ok) {
+      res.status(502).json({ error: result.error, text: result.text || "" });
+      return;
+    }
+    res.json({ ok: true, text: result.text || "", selectedOption: answerLabel });
+  });
 
   // POST /api/claw/chat-stream  { adoptId, message }
   // 直连 Gateway /v1/chat/completions SSE，用 Node http 模块透传（避免 fetch 缓冲问题）
   app.post("/api/claw/chat-stream", clawChatLimiter, async (req, res) => {
     const routeEnterMs = Date.now();
-    let { adoptId, message, model, pendingToolContext, epochLabel, channel, conversationId, runtimeMode, selectedSkillId } = req.body || {};
+    let { adoptId, message, model, pendingToolContext, epochLabel, channel, conversationId, runtimeMode, selectedSkillId, cancelPendingPermission } = req.body || {};
     const clientRunId = normalizeClientRunId(req.body?.clientRunId);
     const normalizedRuntimeMode = normalizeChatRuntimeMode(runtimeMode);
     if (!adoptId || !message) {
@@ -161,7 +226,21 @@ export function registerChatStreamRoutes(app: express.Express) {
         res.status(selectedSkill.status).json({ error: selectedSkill.error });
         return;
       }
-      const runtimeMessage = selectedSkill?.ok ? selectedSkill.message.slice(0, 8000) : msgStrForRuntime;
+      const { forwardToJiuwenClaw, buildJiuwenAgentId, buildJiuwenSessionId } = await import("./jiuwenclaw-bridge");
+      const jiuwenClaw = {
+        adoptId: String(claw.adoptId),
+        agentId: String(claw.agentId || `jiuwen_${String(claw.adoptId)}`),
+        userId: Number(claw.userId),
+      };
+      const jiuwenAgentId = buildJiuwenAgentId(jiuwenClaw);
+      const jiuwenSessionId = buildJiuwenSessionId(jiuwenClaw, jiuwenAgentId, {
+        channel,
+        conversationId,
+        epochLabel,
+      });
+      const selectedSkillMessageLimit = Math.max(8000, Number(process.env.SELECTED_SKILL_MESSAGE_MAX_CHARS || 20000) || 20000);
+      const runtimeMessageBody = selectedSkill?.ok ? selectedSkill.message.slice(0, selectedSkillMessageLimit) : msgStrForRuntime;
+      const runtimeMessage = runtimeMessageBody;
       if (selectedSkill?.ok) {
         appendLogAsync("jiuwenclaw-exec.log", {
           ts: new Date().toISOString(),
@@ -175,13 +254,8 @@ export function registerChatStreamRoutes(app: express.Express) {
           selectedSkillFile: selectedSkill.skillFile,
         });
       }
-      const { forwardToJiuwenClaw } = await import("./jiuwenclaw-bridge");
       await forwardToJiuwenClaw(
-        {
-          adoptId: String(claw.adoptId),
-          agentId: String(claw.agentId || `jiuwen_${String(claw.adoptId)}`),
-          userId: Number(claw.userId),
-        },
+        jiuwenClaw,
         runtimeMessage,
         res,
         {
@@ -192,6 +266,7 @@ export function registerChatStreamRoutes(app: express.Express) {
           epochLabel,
           clientRunId,
           runtimeMode: normalizedRuntimeMode,
+          cancelPendingPermission,
         },
       );
       return;

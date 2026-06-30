@@ -105,7 +105,7 @@ function buildPMSystemPrompt(
   const scheduleGuide = `create_schedule 参数必须使用结构化字段：
 - name: 任务名称，例如 "天气推送"
 - prompt: 每次定时真正要执行的任务，例如 "查询天气并生成简要结果"
-- channel: 必填，只能从已绑定频道里选择 wechat/feishu/wecom；如果用户没说频道，不要猜，调用 create_schedule 时可以省略 channel，系统会追问。
+- channel: 必填，只能从已绑定频道里选择 feishu/dingtalk；如果用户没说频道，不要猜，调用 create_schedule 时可以省略 channel，系统会追问。
 - schedule.kind:
   - daily: 每天执行，必须填 time，如 "09:00"
   - weekly: 每周执行，必须填 time 和 weekdays，如 ["mon","wed","fri"] 或 ["一","三","五"]
@@ -121,7 +121,7 @@ function buildPMSystemPrompt(
 1. passthrough — 普通对话、闲聊、简单问题、查天气、翻译等。交给主聊天 AI 处理。
 2. dispatch_task — 把任务分发给专业 Agent。可以同时分发多个（并行执行）。
 3. create_schedule — 创建定时任务。
-4. send_message — 立即发消息到某个渠道（微信/企微/飞书）。
+4. send_message — 立即发消息到某个渠道（飞书/钉钉）。
 5. list_schedules — 查看已有定时任务。
 6. delete_schedule — 删除定时任务。
 7. create_skill — 生成一个用户自有技能。仅当用户明确要求"做一个技能/插件/工具包"时使用。
@@ -194,7 +194,7 @@ function buildPMTools() {
                 },
                 required: ["kind"],
               },
-              channel: { type: "string", enum: ["wechat", "feishu", "wecom"], description: "推送渠道。只能从当前用户已绑定频道里选；微信用 wechat。" },
+              channel: { type: "string", enum: ["feishu", "dingtalk"], description: "推送渠道。只能从当前用户已绑定频道里选；飞书用 feishu，钉钉用 dingtalk。" },
             },
             required: ["name", "prompt", "schedule"],
           },
@@ -208,7 +208,7 @@ function buildPMTools() {
       parameters: {
         type: "object",
         properties: {
-          channel: { type: "string", enum: ["wechat", "feishu", "wecom"] },
+          channel: { type: "string", enum: ["feishu", "dingtalk"] },
           content: { type: "string", description: "消息内容" },
         },
         required: ["channel", "content"],

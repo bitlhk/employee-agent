@@ -10,9 +10,10 @@ export type BoundChannel = {
 
 export async function getBoundChannelsForAdopt(adoptId: string): Promise<BoundChannel[]> {
   const channels: BoundChannel[] = [];
+  const isJiuwenAgent = adoptId.startsWith("lgj-");
 
-  const wechat = getWeixinStatus(adoptId);
-  if (wechat.bound && !wechat.needsReactivation) {
+  const wechat = isJiuwenAgent ? null : getWeixinStatus(adoptId);
+  if (wechat?.bound && !wechat.needsReactivation) {
     channels.push({
       channelId: "wechat",
       label: "微信",
@@ -29,6 +30,7 @@ export async function getBoundChannelsForAdopt(adoptId: string): Promise<BoundCh
     });
   }
 
+  // DingTalk is supported by JiuwenSwarm, but EA binding is not wired yet.
   // WeCom is still a placeholder provider.
   return channels;
 }

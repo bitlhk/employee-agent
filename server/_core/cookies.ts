@@ -1,4 +1,5 @@
-import type { CookieOptions, Request } from "express";
+import { COOKIE_NAME } from "@shared/const";
+import type { CookieOptions, Request, Response } from "express";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -62,4 +63,38 @@ export function getSessionCookieOptions(
     sameSite,
     secure: isSecure,
   };
+}
+
+export function clearSessionCookieVariants(req: Request, res: Response) {
+  const hostname = req.hostname || "";
+  const configuredDomain = process.env.COOKIE_DOMAIN || "";
+  const normalizedDomain = configuredDomain.replace(/^\./, "");
+  const domains = new Set<string | undefined>([undefined]);
+
+  if (configuredDomain) domains.add(configuredDomain);
+  if (normalizedDomain) {
+    domains.add(normalizedDomain);
+    domains.add(`.${normalizedDomain}`);
+  }
+  if (hostname && hostname !== normalizedDomain) domains.add(hostname);
+
+  for (const domain of domains) {
+    const base = { ...(domain ? { domain } : {}), path: "/" };
+    try {
+      res.clearCookie(COOKIE_NAME, {
+        ...base,
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+      });
+    } catch {}
+    try {
+      res.clearCookie(COOKIE_NAME, {
+        ...base,
+        httpOnly: true,
+        secure: false,
+        sameSite: "lax",
+      });
+    } catch {}
+  }
 }

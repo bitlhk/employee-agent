@@ -81,7 +81,7 @@ function cronDeliveryFromRequest(raw: any): CronJobInput["delivery"] {
       return {
         targets: [{
           channelId,
-          channelLabel: first.channelLabel || (channelId === "wechat" ? "微信" : channelId === "feishu" ? "飞书" : "企业微信"),
+          channelLabel: first.channelLabel || (channelId === "web" ? "当前对话" : channelId === "wechat" ? "微信" : channelId === "feishu" ? "飞书" : "企业微信"),
           targetId: first.targetId,
           targetLabel: first.targetLabel,
           format: first.format,
@@ -90,11 +90,16 @@ function cronDeliveryFromRequest(raw: any): CronJobInput["delivery"] {
     }
   }
 
-  const channelId = normalizeChannelId(String(raw?.channel || raw?.to || raw?.mode || (raw?.weixin ? "wechat" : ""))) || "wechat";
+  const rawChannel = String(raw?.channel || raw?.to || raw?.mode || (raw?.weixin ? "wechat" : "")).trim();
+  const channelId = rawChannel === "conversation"
+    ? "web"
+    : rawChannel === "weixin"
+      ? "wechat"
+      : normalizeChannelId(rawChannel) || "wechat";
   return {
     targets: [{
       channelId,
-      channelLabel: channelId === "wechat" ? "微信" : channelId === "feishu" ? "飞书" : "企业微信",
+      channelLabel: channelId === "web" ? "当前对话" : channelId === "wechat" ? "微信" : channelId === "feishu" ? "飞书" : "企业微信",
       targetId: raw?.target || raw?.to,
       targetLabel: raw?.targetLabel,
     }],
@@ -102,6 +107,7 @@ function cronDeliveryFromRequest(raw: any): CronJobInput["delivery"] {
 }
 
 function cronJobInputFromRequest(job: any): CronJobInput {
+  const rawMeta = job?.meta && typeof job.meta === "object" && !Array.isArray(job.meta) ? job.meta : {};
   return {
     name: String(job?.name || "定时任务").trim() || "定时任务",
     description: job?.description ? String(job.description) : undefined,
@@ -110,6 +116,7 @@ function cronJobInputFromRequest(job: any): CronJobInput {
     prompt: String(job?.prompt || job?.payload?.message || ""),
     delivery: cronDeliveryFromRequest(job?.delivery || {}),
     meta: {
+      ...rawMeta,
       sessionTarget: job?.sessionTarget || "isolated",
       skills: job?.skills,
       model: job?.payload?.model || job?.model,
@@ -138,6 +145,92 @@ function providerErrorStatus(kind?: string) {
   if (kind === "not_found") return 404;
   if (kind === "not_implemented") return 501;
   return 500;
+}
+
+function providerError(error: any) {
+  return Object.assign(new Error(String(error?.detail || "cron provider failed")), {
+    status: providerErrorStatus(error?.kind),
+  });
+}
+
+export async function listCronJobsForClaw(claw: any, options?: {
+  limit?: number;
+  offset?: number;
+  query?: string;
+  enabled?: string;
+  scheduleKind?: string;
+}) {
+  const adoptId = String(claw?.adoptId || "").trim();
+  const limit = Math.max(1, Math.min(200, Number(options?.limit || 20)));
+  const offset = Math.max(0, Number(options?.offset || 0));
+  const query = String(options?.query || "").trim().toLowerCase();
+  const enabled = String(options?.enabled || "all");
+  const scheduleKind = String(options?.scheduleKind || "all");
+
+  if (isHermesAdopt(adoptId)) {
+    let jobs = await hermesCron.listJobs(toHermesHandle(claw));
+    if (query) jobs = jobs.filter((j) => j.name.toLowerCase().includes(query) || (j.description || "").toLowerCase().includes(query));
+    const total = jobs.length;
+    return { runtime: "hermes", capabilities: hermesCron.capabilities(), jobs: jobs.slice(offset, offset + limit), total, limit, offset };
+  }
+
+  if (isJiuwenClawAdoptId(adoptId)) {
+    const listed = await jiuwenClawCronProvider.listJobs(toJiuwenClawHandle(claw));
+    if (!listed.ok) throw providerError(listed.error);
+    let jobs = listed.value;
+    if (query) jobs = jobs.filter((j) => String(j.name || "").toLowerCase().includes(query) || String(j.description || "").toLowerCase().includes(query));
+    if (enabled === "enabled") jobs = jobs.filter((j) => j.enabled !== false);
+    if (enabled === "disabled") jobs = jobs.filter((j) => j.enabled === false);
+    if (["interval", "once", "cron"].includes(scheduleKind)) jobs = jobs.filter((j) => String(j.schedule?.kind || "") === scheduleKind);
+    const total = jobs.length;
+    return { runtime: "jiuwenclaw", capabilities: jiuwenClawCronProvider.capabilities(), jobs: jobs.slice(offset, offset + limit), total, limit, offset };
+  }
+
+  const listed = await openClawCronProvider.listJobs(toOpenClawHandle(claw));
+  if (!listed.ok) throw providerError(listed.error);
+  let jobs = listed.value;
+  if (query) jobs = jobs.filter((j) => String(j.name || "").toLowerCase().includes(query) || String(j.description || "").toLowerCase().includes(query));
+  if (enabled === "enabled") jobs = jobs.filter((j) => j.enabled !== false);
+  if (enabled === "disabled") jobs = jobs.filter((j) => j.enabled === false);
+  if (["interval", "once", "cron"].includes(scheduleKind)) jobs = jobs.filter((j) => String(j.schedule?.kind || "") === scheduleKind);
+  const total = jobs.length;
+  return { runtime: "openclaw", capabilities: openClawCronProvider.capabilities(), jobs: jobs.slice(offset, offset + limit), total, limit, offset };
+}
+
+export async function listCronRunsForClaw(claw: any, options?: {
+  limit?: number;
+  offset?: number;
+  jobId?: string;
+  scope?: string;
+}) {
+  const adoptId = String(claw?.adoptId || "").trim();
+  if (isHermesAdopt(adoptId)) {
+    throw Object.assign(new Error("Hermes cron runs are not supported yet"), { status: 501 });
+  }
+
+  const limit = Math.max(1, Math.min(200, Number(options?.limit || 20)));
+  const offset = Math.max(0, Number(options?.offset || 0));
+  const jobId = String(options?.jobId || "").trim();
+  const scope = String(options?.scope || "all").trim();
+  const provider = isJiuwenClawAdoptId(adoptId) ? jiuwenClawCronProvider : openClawCronProvider;
+  const handle = isJiuwenClawAdoptId(adoptId) ? toJiuwenClawHandle(claw) : toOpenClawHandle(claw);
+  const listed = await provider.listJobs(handle);
+  if (!listed.ok) throw providerError(listed.error);
+
+  const targetJobs = jobId ? listed.value.filter((j) => String(j.id) === jobId) : listed.value;
+  let runs: any[] = [];
+  for (const job of targetJobs.slice(0, 50)) {
+    const runResult = await provider.listRuns(handle, job.id, 100);
+    if (!runResult.ok) {
+      console.warn("[CRON-PROVIDER] listRuns failed for job", { adoptId, jobId: job.id, error: runResult.error });
+      continue;
+    }
+    runs.push(...runResult.value.map((run) => ({ ...run, jobName: job.name })));
+  }
+  if (["ok", "error", "skipped", "timeout", "canceled"].includes(scope)) runs = runs.filter((r: any) => String(r?.status || "") === scope);
+  runs.sort((a: any, b: any) => Date.parse(String(b?.startedAt || "")) - Date.parse(String(a?.startedAt || "")));
+  const total = runs.length;
+  return { runs: runs.slice(offset, offset + limit), total, limit, offset };
 }
 
 export function registerCronRoutes(app: express.Express) {

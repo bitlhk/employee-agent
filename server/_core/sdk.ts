@@ -155,6 +155,28 @@ class SDKServer {
     return new Map(Object.entries(parsed));
   }
 
+  private getCookieValues(cookieHeader: string | undefined, name: string) {
+    if (!cookieHeader) return [];
+
+    const values: string[] = [];
+    for (const part of cookieHeader.split(";")) {
+      const index = part.indexOf("=");
+      if (index < 0) continue;
+
+      const key = part.slice(0, index).trim();
+      if (key !== name) continue;
+
+      const rawValue = part.slice(index + 1).trim();
+      try {
+        values.push(decodeURIComponent(rawValue));
+      } catch {
+        values.push(rawValue);
+      }
+    }
+
+    return Array.from(new Set(values.filter(Boolean)));
+  }
+
   private getSessionSecret() {
     const secret = ENV.cookieSecret;
     return new TextEncoder().encode(secret);
@@ -271,9 +293,24 @@ class SDKServer {
 
   async authenticateRequest(req: Request): Promise<User> {
     // Regular authentication flow
-    const cookies = this.parseCookies(req.headers.cookie);
-    const sessionCookie = cookies.get(COOKIE_NAME);
-    const session = await this.verifySession(sessionCookie);
+    const sessionCookies = this.getCookieValues(req.headers.cookie, COOKIE_NAME);
+    const fallbackCookie = this.parseCookies(req.headers.cookie).get(COOKIE_NAME);
+    const candidates = sessionCookies.length > 0
+      ? sessionCookies
+      : fallbackCookie
+        ? [fallbackCookie]
+        : [];
+    let session: Awaited<ReturnType<typeof this.verifySession>> = null;
+    let sessionCookie: string | undefined;
+
+    for (const candidate of candidates) {
+      const verified = await this.verifySession(candidate);
+      if (verified) {
+        session = verified;
+        sessionCookie = candidate;
+        break;
+      }
+    }
 
     if (!session) {
       throw ForbiddenError("Invalid session cookie");

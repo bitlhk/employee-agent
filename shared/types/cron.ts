@@ -9,7 +9,7 @@ import { z } from "zod";
  * server-side provider implementations.
  */
 
-export const CHANNEL_IDS = ["wechat", "feishu", "wecom"] as const;
+export const CHANNEL_IDS = ["web", "wechat", "feishu", "dingtalk", "wecom"] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
 export const channelIdSchema = z.enum(CHANNEL_IDS);
 
@@ -272,6 +272,7 @@ export const feishuCredentialsSchema = z.object({
   // credentials are intentionally not the primary contract because they are too
   // hard for normal users to configure correctly.
 });
+export const dingtalkCredentialsSchema = z.object({});
 export const wecomCredentialsSchema = z.object({
   corpId: z.string().min(1),
   agentId: z.string().min(1),

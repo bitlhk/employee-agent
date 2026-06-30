@@ -49,14 +49,27 @@ describe("auth.logout", () => {
     const result = await caller.auth.logout();
 
     expect(result).toEqual({ success: true });
-    expect(clearedCookies).toHaveLength(1);
-    expect(clearedCookies[0]?.name).toBe(COOKIE_NAME);
-    expect(clearedCookies[0]?.options).toMatchObject({
-      maxAge: -1,
-      secure: true,
-      sameSite: "none",
-      httpOnly: true,
-      path: "/",
-    });
+    expect(clearedCookies.length).toBeGreaterThanOrEqual(2);
+    expect(clearedCookies.every((cookie) => cookie.name === COOKIE_NAME)).toBe(true);
+    expect(clearedCookies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          options: expect.objectContaining({
+            secure: true,
+            sameSite: "none",
+            httpOnly: true,
+            path: "/",
+          }),
+        }),
+        expect.objectContaining({
+          options: expect.objectContaining({
+            secure: false,
+            sameSite: "lax",
+            httpOnly: true,
+            path: "/",
+          }),
+        }),
+      ])
+    );
   });
 });

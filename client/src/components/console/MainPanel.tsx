@@ -15,6 +15,7 @@ type PanelPageKey = Exclude<PageKey, "chat">;
 
 const PANEL_PAGE_ORDER: PanelPageKey[] = [
   "skills",
+  "channels",
   "weixin",
   "agent",
   "workspace",
@@ -69,7 +70,7 @@ export function MainPanel({
   }, [activePage]);
 
   const renderPage = (page: PanelPageKey): ReactNode => {
-    if (page === "weixin") return <ChannelsPage adoptId={adoptId || ""} />;
+    if (page === "channels" || page === "weixin") return <ChannelsPage adoptId={adoptId || ""} />;
     if (page === "skills") {
       return <SkillsPage skills={safeSkills.data} canEdit={safeSkills.canEdit} pending={safeSkills.pending} onToggle={safeSkills.onToggle} adoptId={safeSkills.adoptId} />;
     }

@@ -1,16 +1,22 @@
 import type { ChannelId, ChannelProvider } from "@shared/types/cron";
-import { FeishuChannelProvider, WechatChannelProvider, WecomChannelProvider } from "./channel-providers";
+import { DingtalkChannelProvider, FeishuChannelProvider, WechatChannelProvider, WecomChannelProvider } from "./channel-providers";
 
 const providers = new Map<ChannelId, ChannelProvider>([
   ["wechat", new WechatChannelProvider()],
   ["feishu", new FeishuChannelProvider()],
+  ["dingtalk", new DingtalkChannelProvider()],
   ["wecom", new WecomChannelProvider()],
 ]);
 
 const CHANNEL_ALIASES: Record<string, ChannelId> = {
+  web: "web",
+  conversation: "web",
   weixin: "wechat",
   wechat: "wechat",
   feishu: "feishu",
+  dingding: "dingtalk",
+  dingtalk: "dingtalk",
+  ding: "dingtalk",
   wecom: "wecom",
 };
 

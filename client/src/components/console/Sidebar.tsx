@@ -2,14 +2,14 @@ import {
   CalendarClock,
   FolderTree,
   MessageSquareText,
-  Settings2,
+  Radio,
   Sparkles,
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { SessionList, type SessionListConversation } from "./SessionList";
 
-export type PageKey = "chat" | "skills" | "weixin" | "agent" | "workspace" | "schedule" | "collab" | "meeting" | "settings";
+export type PageKey = "chat" | "skills" | "channels" | "weixin" | "agent" | "workspace" | "schedule" | "collab" | "meeting" | "settings";
 
 type NavItem = { key: PageKey; label: string; icon: any; adminOnly?: boolean };
 
@@ -19,6 +19,7 @@ const primaryItems: NavItem[] = [
   { key: "chat", label: "聊天", icon: MessageSquareText },
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "collab", label: "协作", icon: Users },
+  { key: "channels", label: "频道", icon: Radio },
   { key: "schedule", label: "定时任务", icon: CalendarClock },
   { key: "workspace", label: "工作空间", icon: FolderTree },
 ];
@@ -27,7 +28,6 @@ export function Sidebar({
   activePage,
   setActivePage,
   collapsed,
-  onOpenSettings,
   coopBadge,
   sessions = [],
   currentConversationId,
@@ -44,7 +44,6 @@ export function Sidebar({
   activePage: PageKey;
   setActivePage: (k: PageKey) => void;
   collapsed?: boolean;
-  onOpenSettings?: () => void;
   coopBadge?: number;
   sessions?: SidebarConversation[];
   currentConversationId?: string;
@@ -103,19 +102,8 @@ export function Sidebar({
         <div className="flex-1" />
       )}
 
-      <div className="shrink-0 pt-2 flex items-center gap-1.5" style={{ borderTop: "1px solid var(--oc-border-subtle)" }}>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            title="设置"
-            onClick={() => onOpenSettings?.()}
-            className="sidebar-item sidebar-icon-button flex items-center justify-center relative"
-            style={{ width: 34, height: 34, padding: 0 }}
-          >
-            <Settings2 size={16} strokeWidth={1.7} className="sidebar-item-icon" />
-          </button>
-        </div>
-        {!collapsed && footer ? <div className="ml-auto min-w-0">{footer}</div> : null}
+      <div className="shrink-0 pt-2 flex items-center justify-center" style={{ borderTop: "1px solid var(--oc-border-subtle)" }}>
+        {!collapsed && footer ? <div className="min-w-0">{footer}</div> : null}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "../_core/cookies";
+import { clearSessionCookieVariants, getSessionCookieOptions } from "../_core/cookies";
 import { sdk } from "../_core/sdk";
 import { publicProcedure, adminProcedure, router } from "../_core/trpc";
 import { z } from "zod";
@@ -43,8 +43,7 @@ export const authRouter = router({
         targetType: "auth_session",
         metadata: { localCacheClearRequested: true },
       });
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      clearSessionCookieVariants(ctx.req, ctx.res);
       return {
         success: true,
       } as const;
@@ -160,6 +159,7 @@ export const authRouter = router({
             name: input.name,
           });
           const cookieOptions = getSessionCookieOptions(ctx.req);
+          clearSessionCookieVariants(ctx.req, ctx.res);
           ctx.res.cookie(COOKIE_NAME, sessionToken, {
             ...cookieOptions,
             maxAge: 365 * 24 * 60 * 60 * 1000,
@@ -245,6 +245,7 @@ export const authRouter = router({
 
         // 设置cookie
         const cookieOptions = getSessionCookieOptions(ctx.req);
+        clearSessionCookieVariants(ctx.req, ctx.res);
         ctx.res.cookie(COOKIE_NAME, sessionToken, {
           ...cookieOptions,
           maxAge: 365 * 24 * 60 * 60 * 1000, // 1年
@@ -278,6 +279,7 @@ export const authRouter = router({
             name: input.email.split('@')[0],
           });
           const cookieOptions = getSessionCookieOptions(ctx.req);
+          clearSessionCookieVariants(ctx.req, ctx.res);
           ctx.res.cookie(COOKIE_NAME, sessionToken, {
             ...cookieOptions,
             maxAge: 365 * 24 * 60 * 60 * 1000,
@@ -342,6 +344,7 @@ export const authRouter = router({
 
         // 设置cookie
         const cookieOptions = getSessionCookieOptions(ctx.req);
+        clearSessionCookieVariants(ctx.req, ctx.res);
         ctx.res.cookie(COOKIE_NAME, sessionToken, {
           ...cookieOptions,
           maxAge: 365 * 24 * 60 * 60 * 1000, // 1年

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { trpc } from "@/lib/trpc";
 import { PageContainer } from "@/components/console/PageContainer";
 import {
@@ -45,6 +45,23 @@ type CoopSessionRow = {
   my_request_status?: string | null;
   created_at?: string | Date | null;
   published_at?: string | Date | null;
+  sourceUpdatedAt?: number;
+  sortUpdatedAt?: number;
+};
+
+type CoopSessionViewRow = {
+  id?: string;
+  coopSessionId?: string;
+  title?: string;
+  preview?: string;
+  updatedAt?: number;
+  sourceUpdatedAt?: number;
+  sortUpdatedAt?: number;
+};
+
+type CoopSessionViewPayload = {
+  sessions?: CoopSessionViewRow[];
+  rawSessions?: CoopSessionRow[];
 };
 
 type CoopCandidate = {
@@ -172,7 +189,8 @@ function countOf(value: unknown) {
 }
 
 function createdAtValue(session: CoopSessionRow) {
-  const time = session.created_at ? new Date(session.created_at).getTime() : 0;
+  const viewTime = Number(session.sortUpdatedAt || session.sourceUpdatedAt || 0);
+  const time = viewTime || (session.created_at ? new Date(session.created_at).getTime() : 0);
   return Number.isFinite(time) ? time : 0;
 }
 
@@ -721,13 +739,66 @@ function CoopSessionsWorkbench({ adoptId }: { adoptId?: string }) {
     adoptId ? `/coop/${sessionId}?fromAdoptId=${encodeURIComponent(adoptId)}` : `/coop/${sessionId}`;
   const { confirm, dialog } = useConfirmDialog();
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
-  const { data: sessions, isLoading, isFetching, refetch } = trpc.coop.listMySessions.useQuery({ limit: 80 }, {
-    refetchInterval: 10_000,
-  });
-  const list = ((sessions as CoopSessionRow[]) || []).map((session) => ({
-    ...session,
-    id: String(session.id || ""),
-  })).filter((session) => session.id);
+  const [sessionsPayload, setSessionsPayload] = useState<CoopSessionViewPayload | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const loadSessions = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true);
+    setIsFetching(true);
+    try {
+      const response = await fetch("/api/ea/session-view/coop?limit=80", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json().catch(() => null);
+      setSessionsPayload(payload || { sessions: [], rawSessions: [] });
+      setLoadError("");
+    } catch (error) {
+      console.warn("[coop] session-view load failed", error);
+      setLoadError("协作列表加载失败，请稍后刷新重试。");
+      setSessionsPayload((current) => current || { sessions: [], rawSessions: [] });
+    } finally {
+      setIsLoading(false);
+      setIsFetching(false);
+    }
+  }, []);
+  const refetch = useCallback(() => {
+    void loadSessions(true);
+  }, [loadSessions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async (silent = false) => {
+      if (cancelled) return;
+      await loadSessions(silent);
+    };
+    void run(false);
+    const timer = window.setInterval(() => void run(true), 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [loadSessions]);
+
+  const list = useMemo(() => {
+    const viewById = new Map<string, CoopSessionViewRow>();
+    for (const view of Array.isArray(sessionsPayload?.sessions) ? sessionsPayload.sessions : []) {
+      const id = String(view?.coopSessionId || String(view?.id || "").replace(/^coop:/, "") || "").trim();
+      if (id) viewById.set(id, view);
+    }
+    return ((sessionsPayload?.rawSessions as CoopSessionRow[]) || []).map((session) => {
+      const id = String(session.id || "");
+      const view = viewById.get(id);
+      return {
+        ...session,
+        id,
+        sourceUpdatedAt: Number(view?.sourceUpdatedAt || view?.updatedAt || 0) || session.sourceUpdatedAt,
+        sortUpdatedAt: Number(view?.sortUpdatedAt || view?.sourceUpdatedAt || view?.updatedAt || 0) || session.sortUpdatedAt,
+      };
+    }).filter((session) => session.id);
+  }, [sessionsPayload]);
   const sorted = useMemo(() => sortSessions(list), [list]);
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -848,13 +919,16 @@ function CoopSessionsWorkbench({ adoptId }: { adoptId?: string }) {
             ))}
           </div>
           <div className="coop-workbench__actions">
-            <Button variant="outline" size="sm" className="coop-refresh-button" onClick={() => refetch()} disabled={isFetching}>
+            <Button variant="outline" size="sm" className="coop-refresh-button ea-data-btn ea-data-btn--ghost" onClick={() => refetch()} disabled={isFetching}>
               <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
               刷新
             </Button>
           </div>
         </div>
-        <div className="coop-empty-state">
+        {loadError ? (
+          <div className="coop-load-error">{loadError}</div>
+        ) : null}
+        <div className="coop-empty-state ea-data-empty">
           <div className="coop-empty-state__icon"><UsersRound size={24} /></div>
           <div className="coop-empty-state__title">还没有协作任务</div>
           <div className="coop-empty-state__desc">你可以发起一个多人协作，让成员分别处理子任务后统一汇总。</div>
@@ -882,21 +956,25 @@ function CoopSessionsWorkbench({ adoptId }: { adoptId?: string }) {
           ))}
         </div>
         <div className="coop-workbench__actions">
-          <Button variant="outline" size="sm" className="coop-refresh-button" onClick={() => refetch()} disabled={isFetching}>
+          <Button variant="outline" size="sm" className="coop-refresh-button ea-data-btn ea-data-btn--ghost" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
             刷新
           </Button>
         </div>
       </div>
 
+      {loadError ? (
+        <div className="coop-load-error">{loadError}</div>
+      ) : null}
+
       {filtered.length === 0 ? (
-        <div className="coop-empty-state coop-empty-state--compact">
+        <div className="coop-empty-state coop-empty-state--compact ea-data-empty">
           <div className="coop-empty-state__title">当前筛选下没有任务</div>
           <div className="coop-empty-state__desc">切换到“全部”可以查看所有协作任务。</div>
         </div>
       ) : (
-        <div className="coop-task-table" role="table" aria-label="协作任务列表">
-          <div className="coop-task-table__head" role="row">
+        <div className="coop-task-table ea-data-card" role="table" aria-label="协作任务列表">
+          <div className="coop-task-table__head ea-data-header" role="row">
             <div>任务</div>
             <div>状态</div>
             <div>下一步</div>
@@ -913,7 +991,7 @@ function CoopSessionsWorkbench({ adoptId }: { adoptId?: string }) {
               return (
                 <div
                   key={session.id}
-                  className="coop-task-row"
+                  className="coop-task-row ea-data-row ea-data-row--clickable"
                   data-action={flags.needMyAction || flags.readyToConsolidate ? "true" : "false"}
                   onClick={() => setLoc(coopSessionPath(session.id))}
                   role="row"
@@ -942,11 +1020,11 @@ function CoopSessionsWorkbench({ adoptId }: { adoptId?: string }) {
                     </div>
                   </div>
                   <div className="coop-task-row__date">{formatDate(session.created_at)}</div>
-                  <div className="coop-task-row__actions" onClick={(event) => event.stopPropagation()}>
+                  <div className="coop-task-row__actions ea-data-actions" onClick={(event) => event.stopPropagation()}>
                     <button
                       type="button"
                       data-coop-menu-trigger
-                      className="coop-task-row__more"
+                      className="coop-task-row__more ea-data-icon-btn"
                       aria-label="更多操作"
                       aria-expanded={openMenuId === session.id}
                       onClick={() => setOpenMenuId(openMenuId === session.id ? null : session.id)}

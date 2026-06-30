@@ -53,14 +53,16 @@ function sendError(id: any, code: number, message: string) {
 const TOOLS = [
   {
     name: "create_scheduled_task",
-    description: "Create a recurring scheduled task. Use when user wants daily checks, periodic reminders, or automated reports. Results can be delivered to WeChat, WeCom, Feishu, Webhook, or in-chat.",
+    description: "Create a recurring scheduled task. Use when user wants daily checks, periodic reminders, or automated reports. Results can be delivered to WeChat, WeCom, Feishu, Webhook, or the EA schedule task record. Do not bind results to the current chat session.",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string", description: "Short task name" },
         message: { type: "string", description: "The instruction to execute each time" },
         cron_expr: { type: "string", description: "Cron expression (min hour day month weekday). Examples: '30 10 * * *' = daily 10:30, '0 9 * * 1-5' = weekdays 9:00, '*/30 * * * *' = every 30 min" },
-        delivery_channel: { type: "string", enum: ["conversation", "weixin", "wecom", "feishu", "webhook"], description: "Where to deliver results. Default: conversation" },
+        delivery_channel: { type: "string", enum: ["conversation", "weixin", "wecom", "feishu", "webhook"], description: "Where to deliver results. Default conversation means the EA schedule task record, not the current chat." },
+        conversation_id: { type: "string", description: "Deprecated. Do not pass for JiuwenSwarm tasks." },
+        session_id: { type: "string", description: "Deprecated. Do not pass for JiuwenSwarm tasks." },
       },
       required: ["name", "message", "cron_expr"],
     },
@@ -138,7 +140,12 @@ async function handleMessage(msg: any) {
 
       if (toolName === "create_scheduled_task") {
         const cronExpr = args.cron_expr || "0 9 * * *";
-        const deliveryChannel = args.delivery_channel || "conversation";
+        const deliveryChannel = String(args.delivery_channel || "conversation");
+        const channelId = deliveryChannel === "conversation"
+          ? "web"
+          : deliveryChannel === "weixin"
+            ? "wechat"
+            : deliveryChannel;
         const job = {
           name: String(args.name || "scheduled task"),
           description: String(args.message || "").slice(0, 100),
@@ -146,7 +153,13 @@ async function handleMessage(msg: any) {
           schedule: { kind: "cron", expr: cronExpr },
           payload: { kind: "agentTurn", message: String(args.message || "") },
           sessionTarget: "isolated",
-          delivery: { mode: "announce", to: deliveryChannel, ...(deliveryChannel !== "conversation" ? { channel: deliveryChannel } : {}) },
+          delivery: {
+            targets: [{
+              channelId,
+              channelLabel: channelId === "web" ? "定时任务记录" : channelId === "wechat" ? "微信" : channelId === "feishu" ? "飞书" : channelId === "wecom" ? "企业微信" : "Webhook",
+            }],
+          },
+          meta: {},
         };
         const resp = await fetch(`${BASE}/api/claw/cron/add`, {
           method: "POST",

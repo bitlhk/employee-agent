@@ -33,8 +33,10 @@ export type NormalizedScheduleIntent =
   | { ok: false; question: string; reason: "missing_prompt" | "missing_time" | "missing_channel" | "channel_unbound" | "invalid_schedule" };
 
 const CHANNEL_LABEL: Record<ChannelId, string> = {
+  web: "当前对话",
   wechat: "微信",
   feishu: "飞书",
+  dingtalk: "钉钉",
   wecom: "企业微信",
 };
 

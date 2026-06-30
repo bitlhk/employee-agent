@@ -249,14 +249,18 @@ const unsupportedAdapter: ChannelBindingAdapter = {
   },
 };
 
-const CHANNEL_ADAPTERS: Record<ChannelId, ChannelBindingAdapter> = {
+const CHANNEL_ADAPTERS: Record<Exclude<ChannelId, "web">, ChannelBindingAdapter> = {
   wechat: wechatAdapter,
   feishu: feishuAdapter,
+  dingtalk: unsupportedAdapter,
   wecom: unsupportedAdapter,
 };
 
 export function useChannelBinding(channelId: ChannelId, adoptId?: string): ChannelBindingState {
-  const adapter = useMemo(() => CHANNEL_ADAPTERS[channelId], [channelId]);
+  const adapter = useMemo(
+    () => channelId === "web" ? unsupportedAdapter : CHANNEL_ADAPTERS[channelId],
+    [channelId],
+  );
   const [status, setStatus] = useState<ChannelBindingStatus>("idle");
   const [qrCode, setQrCode] = useState("");
   const [verificationUri, setVerificationUri] = useState("");

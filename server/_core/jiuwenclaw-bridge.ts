@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { createHash } from "crypto";
 import { execFile } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
+import os from "os";
 import path from "path";
 import { WebSocket, type RawData } from "ws";
 import { auditRequest, recordAuditBestEffort } from "./audit-events";
@@ -18,13 +19,15 @@ import {
   upsertSessionRegistry,
 } from "./helpers";
 
+export { bumpSessionEpoch } from "./helpers";
+
 export type JiuwenClawRuntimeClaw = {
   adoptId: string;
   agentId: string;
   userId: number;
 };
 
-type ForwardOptions = {
+export type JiuwenForwardOptions = {
   model?: string;
   req?: Request;
   channel?: unknown;
@@ -32,11 +35,24 @@ type ForwardOptions = {
   epochLabel?: unknown;
   clientRunId?: string | null;
   runtimeMode?: unknown;
+  cancelPendingPermission?: unknown;
+};
+
+export type JiuwenPermissionRequest = {
+  requestId: string;
+  source: string;
+  title: string;
+  question: string;
+  command?: string;
+  toolName?: string;
+  options: Array<{ label: string; description?: string; value?: string }>;
 };
 
 const DEFAULT_AGENTSERVER_WS_URL = "ws://127.0.0.1:18092";
 const DEFAULT_SERVICE_ID = "linggan";
 const seenJiuwenAuditEventIds = new Set<string>();
+const recentlyAnsweredPermissions = new Map<string, { requestId: string; answeredAt: number }>();
+const RECENT_PERMISSION_TTL_MS = 30 * 60 * 1000;
 
 function runtimeEnabled(): boolean {
   return String(process.env.JIUWENCLAW_RUNTIME_ENABLED || "").toLowerCase() === "true";
@@ -46,22 +62,26 @@ export function isJiuwenClawRuntimeEnabled(): boolean {
   return runtimeEnabled();
 }
 
+function useJiuwenGatewayTransport(): boolean {
+  return String(process.env.JIUWENCLAW_CHAT_TRANSPORT || "").trim().toLowerCase() === "gateway";
+}
+
 function sanitizeRuntimeId(value: unknown, fallback: string, maxLen = 96): string {
   const normalized = normalizeSessionPart(value, maxLen).replace(/:/g, "_").toLowerCase();
   return normalized || fallback;
 }
 
-function buildServiceId(): string {
+export function buildJiuwenServiceId(): string {
   return sanitizeRuntimeId(process.env.JIUWENCLAW_SERVICE_ID || DEFAULT_SERVICE_ID, DEFAULT_SERVICE_ID, 64);
 }
 
-function buildAgentId(claw: JiuwenClawRuntimeClaw): string {
+export function buildJiuwenAgentId(claw: JiuwenClawRuntimeClaw): string {
   const configured = process.env.JIUWENCLAW_AGENT_ID_OVERRIDE;
   if (configured) return sanitizeRuntimeId(configured, `jiuwen_${claw.adoptId}`, 96);
   return sanitizeRuntimeId(claw.agentId || `jiuwen_${claw.adoptId}`, `jiuwen_${claw.adoptId}`, 96);
 }
 
-function buildSessionId(claw: JiuwenClawRuntimeClaw, agentId: string, opts: ForwardOptions): string {
+export function buildJiuwenSessionId(claw: JiuwenClawRuntimeClaw, agentId: string, opts: JiuwenForwardOptions): string {
   const epoch = readSessionEpoch(claw.adoptId);
   const scope = buildSessionRegistryScope(opts.channel, opts.conversationId);
   const found = lookupSessionRegistry(claw.adoptId, agentId, epoch, scope);
@@ -211,7 +231,7 @@ function finiteNumber(value: unknown): number | undefined {
   return Number.isFinite(numberValue) ? numberValue : undefined;
 }
 
-function normalizeJiuwenUsageSummary(delta: any): { usage: Record<string, number>; model?: string } | null {
+export function normalizeJiuwenUsageSummary(delta: any): { usage: Record<string, number>; model?: string } | null {
   const usage = delta?.usage && typeof delta.usage === "object" ? delta.usage : null;
   if (!usage) return null;
 
@@ -235,7 +255,7 @@ function normalizeJiuwenUsageSummary(delta: any): { usage: Record<string, number
   };
 }
 
-function normalizeJiuwenToolPayload(eventType: string, delta: any): {
+export function normalizeJiuwenToolPayload(eventType: string, delta: any): {
   isResult: boolean;
   callId: string;
   toolName: string;
@@ -261,7 +281,7 @@ function normalizeJiuwenToolPayload(eventType: string, delta: any): {
   };
 }
 
-function stringifyToolPayload(value: unknown): string {
+export function stringifyJiuwenToolPayload(value: unknown): string {
   if (typeof value === "string") return value;
   if (value == null) return "";
   try {
@@ -295,7 +315,80 @@ function summarizeJiuwenApprovalEvent(eventType: string, delta: unknown): string
   return `JiuwenSwarm 运行时请求人工确认，EA 当前未接入原生确认回传。event=${eventType}; payload=${trimmedPayload}`;
 }
 
-async function recordJiuwenToolAudit(args: {
+function normalizePermissionOptions(rawOptions: unknown): Array<{ label: string; description?: string; value?: string }> {
+  if (!Array.isArray(rawOptions)) return [
+    { label: "本次允许", value: "本次允许", description: "仅本次允许执行" },
+    { label: "拒绝", value: "拒绝", description: "拒绝本次执行" },
+  ];
+  const options = rawOptions
+    .map((item) => {
+      if (typeof item === "string") return { label: item, value: item };
+      if (!item || typeof item !== "object") return null;
+      const obj = item as Record<string, unknown>;
+      const label = String(obj.label || obj.value || "").trim();
+      if (!label) return null;
+      const description = String(obj.description || "").trim();
+      const value = String(obj.value || label).trim();
+      return {
+        label,
+        value,
+        ...(description ? { description } : {}),
+      };
+    })
+    .filter(Boolean) as Array<{ label: string; description?: string; value?: string }>;
+  return options.length > 0 ? options : [
+    { label: "本次允许", value: "本次允许", description: "仅本次允许执行" },
+    { label: "拒绝", value: "拒绝", description: "拒绝本次执行" },
+  ];
+}
+
+function extractCommandFromQuestion(question: string): string {
+  const fencedJson = question.match(/```json\s*([\s\S]*?)```/i)?.[1];
+  if (fencedJson) {
+    try {
+      const parsed = JSON.parse(fencedJson);
+      const command = String(parsed?.command || parsed?.cmd || "").trim();
+      if (command) return command;
+    } catch {}
+  }
+  const fenced = question.match(/```\s*([\s\S]*?)```/)?.[1]?.trim();
+  if (fenced && fenced.length <= 2000) return fenced;
+  const inline = question.match(/工具\s*`?([^`\s]+)`?\s*需要授权/)?.[1];
+  return inline ? `tool: ${inline}` : "";
+}
+
+export function normalizeJiuwenPermissionRequest(eventType: string, delta: any, fallbackRequestId: string): JiuwenPermissionRequest | null {
+  if (!isJiuwenHumanApprovalEvent(eventType, delta)) return null;
+  const source = String(delta?.source || "").trim() || (String(eventType).toLowerCase() === "chat.ask_user_question" ? "permission_interrupt" : "");
+  if (source && !["permission_interrupt", "confirm_interrupt", "ask_user_interrupt"].includes(source)) return null;
+  const questions = Array.isArray(delta?.questions) ? delta.questions : [];
+  const firstQuestion = questions.find((item: any) => item && typeof item === "object") || {};
+  const requestId = String(
+    delta?.request_id
+    || delta?.requestId
+    || delta?.id
+    || firstQuestion?.request_id
+    || firstQuestion?.id
+    || fallbackRequestId
+  ).trim();
+  if (!requestId) return null;
+  const question = String(firstQuestion?.question || delta?.question || delta?.message || delta?.query || "").trim();
+  const title = String(firstQuestion?.header || delta?.header || "权限审批").trim() || "权限审批";
+  const command = extractCommandFromQuestion(question || stableJson(delta));
+  const toolName = String(delta?.tool_name || delta?.toolName || firstQuestion?.tool_name || "").trim()
+    || (command.startsWith("tool: ") ? command.slice(6).trim() : "");
+  return {
+    requestId,
+    source: source || "permission_interrupt",
+    title,
+    question: question || "JiuwenSwarm 请求授权后继续执行。",
+    ...(command ? { command } : {}),
+    ...(toolName ? { toolName } : {}),
+    options: normalizePermissionOptions(firstQuestion?.options || delta?.options),
+  };
+}
+
+export async function recordJiuwenToolAudit(args: {
   claw: JiuwenClawRuntimeClaw;
   req?: Request;
   agentId: string;
@@ -528,7 +621,7 @@ function normalizeWorkspaceFilePayload(file: any, workspaceDir: string): { name:
   return { name, size, path: relPath };
 }
 
-function normalizeJiuwenFileEvent(delta: any, workspaceDir: string): Array<{ name: string; size: number; path: string }> {
+export function normalizeJiuwenFileEvent(delta: any, workspaceDir: string): Array<{ name: string; size: number; path: string }> {
   const candidates = Array.isArray(delta?.files)
     ? delta.files
     : Array.isArray(delta?.file_list)
@@ -546,14 +639,14 @@ function normalizeJiuwenFileEvent(delta: any, workspaceDir: string): Array<{ nam
   return files;
 }
 
-function normalizeJiuwenMode(value: unknown): "agent.fast" | "agent.plan" | "team" {
+export function normalizeJiuwenMode(value: unknown): "agent.fast" | "agent.plan" | "team" {
   const mode = String(value || "").trim().toLowerCase();
   if (mode === "plan" || mode === "agent.plan") return "agent.plan";
   if (mode === "team" || mode === "code.team") return "team";
   return "agent.fast";
 }
 
-function buildChatRequest(args: {
+export function buildJiuwenAgentServerChatRequest(args: {
   requestId: string;
   serviceId: string;
   agentId: string;
@@ -599,6 +692,55 @@ function buildChatRequest(args: {
   };
 }
 
+export function buildJiuwenAgentServerPermissionAnswerRequest(args: {
+  envelopeRequestId: string;
+  permissionRequestId: string;
+  serviceId: string;
+  agentId: string;
+  sessionId: string;
+  channelId: string;
+  workspaceDir: string;
+  selectedOption: string;
+  source?: string;
+  runtimeMode?: unknown;
+}) {
+  const mode = normalizeJiuwenMode(args.runtimeMode || process.env.JIUWENCLAW_DEFAULT_MODE);
+  const source = String(args.source || "permission_interrupt").trim() || "permission_interrupt";
+  return {
+    protocol_version: "1.0",
+    request_id: args.envelopeRequestId,
+    timestamp: new Date().toISOString(),
+    identity_origin: "user",
+    channel: args.channelId,
+    channel_context: {
+      effective_project_dir: args.workspaceDir,
+      cwd: args.workspaceDir,
+      source_channel: args.channelId,
+    },
+    method: "chat.send",
+    is_stream: true,
+    service_id: args.serviceId,
+    agent_id: args.agentId,
+    session_id: args.sessionId,
+    params: {
+      service_id: args.serviceId,
+      agent_id: args.agentId,
+      session_id: args.sessionId,
+      query: "",
+      content: "",
+      request_id: args.permissionRequestId,
+      answers: [{ selected_options: [args.selectedOption], custom_input: "" }],
+      source,
+      mode,
+      project_dir: args.workspaceDir,
+      request_metadata: {
+        effective_project_dir: args.workspaceDir,
+        source_channel: args.channelId,
+      },
+    },
+  };
+}
+
 // ── 静默失败自愈 ──────────────────────────────────────────────────────────────
 // jiuwenswarm 的中断状态（InterruptionState）持久化损坏后，同 session 所有请求会
 // 静默跳过 LLM 调用（0 token、无错误、瞬间返回）。检测到该特征时自动清除该
@@ -609,11 +751,39 @@ const JIUWEN_SILENT_FAILURE_MS = Math.max(
   Number(process.env.JIUWENCLAW_SILENT_FAILURE_MS || 2000) || 2000,
 );
 const JIUWEN_CHECKPOINT_DB =
-  process.env.JIUWENCLAW_CHECKPOINT_DB || "/root/.jiuwenswarm/agent/.checkpoint/checkpoint.db";
+  process.env.JIUWENCLAW_CHECKPOINT_DB || path.join(os.homedir(), ".jiuwenswarm/agent/.checkpoint/checkpoint.db");
+
+function shouldCancelPendingPermission(value: unknown): boolean {
+  return value === true || value === 1 || /^(1|true|yes)$/i.test(String(value || ""));
+}
+
+function rememberAnsweredPermission(sessionId: string, requestId: string): void {
+  if (!sessionId || !requestId) return;
+  recentlyAnsweredPermissions.set(sessionId, { requestId, answeredAt: Date.now() });
+  if (recentlyAnsweredPermissions.size > 500) {
+    const cutoff = Date.now() - RECENT_PERMISSION_TTL_MS;
+    for (const [key, value] of recentlyAnsweredPermissions) {
+      if (value.answeredAt < cutoff) recentlyAnsweredPermissions.delete(key);
+    }
+  }
+}
+
+function isRecentlyAnsweredPermission(sessionId: string, requestId: string): boolean {
+  const record = recentlyAnsweredPermissions.get(sessionId);
+  if (!record) return false;
+  if (Date.now() - record.answeredAt > RECENT_PERMISSION_TTL_MS) {
+    recentlyAnsweredPermissions.delete(sessionId);
+    return false;
+  }
+  return record.requestId === requestId;
+}
 
 function clearJiuwenSessionCheckpoint(
   sessionId: string,
 ): Promise<{ ok: boolean; deleted: number; error?: string }> {
+  if (!existsSync(JIUWEN_CHECKPOINT_DB)) {
+    return Promise.resolve({ ok: true, deleted: 0, error: `checkpoint db not found: ${JIUWEN_CHECKPOINT_DB}` });
+  }
   const script = [
     "import sqlite3, sys",
     "db, sid = sys.argv[1], sys.argv[2]",
@@ -643,11 +813,15 @@ export async function forwardToJiuwenClaw(
   claw: JiuwenClawRuntimeClaw,
   message: string,
   res: Response,
-  opts: ForwardOptions = {},
+  opts: JiuwenForwardOptions = {},
 ): Promise<void> {
   if (!runtimeEnabled()) {
     res.status(503).json({ error: "jiuwenclaw runtime is disabled" });
     return;
+  }
+  if (useJiuwenGatewayTransport()) {
+    const { forwardToJiuwenGateway } = await import("./jiuwenswarm-gateway-client");
+    return forwardToJiuwenGateway(claw, message, res, opts);
   }
 
   const msgTrim = String(message || "").trim();
@@ -693,9 +867,9 @@ export async function forwardToJiuwenClaw(
   }
 
   const wsUrl = String(process.env.JIUWENCLAW_AGENTSERVER_WS_URL || DEFAULT_AGENTSERVER_WS_URL);
-  const serviceId = buildServiceId();
-  const agentId = buildAgentId(claw);
-  const sessionId = buildSessionId(claw, agentId, opts);
+  const serviceId = buildJiuwenServiceId();
+  const agentId = buildJiuwenAgentId(claw);
+  const sessionId = buildJiuwenSessionId(claw, agentId, opts);
   const channelId = claw.adoptId;
   const workspaceDir = resolveRuntimeWorkspace(claw, claw.adoptId);
   const rawTimeoutMs = String(process.env.JIUWENCLAW_CHAT_TIMEOUT_MS || "180000").trim().toLowerCase();
@@ -703,10 +877,26 @@ export async function forwardToJiuwenClaw(
     ? 0
     : Math.max(30_000, Number(rawTimeoutMs) || 180_000);
 
+  if (shouldCancelPendingPermission(opts.cancelPendingPermission)) {
+    const clearResult = await clearJiuwenSessionCheckpoint(sessionId);
+    appendLogAsync("jiuwenclaw-exec.log", {
+      ts: new Date().toISOString(),
+      event: "chat_stream_cancel_pending_permission",
+      adoptId: claw.adoptId,
+      agentId,
+      sessionId,
+      channelId,
+      userId: claw.userId,
+      clientRunId: opts.clientRunId || "",
+      checkpointDb: JIUWEN_CHECKPOINT_DB,
+      clearResult,
+    });
+  }
+
   const runAttempt = (attempt: number): Promise<"done" | "silent"> => {
   const startedAt = Date.now();
   const requestId = `linggan-jiuwen-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const requestPayload = buildChatRequest({
+  const requestPayload = buildJiuwenAgentServerChatRequest({
     requestId,
     serviceId,
     agentId,
@@ -934,11 +1124,52 @@ export async function forwardToJiuwenClaw(
             return;
           }
           if (isJiuwenHumanApprovalEvent(eventType, body?.delta)) {
-            const approvalMessage = summarizeJiuwenApprovalEvent(eventType, body?.delta);
+            const permissionRequest = normalizeJiuwenPermissionRequest(eventType, body?.delta, requestId);
             logEnd("chat_stream_human_approval_required", {
               eventType,
               deltaSummary: summarizeAuditPayload(body?.delta),
+              permissionRequestId: permissionRequest?.requestId || "",
             });
+            if (permissionRequest) {
+              if (isRecentlyAnsweredPermission(sessionId, permissionRequest.requestId)) {
+                clearJiuwenSessionCheckpoint(sessionId).then((clearResult) => {
+                  appendLogAsync("jiuwenclaw-exec.log", {
+                    ts: new Date().toISOString(),
+                    event: "chat_stream_stale_permission_after_answer",
+                    adoptId: claw.adoptId,
+                    agentId,
+                    serviceId,
+                    sessionId,
+                    channelId,
+                    userId: claw.userId,
+                    clientRunId: opts.clientRunId || "",
+                    mode: requestPayload.params?.mode || "",
+                    requestId,
+                    permissionRequestId: permissionRequest.requestId,
+                    checkpointDb: JIUWEN_CHECKPOINT_DB,
+                    clearResult,
+                  });
+                }).finally(() => {
+                  try { ws.close(1000, "stale human approval cleared"); } catch {}
+                  settle("silent");
+                });
+                return;
+              }
+              writeEvent("jiuwen_permission_request", {
+                ...permissionRequest,
+                adoptId: claw.adoptId,
+                agentId,
+                sessionId,
+                channelId,
+              });
+              sawText = true;
+              writeData({ choices: [{ delta: {}, finish_reason: "stop", index: 0 }] });
+              emitDone();
+              try { ws.close(1000, "human approval required"); } catch {}
+              settle();
+              return;
+            }
+            const approvalMessage = summarizeJiuwenApprovalEvent(eventType, body?.delta);
             fail(approvalMessage);
             try { ws.close(1000, "human approval required"); } catch {}
             return;
@@ -976,7 +1207,7 @@ export async function forwardToJiuwenClaw(
                 writeEvent("tool_result", {
                   tool_call_id: toolCallId,
                   name: tool.toolName,
-                  result: stringifyToolPayload(tool.resultPayload),
+                  result: stringifyJiuwenToolPayload(tool.resultPayload),
                   is_error: tool.isError,
                   executor: "jiuwenswarm",
                   adoptId: claw.adoptId,
@@ -985,7 +1216,7 @@ export async function forwardToJiuwenClaw(
                 writeEvent("tool_call", {
                   id: toolCallId,
                   name: tool.toolName,
-                  arguments: stringifyToolPayload(tool.argumentsPayload) || "{}",
+                  arguments: stringifyJiuwenToolPayload(tool.argumentsPayload) || "{}",
                   executor: "jiuwenswarm",
                   adoptId: claw.adoptId,
                 });
@@ -1059,4 +1290,159 @@ export async function forwardToJiuwenClaw(
     }
   }
   emitDone();
+}
+
+export async function answerJiuwenPermission(
+  claw: JiuwenClawRuntimeClaw,
+  args: {
+    permissionRequestId: string;
+    selectedOption: string;
+    source?: string;
+    model?: string;
+    channel?: unknown;
+    conversationId?: unknown;
+    epochLabel?: unknown;
+    runtimeMode?: unknown;
+  },
+): Promise<{ ok: true; text: string } | { ok: false; error: string; text?: string }> {
+  if (!runtimeEnabled()) {
+    return { ok: false, error: "jiuwenclaw runtime is disabled" };
+  }
+  if (useJiuwenGatewayTransport()) {
+    const { answerJiuwenGatewayPermission } = await import("./jiuwenswarm-gateway-client");
+    return answerJiuwenGatewayPermission(claw, args);
+  }
+  const permissionRequestId = String(args.permissionRequestId || "").trim();
+  if (!permissionRequestId) {
+    return { ok: false, error: "permissionRequestId required" };
+  }
+
+  const wsUrl = String(process.env.JIUWENCLAW_AGENTSERVER_WS_URL || DEFAULT_AGENTSERVER_WS_URL);
+  const serviceId = buildJiuwenServiceId();
+  const agentId = buildJiuwenAgentId(claw);
+  const sessionId = buildJiuwenSessionId(claw, agentId, args);
+  const channelId = claw.adoptId;
+  const workspaceDir = resolveRuntimeWorkspace(claw, claw.adoptId);
+  const envelopeRequestId = `linggan-jiuwen-answer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const requestPayload = buildJiuwenAgentServerPermissionAnswerRequest({
+    envelopeRequestId,
+    permissionRequestId,
+    serviceId,
+    agentId,
+    sessionId,
+    channelId,
+    workspaceDir,
+    selectedOption: args.selectedOption,
+    source: args.source,
+    runtimeMode: args.runtimeMode,
+  });
+
+  appendLogAsync("jiuwenclaw-exec.log", {
+    ts: new Date().toISOString(),
+    event: "permission_answer_request",
+    adoptId: claw.adoptId,
+    agentId,
+    serviceId,
+    sessionId,
+    channelId,
+    userId: claw.userId,
+    envelopeRequestId,
+    permissionRequestId,
+    selectedOption: args.selectedOption,
+    source: args.source || "permission_interrupt",
+  });
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let requestSent = false;
+    let text = "";
+    const timeoutMs = Math.max(15_000, Number(process.env.JIUWENCLAW_PERMISSION_TIMEOUT_MS || 180_000) || 180_000);
+    const settle = (result: { ok: true; text: string } | { ok: false; error: string; text?: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try { ws.close(1000, "permission answer complete"); } catch {}
+      if (result.ok) rememberAnsweredPermission(sessionId, permissionRequestId);
+      appendLogAsync("jiuwenclaw-exec.log", {
+        ts: new Date().toISOString(),
+        event: result.ok ? "permission_answer_complete" : "permission_answer_failed",
+        adoptId: claw.adoptId,
+        agentId,
+        sessionId,
+        envelopeRequestId,
+        permissionRequestId,
+        textBytes: Buffer.byteLength(text, "utf8"),
+        ...(!result.ok ? { error: result.error } : {}),
+      });
+      resolve(result);
+    };
+
+    const timeout = setTimeout(() => {
+      settle({ ok: false, error: "JiuwenSwarm 权限确认后等待结果超时。", text });
+    }, timeoutMs);
+
+    const ws = new WebSocket(wsUrl, {
+      headers: {
+        Origin: process.env.JIUWENCLAW_WS_ORIGIN || wsOriginFromUrl(wsUrl),
+      },
+    });
+    const sendRequest = () => {
+      if (requestSent || ws.readyState !== WebSocket.OPEN) return;
+      requestSent = true;
+      ws.send(JSON.stringify(requestPayload));
+    };
+
+    ws.on("open", () => {
+      setTimeout(sendRequest, 2000);
+    });
+    ws.on("message", (raw) => {
+      const frame = parseJsonFrame(raw);
+      if (!frame) return;
+      if (frame?.event === "connection.ack") {
+        sendRequest();
+        return;
+      }
+      const frameRequestId = String(frame?.request_id || frame?.response_id || "");
+      if (frameRequestId && frameRequestId !== envelopeRequestId) return;
+
+      const kind = String(frame?.response_kind || frame?.event || "");
+      const status = String(frame?.status || "");
+      const body = frame?.body || {};
+      if (status === "failed" || kind === "e2a.error" || kind.endsWith(".error")) {
+        settle({ ok: false, error: pickErrorMessage(frame), text });
+        return;
+      }
+      if (kind === "e2a.chunk") {
+        if (body?.delta_kind === "text") {
+          const delta = pickText(body?.delta);
+          if (delta) text += delta;
+          return;
+        }
+        if (body?.delta_kind === "custom") {
+          const eventType = String(body?.event_type || body?.delta?.event_type || "jiuwen.event");
+          if (eventType === "chat.delta" || eventType === "chat.final") {
+            const delta = pickText(body?.delta);
+            if (delta) text += delta;
+            if (eventType === "chat.final") settle({ ok: true, text });
+            return;
+          }
+          if (eventType === "chat.error") {
+            settle({ ok: false, error: pickText(body?.delta) || pickErrorMessage(frame), text });
+            return;
+          }
+        }
+      }
+      if (frame?.is_final || kind === "e2a.complete") {
+        const finalText = pickText(body?.result || body);
+        if (finalText && !text) text = finalText;
+        settle({ ok: true, text });
+      }
+    });
+    ws.on("error", (err) => {
+      settle({ ok: false, error: String((err as any)?.message || err || "jiuwenclaw websocket error").slice(0, 1000), text });
+    });
+    ws.on("close", () => {
+      if (!settled) settle(text ? { ok: true, text } : { ok: false, error: "jiuwenclaw upstream closed before permission answer completed" });
+    });
+  });
 }

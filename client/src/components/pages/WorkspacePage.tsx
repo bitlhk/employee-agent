@@ -6,7 +6,7 @@
  *
  * MVP scope: list / preview / download. Upload + delete coming next.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { PageContainer } from "@/components/console/PageContainer";
 import { Folder, FileText, Download, Eye, RefreshCw, ChevronRight, Loader2, Upload, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,22 @@ function isPreviewable(name: string): boolean {
 
 function isProtectedRootFile(file: FileNode): boolean {
   return file.type === "file" && !file.path.includes("/") && PROTECTED_ROOT_FILES.has(file.path);
+}
+
+function fileSourceHint(file: FileNode): string {
+  const path = file.path.toLowerCase();
+  if (file.type === "directory") {
+    if (path === "skills" || path.startsWith("skills/")) return "技能目录";
+    if (path === "prompt_attachment" || path.startsWith("prompt_attachment/")) return "附件目录";
+    if (path === "memory" || path.startsWith("memory/")) return "记忆目录";
+    if (path.includes("output") || path.includes("sandbox")) return "产物目录";
+    return "文件夹";
+  }
+  if (isProtectedRootFile(file) || file.name.startsWith(".")) return "系统文件";
+  if (path.includes("prompt_attachment") || path.includes("upload")) return "上传附件";
+  if (path.includes("output") || path.includes("sandbox") || path.includes("artifact")) return "任务产物";
+  if (path.startsWith("skills/")) return "技能文件";
+  return "工作文件";
 }
 
 export function WorkspacePage({ adoptId }: { adoptId: string }) {
@@ -233,26 +249,23 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
 
   return (
     <PageContainer title="工作空间">
-      <div className="flex items-center gap-2 mb-3">
-        <Button size="sm" variant="outline" onClick={load} disabled={loading} className="gap-1.5 lingxia-soft-action">
+      <div className="ea-data-page workspace-data-page">
+      <div className="ea-data-toolbar workspace-data-toolbar">
+        <div className="ea-data-toolbar__actions">
+        <button type="button" onClick={load} disabled={loading} className="ea-data-btn ea-data-btn--ghost">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           刷新
-        </Button>
+        </button>
         {caps?.supportsUpload && (
           <label className="inline-flex">
             <input type="file" className="hidden" onChange={handleFilePick} disabled={uploading} />
-            <Button size="sm" variant="outline" disabled={uploading} className="gap-1.5 lingxia-soft-action" asChild>
-              <span>
+            <span className={`ea-data-btn ea-data-btn--primary ${uploading ? "pointer-events-none opacity-55" : ""}`} aria-disabled={uploading}>
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                 {uploading ? "上传中" : "上传文件"}
-              </span>
-            </Button>
+            </span>
           </label>
         )}
-        <span className="text-xs text-muted-foreground">
-          runtime: <span className="font-mono">{runtime || "-"}</span> · {sorted.length} 项
-          {caps?.supportsUpload && <> · 单文件 ≤ {caps.maxUploadBytes / 1024 / 1024}MB</>}
-        </span>
+        </div>
       </div>
       {uploadError && (
         <div className="mb-3 px-3 py-2 text-xs rounded-md" style={{ background: "#fef2f2", color: "#ef4444", border: "1px solid #fecaca" }}>
@@ -268,7 +281,7 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
             onClick={() => setCurrentPath("")}
             className={`px-1.5 py-0.5 lingxia-soft-link ${currentPath ? "lingxia-soft-link--accent" : ""}`}
           >
-            workspace
+            根目录
           </button>
           {crumbs.map((c) => (
             <span key={c.path} className="flex items-center gap-1">
@@ -292,63 +305,64 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
       )}
 
       {sorted.length === 0 && !loading && (
-        <div className="text-center py-12 text-sm text-muted-foreground">
+        <div className="ea-data-card">
+        <div className="ea-data-empty">
           <Folder className="w-12 h-12 mx-auto mb-2 opacity-30" />
-          <p>工作空间还是空的</p>
-          <p className="text-xs mt-1">让 Agent 帮你生成文件，或稍后启用上传功能</p>
+          <div>工作空间还是空的</div>
+          <div className="ea-data-muted">让 Agent 帮你生成文件，或稍后启用上传功能</div>
+        </div>
         </div>
       )}
 
       {sorted.length > 0 && (
-        <div className="border rounded-md overflow-hidden" style={{ borderColor: "var(--border)" }}>
-          <table className="w-full text-sm">
-            <thead style={{ background: "var(--oc-card, #f9fafb)" }}>
-              <tr className="text-xs text-muted-foreground">
-                <th className="text-left px-3 py-2 font-medium">名称</th>
-                <th className="text-right px-3 py-2 font-medium w-24">大小</th>
-                <th className="text-left px-3 py-2 font-medium w-32">修改时间</th>
-                <th className="text-right px-3 py-2 font-medium w-32">操作</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="ea-data-card workspace-file-list" style={{ "--ea-data-columns": "minmax(240px, 1fr) 100px 120px 120px minmax(220px, 0.6fr)" } as CSSProperties}>
+          <div className="ea-data-header">
+            <span>名称</span>
+            <span className="text-right">大小</span>
+            <span>修改时间</span>
+            <span>来源</span>
+            <span className="text-right">操作</span>
+          </div>
               {sorted.map((f) => (
-                <tr key={f.path} className={`border-t lingxia-soft-row ${f.type === "directory" ? "cursor-pointer" : ""}`} style={{ borderColor: "var(--border)" }} onClick={() => f.type === "directory" && setCurrentPath(f.path)}>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      {f.type === "directory" ? <Folder className="w-4 h-4 text-blue-500" /> : <FileText className="w-4 h-4 text-gray-500" />}
+                <div
+                  key={f.path}
+                  className={`ea-data-row ea-data-row--clickable workspace-file-row ${f.type === "directory" ? "workspace-file-row--directory" : ""}`}
+                  onClick={() => f.type === "directory" && setCurrentPath(f.path)}
+                >
+                  <div className="ea-data-title">
+                      {f.type === "directory" ? <Folder className="w-4 h-4 workspace-folder-icon" /> : <FileText className="w-4 h-4 text-gray-500" />}
                       <span className="font-mono text-xs">{f.name}</span>
                       {f.type === "directory" && <ChevronRight className="w-3 h-3 text-muted-foreground" />}
-                    </div>
-                  </td>
-                  <td className="text-right px-3 py-2 text-xs text-muted-foreground">{f.type === "directory" ? "-" : formatSize(f.size)}</td>
-                  <td className="text-left px-3 py-2 text-xs text-muted-foreground">{formatTime(f.modifiedAt)}</td>
-                  <td className="text-right px-3 py-2">
-                    <div className="inline-flex gap-1">
+                  </div>
+                  <div className="ea-data-cell justify-end ea-data-muted">{f.type === "directory" ? "-" : formatSize(f.size)}</div>
+                  <div className="ea-data-cell ea-data-muted">{formatTime(f.modifiedAt)}</div>
+                  <div className="ea-data-cell ea-data-muted">
+                    <span className="workspace-source-pill">{fileSourceHint(f)}</span>
+                  </div>
+                  <div className="ea-data-actions">
                       {f.type === "file" && isPreviewable(f.name) && caps?.supportsRead && (
-                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); previewFile(f); }} className="h-7 px-2 text-xs gap-1 lingxia-soft-action">
+                        <button type="button" onClick={(e) => { e.stopPropagation(); previewFile(f); }} className="ea-data-icon-btn">
                           <Eye className="w-3 h-3" /> 预览
-                        </Button>
+                        </button>
                       )}
                       {f.type === "file" && caps?.supportsDownload && (
                         <a href={downloadUrl(f)} download={f.name} onClick={(e) => e.stopPropagation()}>
-                          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1 lingxia-soft-action">
+                          <button type="button" className="ea-data-icon-btn">
                             <Download className="w-3 h-3" /> 下载
-                          </Button>
+                          </button>
                         </a>
                       )}
                       {caps?.supportsDelete && !isProtectedRootFile(f) && (
-                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); requestDeleteFile(f); }} className="h-7 px-2 text-xs gap-1 lingxia-soft-action lingxia-soft-action--danger">
+                        <button type="button" onClick={(e) => { e.stopPropagation(); requestDeleteFile(f); }} className="ea-data-icon-btn ea-data-icon-btn--danger" title="删除">
                           <Trash2 className="w-3 h-3" />
-                        </Button>
+                        </button>
                       )}
-                    </div>
-                  </td>
-                </tr>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
         </div>
       )}
+      </div>
 
       {/* Preview modal */}
       {previewing && (

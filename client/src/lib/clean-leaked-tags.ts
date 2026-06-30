@@ -1,5 +1,6 @@
 const TOOL_TAG_RE = /<([a-z][a-z0-9_-]{2,80})\b[^>]*>([\s\S]*?)<\/\1>/gi;
 const SELF_CLOSING_TOOL_TAG_RE = /<([a-z][a-z0-9_-]{2,80})\b([^>]*)\/>/gi;
+const JIUWEN_PERMISSION_MARKER_RE = /<!--EA_JIUWEN_PERMISSION:[A-Za-z0-9+/=]+-->/g;
 
 function looksLikeToolTag(tagName: string) {
   return tagName.includes("_") || tagName.includes("-");
@@ -43,6 +44,8 @@ function normalizeToolName(tagName: string) {
 }
 
 export function cleanLeakedToolTags(content: string): string {
+  if (!content) return content;
+  content = content.replace(JIUWEN_PERMISSION_MARKER_RE, "").replace(/\n{4,}/g, "\n\n\n").trim();
   if (!content || (!content.includes("<") && !content.includes(">"))) return content;
 
   let cleaned = content.replace(TOOL_TAG_RE, (match, rawTagName: string, body: string) => {

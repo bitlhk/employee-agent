@@ -15,7 +15,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { useRoute, useLocation } from "wouter";
 import { SidebarFooter } from "@/components/SidebarFooter";
 import { ChatInput } from "@/components/ChatInput";
-import { ChatMessage, type ToolCallEntry } from "@/components/ChatMessage";
+import { ChatMessage, type JiuwenPermissionRequestCard, type MessageEventEntry, type ToolCallEntry } from "@/components/ChatMessage";
 import { AgentTaskCard, type AgentTask } from "@/components/AgentTaskCard";
 import { BrandIcon } from "@/components/BrandIcon";
 import { Sidebar, type PageKey } from "@/components/console/Sidebar";
@@ -23,11 +23,9 @@ import { SessionList } from "@/components/console/SessionList";
 import { PanelErrorBoundary } from "@/components/console/PanelErrorBoundary";
 import { TopBar } from "@/components/console/TopBar";
 import { MainPanel } from "@/components/console/MainPanel";
-import { SettingsOverlay, type SettingsHealthDiagnostics } from "@/components/settings/SettingsOverlay";
+import type { SettingsHealthDiagnostics } from "@/components/settings/SettingsOverlay";
 import { ChatPage } from "@/components/pages/ChatPage";
 import { LingxiaIcon } from "@/components/LingxiaIcon";
-import { LINGXIA_SIDEBAR_NAV } from "@/config/navigation";
-import { sidebarIconMap } from "@/config/icons";
 import { applySettings as applyUiSettings, getSettings, subscribeSettings } from "@/lib/settings";
 import { useLingxiaChat } from "@/hooks/useLingxiaChat";
 import { formatModelName } from "@/lib/modelDisplay";
@@ -86,6 +84,7 @@ const webHiddenSessionsStorageKey = (userId: string, adoptId: string) => `lingxi
 const clawStatusStorageKey = (userId: string, adoptId: string) => `lingxia_claw_status_${userId}_${adoptId}`;
 const clawModelStorageKey = (userId: string, adoptId: string) => `lingxia_claw_model_${userId}_${adoptId}`;
 const clawModelFallbackStorageKey = (adoptId: string) => `lingxia_claw_model_public_${adoptId}`;
+const JIUWEN_PERMISSION_MARKER_RE = /<!--EA_JIUWEN_PERMISSION:([A-Za-z0-9+/=]+)-->/g;
 
 type ComposerSkillOption = {
   id: string;
@@ -131,6 +130,8 @@ type WebChatSessionRecord = {
   messageCount: number;
   createdAt: number;
   updatedAt: number;
+  sourceUpdatedAt?: number;
+  sortUpdatedAt?: number;
   pinnedAt?: number;
 };
 
@@ -178,6 +179,53 @@ function stripSessionMessagePrefix(text: string) {
   return String(text || "")
     .replace(/^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}\s+GMT[+-]\d+\]\s*/g, "")
     .trim();
+}
+
+function encodeJiuwenPermissionMarker(permission: JiuwenPermissionRequestCard) {
+  try {
+    const payload = {
+      requestId: permission.requestId,
+      source: permission.source || "permission_interrupt",
+      title: permission.title || "权限审批",
+      question: permission.question || "",
+      command: permission.command || "",
+      toolName: permission.toolName || "",
+      options: permission.options || [],
+      state: permission.state || "pending",
+    };
+    return `\n\n<!--EA_JIUWEN_PERMISSION:${btoa(encodeURIComponent(JSON.stringify(payload)))}-->`;
+  } catch {
+    return "";
+  }
+}
+
+function extractJiuwenPermissionMarker(text: string): { text: string; permission?: JiuwenPermissionRequestCard } {
+  let permission: JiuwenPermissionRequestCard | undefined;
+  const cleanText = String(text || "").replace(JIUWEN_PERMISSION_MARKER_RE, (_match, encoded: string) => {
+    try {
+      const parsed = JSON.parse(decodeURIComponent(atob(encoded)));
+      if (parsed?.requestId) {
+        permission = {
+          requestId: String(parsed.requestId),
+          source: String(parsed.source || "permission_interrupt"),
+          title: String(parsed.title || "权限审批"),
+          question: String(parsed.question || ""),
+          command: parsed.command ? String(parsed.command) : undefined,
+          toolName: parsed.toolName ? String(parsed.toolName) : undefined,
+          options: Array.isArray(parsed.options) ? parsed.options : undefined,
+          state: parsed.state === "approved" || parsed.state === "rejected" || parsed.state === "error" ? parsed.state : "pending",
+        };
+      }
+    } catch {}
+    return "";
+  }).replace(/\n{4,}/g, "\n\n\n").trim();
+  return { text: cleanText, permission };
+}
+
+function withJiuwenPermissionMarker(text: string, permission: JiuwenPermissionRequestCard) {
+  const extracted = extractJiuwenPermissionMarker(text);
+  const visibleText = extracted.text || "需要你的授权才能继续执行。";
+  return `${visibleText}${encodeJiuwenPermissionMarker(permission)}`;
 }
 
 function truncateSessionText(text: string, max = 28) {
@@ -231,8 +279,30 @@ function sortWebSessionRecords(sessions: WebChatSessionRecord[]) {
     const aPinned = Number(a.pinnedAt || 0);
     const bPinned = Number(b.pinnedAt || 0);
     if (aPinned || bPinned) return bPinned - aPinned;
-    return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+    return Number(b.sortUpdatedAt || b.sourceUpdatedAt || b.updatedAt || 0) - Number(a.sortUpdatedAt || a.sourceUpdatedAt || a.updatedAt || 0);
   });
+}
+
+function normalizeSessionViewRecord(item: any): WebChatSessionRecord | null {
+  const conversationId = String(item?.conversationId || "").trim();
+  const sessionKey = String(item?.sessionKey || item?.runtimeSessionKey || "").trim();
+  if (!conversationId || !sessionKey) return null;
+  const updatedAt = Number(item?.updatedAt || item?.sourceUpdatedAt || item?.sortUpdatedAt || 0) || 0;
+  const sourceUpdatedAt = Number(item?.sourceUpdatedAt || updatedAt) || updatedAt;
+  const sortUpdatedAt = Number(item?.sortUpdatedAt || sourceUpdatedAt || updatedAt) || sourceUpdatedAt || updatedAt;
+  return {
+    conversationId,
+    sessionKey,
+    sessionId: String(item?.sessionId || item?.jiuwenSessionId || "").trim() || undefined,
+    title: normalizeSessionText(String(item?.title || "新对话")),
+    preview: normalizeSessionText(String(item?.preview || "")),
+    searchText: normalizeSessionText(String(item?.searchText || "")),
+    messageCount: Number(item?.messageCount || 0) || 0,
+    createdAt: Number(item?.createdAt || updatedAt || sourceUpdatedAt || sortUpdatedAt || Date.now()) || Date.now(),
+    updatedAt: updatedAt || sourceUpdatedAt || sortUpdatedAt || Date.now(),
+    sourceUpdatedAt: sourceUpdatedAt || updatedAt,
+    sortUpdatedAt: sortUpdatedAt || sourceUpdatedAt || updatedAt,
+  };
 }
 
 function visibleWebSessionIndex(key: string, hiddenKey?: string | null): WebChatSessionRecord[] {
@@ -331,12 +401,48 @@ type LxMsg = {
   contextWindow?: number;
   contextPercent?: number;
   toolCalls?: import("@/components/ChatMessage").ToolCallEntry[];
+  messageEvents?: MessageEventEntry[];
+  jiuwenPermission?: JiuwenPermissionRequestCard;
   // 2026-04-29 批次 2 A3：截断恢复状态（仅 assistant 用）
   recovering?: boolean;
   recovered?: boolean;
   recoveryFailed?: boolean;
   partialText?: string;            // 截断时已显示的内容（恢复失败时保留）
 };
+
+function toolCallToMessageEvent(tool: ToolCallEntry): MessageEventEntry {
+  return {
+    type: "tool_call",
+    id: String(tool.id || ""),
+    name: String(tool.name || "tool"),
+    arguments: String(tool.arguments || "{}"),
+    result: tool.result,
+    status: tool.status,
+    ts: Number(tool.ts || Date.now()),
+    durationMs: tool.durationMs,
+    executor: tool.executor,
+    truncated: tool.truncated,
+    suppressedOriginalResult: tool.suppressedOriginalResult,
+    policyDenyReason: tool.policyDenyReason,
+    auditId: tool.auditId,
+    outputFiles: tool.outputFiles,
+    adoptId: tool.adoptId,
+    _gateway: tool._gateway,
+  };
+}
+
+function normalizeMessageToolEvents(message: LxMsg): LxMsg {
+  const nonToolEvents = Array.isArray(message.messageEvents)
+    ? message.messageEvents.filter((event) => event?.type !== "tool_call")
+    : [];
+  const toolEvents = Array.isArray(message.toolCalls)
+    ? message.toolCalls.filter((tool) => tool?.id && tool?.name).map(toolCallToMessageEvent)
+    : [];
+  return {
+    ...message,
+    messageEvents: [...nonToolEvents, ...toolEvents],
+  };
+}
 
 type ClawReadinessIssue = {
   code: string;
@@ -435,15 +541,43 @@ function isLingxiaChatV2Enabled(userId?: number | string | null): boolean {
 
 const backfillLxMsgIds = (raw: any): LxMsg[] => {
   if (!Array.isArray(raw)) return [];
-  return raw.map((m: any) => ({
-    ...m,
-    id: typeof m?.id === "string" && m.id ? m.id : makeLxMsgId(),
-    role: m?.role === "assistant" ? "assistant" : "user",
-    text: String(m?.text ?? ""),
-    timeLabel: String(m?.timeLabel ?? new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })),
-    // 2026-04-29 批次 2 A3：重载后清空 recovering 瞬态——刷新前正在补偿的消息视为失败，避免 UI 卡住
-    recovering: false,
-  }));
+  return raw.map((m: any) => {
+    const parsed = extractJiuwenPermissionMarker(String(m?.text ?? ""));
+    const toolCalls = Array.isArray(m?.toolCalls) ? m.toolCalls : [];
+    const existingEvents = Array.isArray(m?.messageEvents) ? m.messageEvents : Array.isArray(m?.events) ? m.events : [];
+    const toolEvents: MessageEventEntry[] = toolCalls
+      .filter((tool: any) => tool?.id && tool?.name)
+      .map((tool: any) => ({
+        type: "tool_call" as const,
+        id: String(tool.id),
+        name: String(tool.name),
+        arguments: String(tool.arguments || "{}"),
+        result: tool.result != null ? String(tool.result) : undefined,
+        status: tool.status === "error" ? "error" : tool.status === "done" ? "done" : "running",
+        ts: Number(tool.ts || Date.now()),
+        durationMs: typeof tool.durationMs === "number" ? tool.durationMs : undefined,
+        executor: tool.executor,
+        truncated: Boolean(tool.truncated),
+        suppressedOriginalResult: Boolean(tool.suppressedOriginalResult),
+        policyDenyReason: tool.policyDenyReason,
+        auditId: tool.auditId,
+        outputFiles: Array.isArray(tool.outputFiles) ? tool.outputFiles : undefined,
+        adoptId: tool.adoptId,
+        _gateway: Boolean(tool._gateway),
+      }));
+    return {
+      ...m,
+      id: typeof m?.id === "string" && m.id ? m.id : makeLxMsgId(),
+      role: m?.role === "assistant" ? "assistant" : "user",
+      text: parsed.text,
+      timeLabel: String(m?.timeLabel ?? new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })),
+      ...(toolCalls.length > 0 ? { toolCalls } : {}),
+      messageEvents: existingEvents.length > 0 ? existingEvents : toolEvents,
+      jiuwenPermission: m?.jiuwenPermission || parsed.permission,
+      // 2026-04-29 批次 2 A3：重载后清空 recovering 瞬态——刷新前正在补偿的消息视为失败，避免 UI 卡住
+      recovering: false,
+    };
+  });
 };
 
 // ── 2026-04-29 批次 2 A3：SSE 截断后恢复 ────────────────────────────
@@ -620,6 +754,7 @@ export default function Home() {
         sessionStorage.removeItem("home_initial_page");
         if (v === "agentLab") return "chat";
         if (v === "docs") return "workspace";
+        if (v === "weixin") return "channels";
         if (v === "meeting") return "meeting";
         if (v === "office") return "chat";
         return v as PageKey;
@@ -649,7 +784,6 @@ export default function Home() {
   });
   const coopBadgeCount = (coopPending?.pendingMyApproval || 0) + (coopPending?.awaitingMyConsolidation || 0);
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [sessionSwitchingId, setSessionSwitchingId] = useState<string | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
@@ -950,8 +1084,12 @@ export default function Home() {
       setWebSessions([]);
       return;
     }
+    if (isJiuwenRuntime) {
+      setWebSessions([]);
+      return;
+    }
     setWebSessions(visibleWebSessionIndex(SESSION_INDEX_KEY, HIDDEN_SESSION_KEY));
-  }, [SESSION_INDEX_KEY, HIDDEN_SESSION_KEY]);
+  }, [SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isJiuwenRuntime]);
 
   useEffect(() => {
     if (!CLAW_STATUS_KEY) {
@@ -1049,7 +1187,7 @@ export default function Home() {
     if (shouldShowLoading) setWebSessionsLoading(true);
     const isCurrentRequest = () => backendSessionsRequestSeqRef.current === requestSeq;
     try {
-      const response = await fetchWithTimeout(`${apiBase}/api/claw/chat-history/sessions?adoptId=${encodeURIComponent(resolvedAdoptId)}&limit=${historyLimit}`, {
+      const response = await fetchWithTimeout(`${apiBase}/api/ea/session-view/chat?adoptId=${encodeURIComponent(resolvedAdoptId)}&limit=${historyLimit}`, {
         credentials: "include",
       }, silent ? 8000 : 6000);
       if (!response.ok) {
@@ -1057,17 +1195,53 @@ export default function Home() {
         return webSessionsRef.current;
       }
       const data = await response.json().catch(() => null);
-      if (!data?.sessions) {
+      const remoteRows = Array.isArray(data?.sessions) ? data.sessions : data?.rawSessions;
+      if (!remoteRows) {
         markClientLoadMetric("sessions", "error", "empty response", requestStartedAt);
         return webSessionsRef.current;
       }
       if (!isCurrentRequest()) return webSessionsRef.current;
       const hidden = HIDDEN_SESSION_KEY ? readHiddenWebSessions(HIDDEN_SESSION_KEY) : new Set<string>();
-      const remote = (Array.isArray(data.sessions) ? data.sessions : []) as WebChatSessionRecord[];
+      const remote = (Array.isArray(remoteRows) ? remoteRows : [])
+        .map((item: any) => normalizeSessionViewRecord(item) || item)
+        .filter(Boolean) as WebChatSessionRecord[];
       const backendSessions = remote
-        .filter((item) => item?.conversationId && item.sessionKey && !hidden.has(item.conversationId) && Number(item.messageCount || 0) > 0)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .filter((item) => (
+          item?.conversationId &&
+          item.sessionKey &&
+          (isJiuwenRuntime || !hidden.has(item.conversationId)) &&
+          Number(item.messageCount || 0) > 0
+        ))
+        .sort((a, b) => Number(b.sortUpdatedAt || b.sourceUpdatedAt || b.updatedAt || 0) - Number(a.sortUpdatedAt || a.sourceUpdatedAt || a.updatedAt || 0))
         .slice(0, 30);
+      if (isJiuwenRuntime) {
+        const uiSource = [...readWebSessionIndex(SESSION_INDEX_KEY), ...webSessionsRef.current];
+        const uiByConversation = new Map<string, WebChatSessionRecord>();
+        for (const item of uiSource) {
+          if (!item?.conversationId) continue;
+          const previous = uiByConversation.get(item.conversationId);
+          uiByConversation.set(item.conversationId, {
+            ...previous,
+            customTitle: item.customTitle || previous?.customTitle,
+            pinnedAt: item.pinnedAt || previous?.pinnedAt,
+          } as WebChatSessionRecord);
+        }
+        const decoratedBackend = backendSessions.map((item) => {
+          const ui = uiByConversation.get(item.conversationId);
+          return {
+            ...item,
+            customTitle: ui?.customTitle,
+            pinnedAt: ui?.pinnedAt,
+            updatedAt: Number(item.sourceUpdatedAt || item.updatedAt || 0) || item.updatedAt,
+            sortUpdatedAt: Number(item.sourceUpdatedAt || item.sortUpdatedAt || item.updatedAt || 0) || item.updatedAt,
+          };
+        });
+        const nextSessions = sortWebSessionRecords(decoratedBackend).slice(0, 30);
+        setWebSessions(nextSessions);
+        writeWebSessionIndex(SESSION_INDEX_KEY, nextSessions);
+        markClientLoadMetric("sessions", "ok", `${backendSessions.length} jiuwen backend sessions`, requestStartedAt);
+        return nextSessions;
+      }
       const backendConversationIds = new Set(backendSessions.map((item) => item.conversationId).filter(Boolean));
       let mergedSessions: WebChatSessionRecord[] = [];
       setWebSessions((previous) => {
@@ -1090,7 +1264,7 @@ export default function Home() {
     } finally {
       if (shouldShowLoading && isCurrentRequest()) setWebSessionsLoading(false);
     }
-  }, [activeLingxiaStreaming, resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isHermesRuntime, markClientLoadMetric]);
+  }, [activeLingxiaStreaming, resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isHermesRuntime, isJiuwenRuntime, markClientLoadMetric]);
 
   useEffect(() => {
     if (!resolvedAdoptId || !SESSION_INDEX_KEY || isHermesRuntime) return;
@@ -1128,11 +1302,15 @@ export default function Home() {
     const onStorage = (event: StorageEvent) => {
       if (event.storageArea !== localStorage) return;
       if (event.key !== SESSION_INDEX_KEY && event.key !== HIDDEN_SESSION_KEY) return;
+      if (isJiuwenRuntime) {
+        void refreshBackendWebSessions(true).catch(() => {});
+        return;
+      }
       setWebSessions(visibleWebSessionIndex(SESSION_INDEX_KEY, HIDDEN_SESSION_KEY));
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, [SESSION_INDEX_KEY, HIDDEN_SESSION_KEY]);
+  }, [SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isJiuwenRuntime, refreshBackendWebSessions]);
 
   useEffect(() => {
     if (isHermesRuntime || activeLingxiaStreaming || !webConversationId || activeLingxiaMsgs.length === 0) return;
@@ -1249,13 +1427,46 @@ export default function Home() {
     toast.success(pinned ? "会话已置顶" : "已取消置顶");
   }, [updateWebSessionMeta]);
 
-  const restoreLingxiaMessages = (messages: any[]) => {
+  const mergeCurrentToolCallsIntoHistory = (messages: LxMsg[]) => {
+    const current = activeLingxiaMsgsRef.current || [];
+    if (!current.length || !messages.length) return messages;
+
+    const currentAssistantWithTools = current
+      .filter((msg) => msg.role === "assistant" && Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0)
+      .reverse();
+    if (currentAssistantWithTools.length === 0) return messages;
+
+    const usedCurrentIds = new Set<string>();
+    const next = [...messages];
+    for (let i = next.length - 1; i >= 0; i -= 1) {
+      const msg = next[i];
+      if (msg.role !== "assistant" || (msg.toolCalls || []).length > 0) continue;
+      const msgText = normalizeSessionText(extractJiuwenPermissionMarker(msg.text || "").text);
+      const currentMatch = currentAssistantWithTools.find((candidate) => {
+        if (usedCurrentIds.has(candidate.id)) return false;
+        const candidateText = normalizeSessionText(extractJiuwenPermissionMarker(candidate.text || "").text);
+        return Boolean(candidateText && msgText && candidateText === msgText);
+      });
+      if (!currentMatch?.toolCalls?.length) continue;
+      usedCurrentIds.add(currentMatch.id);
+      next[i] = {
+        ...msg,
+        toolCalls: currentMatch.toolCalls,
+      };
+    }
+    return next;
+  };
+
+  const restoreLingxiaMessages = (messages: any[], opts?: { preserveCurrentToolCalls?: boolean }) => {
     const nextMessages = backfillLxMsgIds(messages || []);
+    const hydratedMessages = opts?.preserveCurrentToolCalls
+      ? mergeCurrentToolCallsIntoHistory(nextMessages)
+      : nextMessages;
     if (chatV2Enabled) {
-      chatV2.restore(nextMessages);
+      chatV2.restore(hydratedMessages);
     } else {
       setLingxiaToolCalls([]);
-      setLingxiaMsgs(nextMessages);
+      setLingxiaMsgs(hydratedMessages);
     }
   };
 
@@ -1495,6 +1706,67 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [activeLingxiaStreaming, resolvedAdoptId, webConversationId, webSessions]);
 
+  useEffect(() => {
+    if (!resolvedAdoptId || !isJiuwenRuntime || !webConversationId || activeLingxiaStreaming) return;
+    const session = webSessions.find((item) => item.conversationId === webConversationId);
+    if (!session?.sessionKey) return;
+    const sessionKey = session.sessionKey;
+    const apiBase = import.meta.env.VITE_API_URL || "";
+    let cancelled = false;
+
+    const shouldApplyHistory = (historyMessages: any[]) => {
+      const next = backfillLxMsgIds(historyMessages || []).slice(-100);
+      const current = activeLingxiaMsgsRef.current || [];
+      const nextTextCount = next.filter((m: any) => normalizeSessionText(m?.text || "")).length;
+      const currentTextCount = current.filter((m: any) => normalizeSessionText(m?.text || "")).length;
+      const nextLastText = normalizeSessionText(next[next.length - 1]?.text || "");
+      const currentLastText = normalizeSessionText(current[current.length - 1]?.text || "");
+      const currentLast = current[current.length - 1];
+      if (
+        currentLast?.role === "assistant" &&
+        currentLast.jiuwenPermission?.state === "pending" &&
+        nextTextCount <= currentTextCount &&
+        normalizeSessionText(extractJiuwenPermissionMarker(currentLast.text || "").text) === nextLastText
+      ) {
+        return null;
+      }
+      if (nextTextCount < currentTextCount) return null;
+      if (nextTextCount === currentTextCount && nextLastText === currentLastText) return null;
+      return next;
+    };
+
+    const poll = async () => {
+      try {
+        const response = await fetchWithTimeout(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(sessionKey)}`, {
+          credentials: "include",
+        }, 5000);
+        if (cancelled || !response.ok) return;
+        const payload = await response.json().catch(() => null);
+        if (!Array.isArray(payload?.messages)) return;
+        const nextMessages = shouldApplyHistory(payload.messages);
+        if (!nextMessages) return;
+        restoredSessionKeyRef.current = sessionKey;
+        restoredConversationMessageCountsRef.current[webConversationId] = nextMessages.filter((m: any) => normalizeSessionText(m?.text || "")).length;
+        try {
+          if (resolvedAdoptId && userStorageId) {
+            localStorage.setItem(webMessagesStorageKey(userStorageId, resolvedAdoptId, webConversationId), JSON.stringify(nextMessages));
+          }
+        } catch {}
+        restoreLingxiaMessages(nextMessages, { preserveCurrentToolCalls: true });
+      } catch {
+        // Background sync only; keep the active chat usable if history polling fails.
+      }
+    };
+
+    const initialTimer = window.setTimeout(poll, 1500);
+    const interval = window.setInterval(poll, 10000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+    };
+  }, [activeLingxiaStreaming, isJiuwenRuntime, resolvedAdoptId, userStorageId, webConversationId, webSessions]);
+
   const startNewLingxiaConversation = () => {
     if (activeLingxiaStreaming) {
       toast.error("请先停止当前回复");
@@ -1515,7 +1787,7 @@ export default function Home() {
     }
     const session = webSessions.find((item) => item.conversationId === conversationId);
     const cachedMessages = readCachedWebConversationMessages(conversationId);
-    const hasCachedMessages = cachedMessages.length > 0;
+    const hasCachedMessages = !isJiuwenRuntime && cachedMessages.length > 0;
     const switchRequestSeq = restoreConversationRequestSeqRef.current + 1;
     restoreConversationRequestSeqRef.current = switchRequestSeq;
 
@@ -1546,12 +1818,14 @@ export default function Home() {
       restoredSessionKeyRef.current = session.sessionKey;
       activateWebConversation(conversationId, Array.isArray(payload?.messages) ? payload.messages : []);
       setSessionMenuOpen(false);
-      void fetchWithTimeout(`${apiBase}/api/claw/chat-history/activate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ adoptId: resolvedAdoptId, sessionKey: session.sessionKey }),
-      }, 5000).catch(() => {});
+      if (!isJiuwenRuntime) {
+        void fetchWithTimeout(`${apiBase}/api/claw/chat-history/activate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ adoptId: resolvedAdoptId, sessionKey: session.sessionKey }),
+        }, 5000).catch(() => {});
+      }
     } catch (error: any) {
       if (!hasCachedMessages) {
         toast.error(displayErrorMessage(error, "history"));
@@ -1559,9 +1833,7 @@ export default function Home() {
         console.warn("[history] background hydrate failed after cached switch", error?.message || error);
       }
     } finally {
-      if (restoreConversationRequestSeqRef.current === switchRequestSeq) {
-        setSessionSwitchingId(null);
-      }
+      setSessionSwitchingId((current) => current === conversationId ? null : current);
     }
   };
 
@@ -1594,6 +1866,19 @@ export default function Home() {
       localStorage.removeItem(webMessagesStorageKey(userStorageId, resolvedAdoptId, conversationId));
       localStorage.removeItem(legacyWebMessagesStorageKey(resolvedAdoptId, conversationId));
     } catch {}
+    if (isJiuwenRuntime && session?.sessionKey) {
+      const apiBase = import.meta.env.VITE_API_URL || "";
+      try {
+        await fetchWithTimeout(`${apiBase}/api/claw/chat-history/session`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ adoptId: resolvedAdoptId, sessionKey: session.sessionKey }),
+        }, 5000);
+      } catch (error) {
+        console.warn("[history] backend delete failed; keeping local hidden tombstone", error);
+      }
+    }
     if (conversationId === webConversationId) {
       const nextSession = next[0];
       if (nextSession?.sessionKey && !isHermesRuntime) {
@@ -1814,10 +2099,88 @@ export default function Home() {
     return () => clearInterval(id);
   }, [lingxiaStreaming]);
 
+  const attachJiuwenPermissionToLastAssistant = (permission: JiuwenPermissionRequestCard) => {
+    setLingxiaMsgs((prev) => {
+      const next = [...prev];
+      const lastIdx = next.length - 1;
+      if (lastIdx < 0 || next[lastIdx].role !== "assistant") return prev;
+      const nextPermission = { ...permission, state: "pending" as const };
+      next[lastIdx] = {
+        ...next[lastIdx],
+        text: withJiuwenPermissionMarker(next[lastIdx].text || "需要你的授权才能继续执行。", nextPermission),
+        jiuwenPermission: nextPermission,
+        status: undefined,
+      };
+      return next;
+    });
+  };
+
+  const handleJiuwenPermissionAnswer = async (
+    messageId: string,
+    permission: JiuwenPermissionRequestCard,
+    action: "allow_once" | "reject",
+  ) => {
+    if (!resolvedAdoptId || !permission?.requestId) return;
+    const nextState: JiuwenPermissionRequestCard["state"] = action === "reject" ? "rejected" : "approved";
+    setLingxiaMsgs((prev) => prev.map((msg) => (
+      msg.id === messageId
+        ? { ...msg, jiuwenPermission: { ...permission, state: "submitting", error: undefined } }
+        : msg
+    )));
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || "";
+      const resp = await fetch(`${apiBase}/api/claw/jiuwen/permission-answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          adoptId: resolvedAdoptId,
+          requestId: permission.requestId,
+          action,
+          source: permission.source || "permission_interrupt",
+          channel: "web",
+          conversationId: webConversationId,
+          runtimeMode: chatRuntimeMode,
+        }),
+      });
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok || payload?.ok === false) {
+        throw new Error(payload?.error || `授权提交失败 (${resp.status})`);
+      }
+      const continuedText = String(payload?.text || "").trim();
+      setLingxiaMsgs((prev) => prev.map((msg) => {
+        if (msg.id !== messageId) return msg;
+        const current = msg.text || "";
+        const nextPermission = { ...permission, state: nextState };
+        const mergedText = continuedText
+          ? (current ? `${extractJiuwenPermissionMarker(current).text}\n\n${continuedText}` : continuedText)
+          : current;
+        return {
+          ...msg,
+          text: withJiuwenPermissionMarker(mergedText, nextPermission),
+          jiuwenPermission: nextPermission,
+        };
+      }));
+    } catch (error: any) {
+      const errorText = error?.message || "授权提交失败";
+      setLingxiaMsgs((prev) => prev.map((msg) => (
+        msg.id === messageId
+          ? { ...msg, jiuwenPermission: { ...permission, state: "error", error: errorText } }
+          : msg
+      )));
+      toast.error(errorText);
+    }
+  };
+
   const sendLingxiaMessage = async (messageOverride?: string, opts?: { selectedSkillId?: string }) => {
     const sourceText = messageOverride ?? lingxiaInput;
     if (!resolvedAdoptId || !sourceText.trim() || lingxiaStreaming) return;
     if (chatV2Enabled) return;
+    const lastAssistantBeforeSend = [...activeLingxiaMsgsRef.current].reverse().find((msg) => msg.role === "assistant");
+    const shouldCancelPendingJiuwenPermission =
+      isJiuwenRuntime &&
+      Boolean(lastAssistantBeforeSend?.jiuwenPermission?.requestId) &&
+      lastAssistantBeforeSend?.jiuwenPermission?.state !== "rejected";
     // 2026-04-17 SSE race fix: 强制 abort 上一次的流，避免 WS 重连/网络抖动后旧 reader 还在
     // setLingxiaMsgs 写 delta，跟新流字符级交错（典型现象：英文 narrative + 中文技能列表混合）
     if (lingxiaStreamAbortRef.current) {
@@ -1864,7 +2227,19 @@ export default function Home() {
     const clientRunId = makeClientRunId();
     const conversationIdAtSend = webConversationId;
     setLingxiaMsgs((prev) => [
-      ...prev,
+      ...prev.map((msg) => {
+        if (msg.id !== lastAssistantBeforeSend?.id || msg.role !== "assistant" || !msg.jiuwenPermission?.requestId || msg.jiuwenPermission.state === "rejected") return msg;
+        const nextPermission = {
+          ...msg.jiuwenPermission,
+          state: "rejected" as const,
+          error: "已因发送新消息取消上一轮授权",
+        };
+        return {
+          ...msg,
+          text: withJiuwenPermissionMarker(extractJiuwenPermissionMarker(msg.text || "").text, nextPermission),
+          jiuwenPermission: nextPermission,
+        };
+      }),
       { id: userMessageId, role: "user", text, timeLabel: nowLabel },
       { id: assistantMessageId, role: "assistant", text: "", timeLabel: assistantTimeLabel },
     ]);
@@ -1949,6 +2324,22 @@ export default function Home() {
                 return;
               }
 
+              if (chunk._event === "jiuwen_permission_request") {
+                attachJiuwenPermissionToLastAssistant({
+                  requestId: String(chunk.requestId || ""),
+                  source: String(chunk.source || "permission_interrupt"),
+                  title: String(chunk.title || "权限审批"),
+                  question: String(chunk.question || ""),
+                  command: chunk.command ? String(chunk.command) : undefined,
+                  toolName: chunk.toolName ? String(chunk.toolName) : undefined,
+                  options: Array.isArray(chunk.options) ? chunk.options : undefined,
+                  state: "pending",
+                });
+                setLingxiaStreaming(false);
+                wsClient.setRawHandler(null);
+                return;
+              }
+
               // ── tool_call 事件（与 HTTP SSE event:tool_call 一致）──
 
               // ── Agent Team 事件 ──
@@ -1985,11 +2376,12 @@ export default function Home() {
                 const toolName = String(chunk.name || "unknown");
                 const toolTs = Date.now();
                 const isGateway = Boolean(chunk._gateway);
+                const executor = chunk.executor as ToolCallEntry["executor"] | undefined;
                 setLingxiaMsgs((prev) => {
                   const next = [...prev]; const lastIdx = next.length - 1;
                   if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
                     const existing = next[lastIdx].toolCalls || [];
-                    next[lastIdx] = { ...next[lastIdx], toolCalls: [...existing, { id: String(chunk.id || ""), name: toolName, arguments: String(chunk.arguments || "{}"), status: "running" as const, ts: toolTs, _gateway: isGateway, executor: isGateway ? "gateway" : undefined }] };
+                    next[lastIdx] = normalizeMessageToolEvents({ ...next[lastIdx], toolCalls: [...existing, { id: String(chunk.id || ""), name: toolName, arguments: String(chunk.arguments || "{}"), status: "running" as const, ts: toolTs, _gateway: isGateway, executor: isGateway ? "gateway" : executor }] });
                   }
                   return next;
                 });
@@ -2013,7 +2405,7 @@ export default function Home() {
                     if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
                       const tcs = next[lastIdx].toolCalls || [];
                       const gwIdx = tcs.findLastIndex((tc: any) => tc._gateway && tc.status === "running");
-                      if (gwIdx >= 0) { const updated = [...tcs]; updated[gwIdx] = { ...updated[gwIdx], status: "done", durationMs: Date.now() - updated[gwIdx].ts }; next[lastIdx] = { ...next[lastIdx], toolCalls: updated }; }
+                      if (gwIdx >= 0) { const updated = [...tcs]; updated[gwIdx] = { ...updated[gwIdx], status: "done", durationMs: Date.now() - updated[gwIdx].ts }; next[lastIdx] = normalizeMessageToolEvents({ ...next[lastIdx], toolCalls: updated }); }
                     }
                     return next;
                   });
@@ -2022,7 +2414,7 @@ export default function Home() {
                     const next = [...prev]; const lastIdx = next.length - 1;
                     if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
                       const tcs = next[lastIdx].toolCalls || [];
-                      next[lastIdx] = { ...next[lastIdx], toolCalls: tcs.map((tc: any) => tc.id === toolCallId ? { ...tc, result, status, durationMs: Date.now() - tc.ts, executor: chunk.executor, truncated: Boolean(chunk.truncated), outputFiles: chunk.outputFiles, adoptId: resolvedAdoptId ?? undefined } : tc) };
+                      next[lastIdx] = normalizeMessageToolEvents({ ...next[lastIdx], toolCalls: tcs.map((tc: any) => tc.id === toolCallId ? { ...tc, result, status, durationMs: Date.now() - tc.ts, executor: chunk.executor, truncated: Boolean(chunk.truncated), outputFiles: chunk.outputFiles, adoptId: resolvedAdoptId ?? undefined } : tc) });
                     }
                     return next;
                   });
@@ -2038,7 +2430,7 @@ export default function Home() {
                 const wsAdoptId = String(chunk.adoptId || "");
                 if (wsFiles.length > 0) {
                   const pseudoTc: any = { id: `ws-files-${Date.now()}`, name: "[产出文件]", arguments: "{}", result: wsFiles.map((f: any) => f.name).join(", "), status: "done", ts: Date.now(), executor: "native", outputFiles: wsFiles.map((f: any) => ({ name: f.name, size: f.size, wsPath: f.path })), adoptId: wsAdoptId };
-                  setLingxiaMsgs((prev) => { const next = [...prev]; const lastIdx = next.length - 1; if (lastIdx >= 0 && next[lastIdx].role === "assistant") { const existing = next[lastIdx].toolCalls || []; next[lastIdx] = { ...next[lastIdx], toolCalls: [...existing, pseudoTc] }; } return next; });
+                  setLingxiaMsgs((prev) => { const next = [...prev]; const lastIdx = next.length - 1; if (lastIdx >= 0 && next[lastIdx].role === "assistant") { const existing = next[lastIdx].toolCalls || []; next[lastIdx] = normalizeMessageToolEvents({ ...next[lastIdx], toolCalls: [...existing, pseudoTc] }); } return next; });
                 }
                 return;
               }
@@ -2151,6 +2543,7 @@ export default function Home() {
           channel: "web",
           conversationId: webConversationId,
           runtimeMode: chatRuntimeMode,
+          ...(shouldCancelPendingJiuwenPermission ? { cancelPendingPermission: true } : {}),
           ...(opts?.selectedSkillId ? { selectedSkillId: opts.selectedSkillId } : {}),
         }),
       });
@@ -2229,6 +2622,22 @@ export default function Home() {
           try {
             const chunk = JSON.parse(raw);
             lastEventAtRef.current = Date.now(); // 任意事件进来，重置断连计时
+            if (currentEvent === "jiuwen_permission_request") {
+              flushDelta();
+              attachJiuwenPermissionToLastAssistant({
+                requestId: String(chunk.requestId || ""),
+                source: String(chunk.source || "permission_interrupt"),
+                title: String(chunk.title || "权限审批"),
+                question: String(chunk.question || ""),
+                command: chunk.command ? String(chunk.command) : undefined,
+                toolName: chunk.toolName ? String(chunk.toolName) : undefined,
+                options: Array.isArray(chunk.options) ? chunk.options : undefined,
+                state: "pending",
+              });
+              setLingxiaStreaming(false);
+              currentEvent = "";
+              continue;
+            }
             if (currentEvent === "agent_status") {
               if (chunk.kind === "heartbeat") {
                 if (chunk.tool) setActiveToolName(String(chunk.tool));
@@ -2284,6 +2693,7 @@ export default function Home() {
               const toolName = String(chunk.name || "unknown");
               const toolTs = Date.now();
               const isGateway = Boolean(chunk._gateway);
+              const executor = chunk.executor as ToolCallEntry["executor"] | undefined;
               // Gateway 内部工具：内联到消息卡片，不设顶部横幅
               if (isGateway) {
                 setLingxiaMsgs((prev) => {
@@ -2291,7 +2701,7 @@ export default function Home() {
                   const lastIdx = next.length - 1;
                   if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
                     const existing = next[lastIdx].toolCalls || [];
-                    next[lastIdx] = { ...next[lastIdx], toolCalls: [...existing, { id: String(chunk.id || ""), name: toolName, arguments: "{}", status: "running" as const, ts: toolTs, _gateway: true, executor: "gateway" }] };
+                    next[lastIdx] = normalizeMessageToolEvents({ ...next[lastIdx], toolCalls: [...existing, { id: String(chunk.id || ""), name: toolName, arguments: "{}", status: "running" as const, ts: toolTs, _gateway: true, executor: "gateway" }] });
                   }
                   return next;
                 });
@@ -2307,7 +2717,7 @@ export default function Home() {
                   const lastIdx = next.length - 1;
                   if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
                     const existing = next[lastIdx].toolCalls || [];
-                    next[lastIdx] = { ...next[lastIdx], toolCalls: [...existing, { id: String(chunk.id || ""), name: toolName, arguments: String(chunk.arguments || ""), status: "running" as const, ts: toolTs }] };
+                    next[lastIdx] = normalizeMessageToolEvents({ ...next[lastIdx], toolCalls: [...existing, { id: String(chunk.id || ""), name: toolName, arguments: String(chunk.arguments || ""), status: "running" as const, ts: toolTs, executor }] });
                   }
                   return next;
                 });
@@ -2321,7 +2731,7 @@ export default function Home() {
               const isTimeout = chunk.policyDenyReason === "tool_timeout";
               const isGateway = Boolean(chunk._gateway);
               const status = chunk.is_error ? "error" : "done";
-              const executor = chunk.executor as ("sandbox" | "native" | "none" | "timeout" | "gateway") | undefined;
+              const executor = chunk.executor as ToolCallEntry["executor"] | undefined;
               const truncated = Boolean(chunk.truncated);
               const suppressedOriginalResult = Boolean(chunk.suppressedOriginalResult);
               const policyDenyReason = chunk.policyDenyReason as string | undefined;
@@ -2339,7 +2749,7 @@ export default function Home() {
                     if (gwIdx >= 0) {
                       const updated = [...tcs];
                       updated[gwIdx] = { ...updated[gwIdx], status: "done", durationMs: Date.now() - updated[gwIdx].ts };
-                      next[lastIdx] = { ...next[lastIdx], toolCalls: updated };
+                      next[lastIdx] = normalizeMessageToolEvents({ ...next[lastIdx], toolCalls: updated });
                     }
                   }
                   return next;
@@ -2352,7 +2762,7 @@ export default function Home() {
                 const lastIdx = next.length - 1;
                 if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
                   const tcs = next[lastIdx].toolCalls || [];
-                  next[lastIdx] = { ...next[lastIdx], toolCalls: tcs.map((tc) => tc.id === toolCallId ? { ...tc, result, status, durationMs: Date.now() - tc.ts, executor, truncated, suppressedOriginalResult, policyDenyReason, auditId, outputFiles, adoptId: resolvedAdoptId ?? undefined } : tc) as import("@/components/ChatMessage").ToolCallEntry[] };
+                  next[lastIdx] = normalizeMessageToolEvents({ ...next[lastIdx], toolCalls: tcs.map((tc) => tc.id === toolCallId ? { ...tc, result, status, durationMs: Date.now() - tc.ts, executor, truncated, suppressedOriginalResult, policyDenyReason, auditId, outputFiles, adoptId: resolvedAdoptId ?? undefined } : tc) as import("@/components/ChatMessage").ToolCallEntry[] });
                 }
                 return next;
               });
@@ -2391,7 +2801,7 @@ export default function Home() {
                   const lastIdx = next.length - 1;
                   if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
                     const existing = next[lastIdx].toolCalls || [];
-                    next[lastIdx] = { ...next[lastIdx], toolCalls: [...existing, pseudoTc] };
+                    next[lastIdx] = normalizeMessageToolEvents({ ...next[lastIdx], toolCalls: [...existing, pseudoTc] });
                   }
                   return next;
                 });
@@ -2955,12 +3365,6 @@ export default function Home() {
     wsConnected,
   ]);
 
-  const navLabel = (key: string) => LINGXIA_SIDEBAR_NAV.find((i) => i.key === key)?.label || key;
-  const NavIcon = ({ navKey }: { navKey: keyof typeof sidebarIconMap }) => {
-    const Cmp = sidebarIconMap[navKey];
-    return <Cmp size={14} className="sidebar-item-icon" style={{ color: "var(--oc-text-secondary)" }} />;
-  };
-
   const accessGateShell = (title: string, desc: string, action?: any) => (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-6">
       <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
@@ -3057,7 +3461,6 @@ export default function Home() {
                 activePage={activePage}
                 setActivePage={setActivePage}
                 collapsed={sidebarCollapsed}
-                onOpenSettings={() => setSettingsOpen(true)}
                 coopBadge={coopBadgeCount}
                 sessions={webSessions}
               currentConversationId={webConversationId}
@@ -3077,13 +3480,6 @@ export default function Home() {
                   collapsed={sidebarCollapsed}
                 />
               )}
-            />
-            <SettingsOverlay
-              open={settingsOpen}
-              onClose={() => setSettingsOpen(false)}
-              adoptId={resolvedAdoptId || ""}
-              skills={lingxiaSkills as any}
-              diagnostics={settingsHealthDiagnostics}
             />
 
             <div
@@ -3254,9 +3650,12 @@ export default function Home() {
                     modelId={effectiveLingxiaModelId || "default"}
                     timeLabel={m.timeLabel}
                     toolCalls={m.role === "assistant" ? (m.toolCalls ?? (isLast && !chatV2Enabled && lingxiaStreaming ? lingxiaToolCalls : [])) : undefined}
+                    messageEvents={m.role === "assistant" ? (m as LxMsg).messageEvents : undefined}
                     showToolCalls={lingxiaShowToolCalls}
                     usage={m.usage}
                     contextPercent={m.contextPercent}
+                    jiuwenPermission={m.role === "assistant" ? (m as LxMsg).jiuwenPermission : undefined}
+                    onJiuwenPermissionAnswer={(permission, action) => void handleJiuwenPermissionAnswer(m.id, permission, action)}
                     onDelete={m.role === "assistant" && !chatV2Enabled ? () => { setLingxiaMsgs(prev => prev.filter((_, i) => i !== idx)); } : undefined}
                   />
                   </div>

@@ -8,7 +8,7 @@ import type {
   ScanChannelProvider,
   SyncBindChannelProvider,
 } from "@shared/types/cron";
-import { feishuCredentialsSchema, wechatCredentialsSchema, wecomCredentialsSchema } from "@shared/types/cron";
+import { dingtalkCredentialsSchema, feishuCredentialsSchema, wechatCredentialsSchema, wecomCredentialsSchema } from "@shared/types/cron";
 import {
   pollFeishuBindStatus,
   sendFeishuMessage,
@@ -123,6 +123,33 @@ export class FeishuChannelProvider implements ScanChannelProvider {
       return { ok: false, error: { kind: "channel_unreachable", detail: result.error || "feishu send failed" } };
     }
     return { ok: true, value: { deliveredAt: new Date().toISOString() } };
+  }
+}
+
+export class DingtalkChannelProvider implements ScanChannelProvider {
+  readonly id = "dingtalk";
+  readonly displayName = "钉钉";
+  readonly bindMode = "scan";
+  readonly credentialsSchema = dingtalkCredentialsSchema;
+
+  async startBindFlow(_ctx: ChannelSendContext): Promise<Result<ChannelBindStart>> {
+    return notImplemented("dingtalk");
+  }
+
+  async pollBindStatus(_ctx: ChannelSendContext, _pollToken: string): Promise<Result<ChannelBindStatus>> {
+    return notImplemented("dingtalk");
+  }
+
+  async test(_ctx: ChannelSendContext): Promise<Result<{ message: string }>> {
+    return notImplemented("dingtalk");
+  }
+
+  async unbind(_ctx: ChannelSendContext): Promise<Result<void>> {
+    return notImplemented("dingtalk");
+  }
+
+  async send(_ctx: ChannelSendContext, _payload: ChannelPayload): Promise<Result<{ deliveredAt: string }>> {
+    return notImplemented("dingtalk");
   }
 }
 

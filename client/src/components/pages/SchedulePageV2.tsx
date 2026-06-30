@@ -6,6 +6,8 @@ import {
   ChevronDown,
   ChevronRight,
   Clock3,
+  Check,
+  Copy,
   Eye,
   MessageCircle,
   PauseCircle,
@@ -16,9 +18,10 @@ import {
   Zap,
 } from "lucide-react";
 import { PageContainer } from "@/components/console/PageContainer";
+import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
-type ChannelId = "wechat" | "feishu" | "wecom";
+type ChannelId = "web" | "wechat" | "feishu" | "wecom";
 
 type CronJobV2 = {
   id: string;
@@ -132,6 +135,8 @@ const T = {
   runNow: "\u7acb\u5373\u8fd0\u884c",
   runNowFailed: "\u7acb\u5373\u8fd0\u884c\u5931\u8d25",
   started: "\u5df2\u53d1\u8d77\uff0c\u7ed3\u679c\u5c06\u63a8\u9001\u5230",
+  runningHint: "正在执行，完成后将在这里显示结果。",
+  noRunOutput: "暂无执行结果。",
   preview: "\u9884\u89c8",
   previewFuture: "\u9884\u89c8\u672a\u6765\u6267\u884c",
   previewFailed: "\u9884\u89c8\u5931\u8d25",
@@ -152,6 +157,7 @@ const T = {
 };
 
 const CHANNEL_LABEL: Record<ChannelId, string> = {
+  web: "定时任务记录",
   wechat: "\u5fae\u4fe1",
   feishu: "\u98de\u4e66",
   wecom: "\u4f01\u4e1a\u5fae\u4fe1",
@@ -169,6 +175,7 @@ const EMPTY_CREATE_FORM: CreateForm = {
 };
 
 function normalizeChannelId(channelId?: string): ChannelId {
+  if (channelId === "web" || channelId === "conversation") return "web";
   if (channelId === "feishu" || channelId === "wecom") return channelId;
   return "wechat";
 }
@@ -180,6 +187,7 @@ function channelLabel(channelId?: string) {
 function channelIcon(channelId?: string) {
   const props = { size: 15, strokeWidth: 2 };
   const id = normalizeChannelId(channelId);
+  if (id === "web") return <CalendarClock {...props} />;
   if (id === "feishu") return <Zap {...props} />;
   if (id === "wecom") return <Bell {...props} />;
   return <MessageCircle {...props} />;
@@ -201,6 +209,19 @@ function scheduleText(job: CronJobV2) {
   if (job.schedule.kind === "interval") return `${T.every} ${job.schedule.intervalMinutes || "?"} ${T.minute}`;
   if (job.schedule.kind === "once") return `${T.once} ${formatDate(job.schedule.runAt)}`;
   return job.schedule.display || job.schedule.cronExpr || "cron";
+}
+
+function runOutputText(run?: CronRunV2, fallback = T.noRunOutput) {
+  const text = String(run?.output || run?.summary || run?.errorMessage || run?.error || "").trim();
+  return text || fallback;
+}
+
+function runDurationText(run?: CronRunV2) {
+  const ms = Number(run?.durationMs || 0);
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = Math.round(ms / 1000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 function cronExprFromDailyTime(value: string) {
@@ -285,6 +306,8 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
   const [previewJobId, setPreviewJobId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<Record<string, PreviewRun[]>>({});
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
+  const [expandedRunJobIds, setExpandedRunJobIds] = useState<Set<string>>(() => new Set());
+  const [copiedRunId, setCopiedRunId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [createForm, setCreateForm] = useState<CreateForm>(EMPTY_CREATE_FORM);
@@ -303,17 +326,12 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
     setLoading(true);
     setError("");
     try {
-      const [jobResp, runResp] = await Promise.all([
-        fetch(`/api/claw/cron/list?adoptId=${encodeURIComponent(aid)}&limit=100`, { credentials: "include" }),
-        fetch(`/api/claw/cron/runs?adoptId=${encodeURIComponent(aid)}&limit=100`, { credentials: "include" }),
-      ]);
-      if (!jobResp.ok) throw new Error(`${T.jobLoadFailed} (${jobResp.status})`);
-      if (!runResp.ok) throw new Error(`${T.runsLoadFailed} (${runResp.status})`);
-      const jobJson = await jobResp.json();
-      const runJson = await runResp.json();
-      setJobs(Array.isArray(jobJson?.jobs) ? jobJson.jobs : []);
-      setRuns(Array.isArray(runJson?.runs) ? runJson.runs : []);
-      setCapabilities(jobJson?.capabilities || null);
+      const resp = await fetch(`/api/ea/session-view/cron?adoptId=${encodeURIComponent(aid)}&limit=100`, { credentials: "include" });
+      if (!resp.ok) throw new Error(`${T.jobLoadFailed} (${resp.status})`);
+      const data = await resp.json();
+      setJobs(Array.isArray(data?.jobs) ? data.jobs : []);
+      setRuns(Array.isArray(data?.runs) ? data.runs : []);
+      setCapabilities(data?.capabilities || null);
     } catch (err: any) {
       setError(err?.message || T.loadFailed);
     } finally {
@@ -346,6 +364,7 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
   async function runNow(job: CronJobV2) {
     if (!aid || runningJobId) return;
     setRunningJobId(job.id);
+    setExpandedRunJobIds((prev) => new Set(prev).add(job.id));
     const target = job.delivery?.targets?.[0];
     try {
       const resp = await fetch("/api/claw/cron/run", {
@@ -358,13 +377,40 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
         const data = await resp.json().catch(() => ({}));
         throw new Error(data?.error || `${T.runNowFailed} (${resp.status})`);
       }
+      const data = await resp.json().catch(() => ({}));
       toast.success(`${T.started} ${target?.channelLabel || channelLabel(target?.channelId)}`);
-      setTimeout(() => setRunningJobId(null), 1000);
-      setTimeout(load, 1800);
+      void pollRunResult(job.id, typeof data?.runId === "string" ? data.runId : undefined);
     } catch (err: any) {
       setRunningJobId(null);
       toast.error(err?.message || T.runNowFailed);
     }
+  }
+
+  async function pollRunResult(jobId: string, runId?: string) {
+    const maxAttempts = 30;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1800 : 3000));
+      try {
+        const resp = await fetch(`/api/ea/session-view/cron?adoptId=${encodeURIComponent(aid)}&jobId=${encodeURIComponent(jobId)}&limit=20`, { credentials: "include" });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        const nextRuns: CronRunV2[] = Array.isArray(data?.runs) ? data.runs : [];
+        if (nextRuns.length > 0) {
+          setRuns((prev) => {
+            const rest = prev.filter((run) => run.jobId !== jobId);
+            return [...nextRuns, ...rest];
+          });
+        }
+        const targetRun = runId ? nextRuns.find((run) => run.id === runId) : nextRuns[0];
+        if (targetRun && targetRun.status !== "running") {
+          await load();
+          break;
+        }
+      } catch {
+        // Keep polling; a transient refresh failure should not hide a completed run.
+      }
+    }
+    setRunningJobId((current) => current === jobId ? null : current);
   }
 
   async function toggleJob(job: CronJobV2) {
@@ -436,6 +482,28 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
     }
   }
 
+  async function copyRunOutput(run: CronRunV2 | undefined, copyId: string) {
+    const text = runOutputText(run, "");
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedRunId(copyId);
+      window.setTimeout(() => setCopiedRunId((current) => current === copyId ? null : current), 1400);
+      toast.success("执行结果已复制");
+    } catch {
+      toast.error("复制失败");
+    }
+  }
+
+  function toggleRunOutput(jobId: string) {
+    setExpandedRunJobIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  }
+
   async function createJob() {
     if (!aid || createBusy) return;
     const job = buildCreateJob(createForm);
@@ -471,28 +539,24 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
   return (
     <PageContainer title={T.pageTitle}>
       {dialog}
-      <div className="schedule-v2">
-        <div className="schedule-v2-toolbar">
-          <div>
-            <div className="schedule-v2-kicker">{T.kicker}</div>
-            <div className="schedule-v2-subtitle">{T.subtitle}</div>
-          </div>
-          <div className="schedule-v2-toolbar-actions">
-            <button className="schedule-v2-btn schedule-v2-btn--primary" onClick={() => setCreateOpen((v) => !v)} disabled={!aid}>
+      <div className="schedule-v2 ea-data-page">
+        <div className="schedule-v2-toolbar ea-data-toolbar">
+          <div className="schedule-v2-toolbar-actions ea-data-toolbar__actions">
+            <button className="schedule-v2-btn schedule-v2-btn--primary ea-data-btn ea-data-btn--primary" onClick={() => setCreateOpen((v) => !v)} disabled={!aid}>
               <Plus size={14} /> {createOpen ? T.collapseCreate : T.createTask}
             </button>
-            <button className="schedule-v2-btn schedule-v2-btn--ghost" onClick={load} disabled={loading}>
+            <button className="schedule-v2-btn schedule-v2-btn--ghost ea-data-btn ea-data-btn--ghost" onClick={load} disabled={loading}>
               <RefreshCw size={14} /> {T.refresh}
             </button>
           </div>
         </div>
 
-        {!aid && <div className="schedule-v2-empty">{T.missingAdoptId}</div>}
+        {!aid && <div className="schedule-v2-empty ea-data-empty">{T.missingAdoptId}</div>}
 
         {error && (
-          <div className="schedule-v2-error">
+          <div className="schedule-v2-error ea-data-error">
             <span>{error}</span>
-            <button className="schedule-v2-btn schedule-v2-btn--ghost" onClick={load}>{T.retry}</button>
+            <button className="schedule-v2-btn schedule-v2-btn--ghost ea-data-btn ea-data-btn--ghost" onClick={load}>{T.retry}</button>
           </div>
         )}
 
@@ -572,20 +636,21 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
                   value={createForm.channelId}
                   onChange={(e) => setCreateForm((f) => ({ ...f, channelId: e.target.value as CreateForm["channelId"] }))}
                 >
+                  <option value="web">{CHANNEL_LABEL.web}</option>
                   <option value="wechat">{CHANNEL_LABEL.wechat}</option>
                   <option value="feishu">{CHANNEL_LABEL.feishu}</option>
                   <option value="wecom" disabled>{CHANNEL_LABEL.wecom}\uff08\u5373\u5c06\u4e0a\u7ebf\uff09</option>
                 </select>
               </label>
-              <button className="schedule-v2-btn schedule-v2-btn--primary schedule-v2-create-submit" onClick={createJob} disabled={createBusy}>
+              <button className="schedule-v2-btn schedule-v2-btn--primary schedule-v2-create-submit ea-data-btn ea-data-btn--primary" onClick={createJob} disabled={createBusy}>
                 <Plus size={14} /> {createBusy ? T.saving : T.saveTask}
               </button>
             </div>
           </div>
         )}
 
-        <div className="schedule-v2-card">
-          <div className="schedule-v2-header">
+        <div className="schedule-v2-card ea-data-card">
+          <div className="schedule-v2-header ea-data-header">
             <span>{T.task}</span>
             <span>{T.schedule}</span>
             <span>{T.delivery}</span>
@@ -595,13 +660,13 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
           </div>
 
           {loading ? <SkeletonRows /> : jobs.length === 0 ? (
-            <div className="schedule-v2-empty">
+            <div className="schedule-v2-empty ea-data-empty">
               <CalendarClock size={26} />
               <div>{T.emptyTitle}</div>
-              <div className="schedule-v2-muted">
+              <div className="schedule-v2-muted ea-data-muted">
                 {T.emptyHint}
               </div>
-              <button className="schedule-v2-btn schedule-v2-btn--primary" onClick={() => setCreateOpen(true)} disabled={!aid}>
+              <button className="schedule-v2-btn schedule-v2-btn--primary ea-data-btn ea-data-btn--primary" onClick={() => setCreateOpen(true)} disabled={!aid}>
                 <Plus size={14} /> {T.createTask}
               </button>
             </div>
@@ -609,51 +674,98 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
             const target = job.delivery?.targets?.[0];
             const latest = latestRunByJob.get(job.id);
             const activePreview = previewJobId === job.id;
+            const outputExpanded = expandedRunJobIds.has(job.id) || runningJobId === job.id;
             const canRunNow = job.meta?.runNowSupported !== false && capabilities?.supportsRunNow !== false;
             const canToggle = job.meta?.updateSupported !== false && job.runtime !== "jiuwenclaw";
+            const latestOutput = runOutputText(latest, runningJobId === job.id ? T.runningHint : T.noRunOutput);
+            const latestCopyId = latest?.id || `${job.id}-latest`;
             return (
               <div className="schedule-v2-row-group" key={job.id}>
-                <div className="schedule-v2-row">
+                <div
+                  className={`schedule-v2-row schedule-v2-row--clickable ea-data-row ea-data-row--clickable${outputExpanded ? " schedule-v2-row--expanded ea-data-row--expanded" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => toggleRunOutput(job.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      toggleRunOutput(job.id);
+                    }
+                  }}
+                  title="点击查看最近执行结果"
+                >
                   <div className="schedule-v2-job">
-                    <div className="schedule-v2-job-title">
+                    <div className="schedule-v2-job-title ea-data-title">
                       <span className={job.enabled ? "schedule-v2-dot schedule-v2-dot--on" : "schedule-v2-dot"} />
                       <span>{job.name}</span>
+                      <span className="schedule-v2-expand-icon">
+                        {outputExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      </span>
                     </div>
-                    {job.description && <div className="schedule-v2-muted">{job.description}</div>}
+                    {job.description && <div className="schedule-v2-muted ea-data-muted">{job.description}</div>}
                   </div>
 
-                  <div className="schedule-v2-cell">
+                  <div className="schedule-v2-cell ea-data-cell">
                     <Clock3 size={14} />
                     <span>{scheduleText(job)}</span>
                   </div>
 
-                  <div className="schedule-v2-cell">
+                  <div className="schedule-v2-cell ea-data-cell">
                     <span className="schedule-v2-channel-icon">{channelIcon(target?.channelId)}</span>
                     <span>{target?.channelLabel || channelLabel(target?.channelId)}</span>
-                    {target?.targetLabel && <span className="schedule-v2-muted">· {target.targetLabel}</span>}
+                    {target?.targetLabel && <span className="schedule-v2-muted ea-data-muted">· {target.targetLabel}</span>}
                   </div>
 
-                  <div className="schedule-v2-cell">{formatDate(job.state?.nextRunAt)}</div>
+                  <div className="schedule-v2-cell ea-data-cell">{formatDate(job.state?.nextRunAt)}</div>
 
-                  <div className="schedule-v2-cell">
+                  <div className="schedule-v2-cell ea-data-cell">
                     <StatusPill status={latest?.status || job.state?.lastStatus} />
                   </div>
 
-                  <div className="schedule-v2-actions">
-                    <button className="schedule-v2-icon-btn" onClick={() => runNow(job)} disabled={!canRunNow || runningJobId === job.id} title={T.runNow}>
+                  <div className="schedule-v2-actions ea-data-actions" onClick={(event) => event.stopPropagation()}>
+                    <button className="schedule-v2-icon-btn ea-data-icon-btn" onClick={() => runNow(job)} disabled={!canRunNow || runningJobId === job.id} title={T.runNow}>
                       <Play size={14} /> {T.run}
                     </button>
-                    <button className="schedule-v2-icon-btn" onClick={() => togglePreview(job)} title={T.previewFuture}>
+                    <button className="schedule-v2-icon-btn ea-data-icon-btn" onClick={() => togglePreview(job)} title={T.previewFuture}>
                       {activePreview ? <ChevronDown size={14} /> : <Eye size={14} />} {T.preview}
                     </button>
-                    <button className="schedule-v2-icon-btn" onClick={() => toggleJob(job)} disabled={!canToggle} title={job.enabled ? T.disable : T.enable}>
+                    <button className="schedule-v2-icon-btn ea-data-icon-btn" onClick={() => toggleJob(job)} disabled={!canToggle} title={job.enabled ? T.disable : T.enable}>
                       <PauseCircle size={14} /> {job.enabled ? T.disable : T.enable}
                     </button>
-                    <button className="schedule-v2-icon-btn schedule-v2-icon-btn--danger" onClick={() => removeJob(job)} title={T.delete}>
+                    <button className="schedule-v2-icon-btn schedule-v2-icon-btn--danger ea-data-icon-btn ea-data-icon-btn--danger" onClick={() => removeJob(job)} title={T.delete}>
                       <Trash2 size={14} /> {T.delete}
                     </button>
                   </div>
                 </div>
+
+                {outputExpanded && (
+                  <div className="schedule-v2-run-output">
+                    <div className="schedule-v2-run-output-head">
+                      <div className="schedule-v2-preview-title">
+                        <ChevronRight size={14} /> 最近执行结果
+                      </div>
+                      <button
+                        type="button"
+                        className="schedule-v2-run-copy"
+                        onClick={() => copyRunOutput(latest, latestCopyId)}
+                        disabled={!latest?.output && !latest?.summary && !latest?.errorMessage && !latest?.error}
+                        title="复制执行结果"
+                      >
+                        {copiedRunId === latestCopyId ? <Check size={13} /> : <Copy size={13} />}
+                        {copiedRunId === latestCopyId ? "已复制" : "复制"}
+                      </button>
+                    </div>
+                    <div className="schedule-v2-run-output-meta">
+                      <StatusPill status={latest?.status || (runningJobId === job.id ? "running" : undefined)} />
+                      {latest?.startedAt && <span>{formatDate(latest.startedAt)}</span>}
+                      {runDurationText(latest) && <span>{runDurationText(latest)}</span>}
+                      {latest?.id && <span className="schedule-v2-run-output-id">{latest.id}</span>}
+                    </div>
+                    <div className="schedule-v2-run-output-text">
+                      <ChatMarkdown content={latestOutput} />
+                    </div>
+                  </div>
+                )}
 
                 {activePreview && (
                   <div className="schedule-v2-preview">
