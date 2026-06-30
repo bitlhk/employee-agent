@@ -1,9 +1,9 @@
 import {
-  CalendarClock,
-  FolderTree,
-  MessageSquareText,
+  LayoutGrid,
+  MessageCircle,
   Radio,
-  Sparkles,
+  Sparkle,
+  Timer,
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -16,12 +16,12 @@ type NavItem = { key: PageKey; label: string; icon: any; adminOnly?: boolean };
 export type SidebarConversation = SessionListConversation;
 
 const primaryItems: NavItem[] = [
-  { key: "chat", label: "聊天", icon: MessageSquareText },
-  { key: "skills", label: "技能", icon: Sparkles },
+  { key: "chat", label: "聊天", icon: MessageCircle },
+  { key: "skills", label: "技能", icon: Sparkle },
   { key: "collab", label: "协作", icon: Users },
   { key: "channels", label: "频道", icon: Radio },
-  { key: "schedule", label: "定时任务", icon: CalendarClock },
-  { key: "workspace", label: "工作空间", icon: FolderTree },
+  { key: "schedule", label: "定时任务", icon: Timer },
+  { key: "workspace", label: "工作空间", icon: LayoutGrid },
 ];
 
 export function Sidebar({
@@ -63,7 +63,7 @@ export function Sidebar({
           return (
             <div key={it.key} className="flex flex-col">
               <button title={it.label} onClick={() => setActivePage(it.key)} className={`w-full flex items-center text-left sidebar-item relative ${active ? "active" : ""}`}>
-                <Icon size={20} strokeWidth={1.7} className="sidebar-item-icon" />
+                <Icon size={18} strokeWidth={1.7} className="sidebar-item-icon" />
                 {!collapsed && <span className="sidebar-item-label">{it.label}</span>}
                 {it.key === "collab" && coopBadge !== undefined && coopBadge > 0 ? (
                   <span className="absolute right-2 top-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 text-[10px] font-semibold rounded-full bg-red-500 text-white" style={{ lineHeight: 1 }}>

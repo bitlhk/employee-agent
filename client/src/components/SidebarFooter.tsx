@@ -18,21 +18,17 @@ export function SidebarFooter({
   return (
     <div className="sidebar-footer">
       {!collapsed && (
-        <div
-          className="sidebar-meta"
-          style={{ padding: "0", lineHeight: 1, border: "none", background: "transparent" }}
-        >
-          <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            fontSize: "var(--oc-text-xs)",
-            color: "var(--oc-sidebar-subtle, var(--oc-text-tertiary))",
-            whiteSpace: "nowrap",
-          }}
-        >
-            <span>{cleanVersion}</span>
+        <div className="sidebar-meta sidebar-footer-meta">
+          <div className="sidebar-footer-row">
+            <a
+              className="sidebar-footer-link"
+              href="https://atomgit.com/openJiuwen/jiuwenswarm"
+              target="_blank"
+              rel="noreferrer"
+              title="访问 JiuwenSwarm 代码仓"
+            >
+              {cleanVersion}
+            </a>
           </div>
         </div>
       )}

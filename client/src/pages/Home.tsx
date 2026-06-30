@@ -3520,7 +3520,7 @@ export default function Home() {
                   title="查看首屏请求耗时"
                 >
                   <span className="client-load-diagnostics__dot" data-status={slowestClientMetric?.status || "pending"} />
-                  <span>{primaryClientLoadMetricList.length > 0 ? `首屏 ${clientLoadTotalMs}ms` : "诊断"}</span>
+                  <span>{primaryClientLoadMetricList.length > 0 ? `${clientLoadTotalMs}ms` : "诊断"}</span>
                 </button>
                 {clientDiagnosticsOpen ? (
                   <div className="client-load-diagnostics__panel">
@@ -3606,8 +3606,9 @@ export default function Home() {
             {/* 消息区 */}
             <div
               ref={lingxiaMsgViewportRef}
-              className="flex-1 min-h-0 overflow-y-auto pt-6 px-6 space-y-5 stealth-scrollbar" style={{ paddingBottom: 100 }}
+              className="flex-1 min-h-0 overflow-y-auto pt-6 stealth-scrollbar" style={{ paddingBottom: 100 }}
             >
+              <div className="mx-auto w-full max-w-[880px] px-6 space-y-5">
 
               {clawByAdoptLoading && activeLingxiaMsgs.length === 0 ? <ChatStartupSkeleton /> : null}
 
@@ -3663,6 +3664,7 @@ export default function Home() {
               })}
 
               <div ref={lingxiaMsgsEndRef} />
+              </div>
             </div>
 
             {!lingxiaNearBottom && (

@@ -532,8 +532,8 @@ export function ChatInput({
 
   return (
     <div
-      className={`flex-none mb-4 mt-0 ${dragActive ? "is-drag-active" : ""}`}
-      style={{ position: "relative", paddingLeft: 40, paddingRight: 40 }}
+      className={`flex-none mb-4 mt-0 w-full max-w-[880px] mx-auto px-6 ${dragActive ? "is-drag-active" : ""}`}
+      style={{ position: "relative" }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -557,8 +557,8 @@ export function ChatInput({
           style={{
             position: "absolute",
             bottom: "calc(100% + 6px)",
-            left: 40,
-            right: 40,
+            left: 24,
+            right: 24,
             maxWidth: 420,
             background: "var(--oc-card)",
             border: "1px solid var(--oc-border)",

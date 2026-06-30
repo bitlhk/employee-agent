@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Bell, CheckCircle2, MessageCircle, QrCode, Send, ShieldOff, Unlink } from "lucide-react";
+import { CheckCircle2, MessageCircle, ShieldOff, Unlink } from "lucide-react";
 import { PageContainer } from "@/components/console/PageContainer";
 import { useChannelBinding } from "@/hooks/useChannelBinding";
-import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type ChannelKey = "feishu" | "dingtalk" | "wechat" | "wecom";
 
@@ -23,22 +22,9 @@ const CHANNELS: Array<{
 export function ChannelsPage({ adoptId }: { adoptId?: string }) {
   const [active, setActive] = useState<ChannelKey>("feishu");
   const feishu = useChannelBinding("feishu", adoptId);
-  const { confirm, dialog } = useConfirmDialog();
-
-  const unbindFeishu = async () => {
-    const ok = await confirm({
-      title: "解绑飞书？",
-      description: "解绑后将无法通过飞书接收通知。",
-      confirmText: "解绑",
-      variant: "danger",
-    });
-    if (!ok) return;
-    await feishu.unbind();
-  };
 
   return (
     <PageContainer title="频道" desc="管理员工智能体与你的触达方式。日常对话、协作提醒和定时任务都可以复用这些频道。">
-      {dialog}
       <div className="channel-layout">
         <aside className="settings-card channel-list" aria-label="频道列表">
           {CHANNELS.map((channel) => {
@@ -74,25 +60,7 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
 
         <section className="settings-card channel-detail">
           {active === "feishu" ? (
-            <ScanChannelDetail
-              channelLabel="飞书"
-              connectedTitle="飞书已连接"
-              connectedDesc="定时任务和协作提醒现在可以投递到飞书。飞书内直接发消息给员工智能体的双向对话会在后续版本继续增强。"
-              idleTitle={feishu.status === "loading" ? "正在获取授权二维码..." : "扫码连接飞书"}
-              idleDesc="飞书是当前 EA 面向 JiuwenSwarm 的优先频道，采用扫码授权，支持任务通知推送。"
-              scanTitle="请用飞书扫描二维码"
-              scanDesc="扫码授权后，员工智能体会自动保存飞书应用凭证用于任务通知。"
-              status={feishu.status}
-              qrcodeUrl={feishu.qrCode || ""}
-              verificationUri={feishu.verificationUri}
-              userCode={feishu.userCode}
-              targetLabel={feishu.targetLabel || ""}
-              testing={feishu.testing}
-              onStartBind={feishu.startBind}
-              onTest={feishu.test}
-              onUnbind={unbindFeishu}
-              bullets={["JiuwenSwarm 支持", "支持任务完成通知", "扫码授权免 webhook 配置"]}
-            />
+            <FeishuBridgePanel adoptId={adoptId} notificationBound={feishu.status === "bound"} notificationTarget={feishu.targetLabel || ""} />
           ) : active === "dingtalk" ? (
             <ComingSoonDetail
               icon={<MessageCircle size={22} />}
@@ -110,105 +78,130 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
   );
 }
 
-function ScanChannelDetail({
-  channelLabel,
-  connectedTitle,
-  connectedDesc,
-  idleTitle,
-  idleDesc,
-  scanTitle,
-  scanDesc,
-  status,
-  qrcodeUrl,
-  verificationUri,
-  userCode,
-  targetLabel,
-  testing,
-  onStartBind,
-  onTest,
-  onUnbind,
-  bullets,
+function FeishuBridgePanel({
+  adoptId,
+  notificationBound,
+  notificationTarget,
 }: {
-  channelLabel: string;
-  connectedTitle: string;
-  connectedDesc: string;
-  idleTitle: string;
-  idleDesc: string;
-  scanTitle: string;
-  scanDesc: string;
-  status: "idle" | "loading" | "scanning" | "bound" | "unsupported";
-  qrcodeUrl: string;
-  verificationUri?: string;
-  userCode?: string;
-  targetLabel: string;
-  testing: boolean;
-  onStartBind: () => void;
-  onTest: () => void;
-  onUnbind: () => void;
-  bullets: string[];
+  adoptId?: string;
+  notificationBound: boolean;
+  notificationTarget: string;
 }) {
-  if (status === "bound") {
-    return (
-      <div className="channel-detail__body">
-        <div className="channel-status-icon channel-status-icon--ok"><CheckCircle2 size={26} /></div>
-        <h2 className="channel-detail__title">{connectedTitle}</h2>
-        <p className="channel-detail__desc">{connectedDesc}</p>
-        <div className="channel-meta">
-          <span>绑定身份</span>
-          <strong>{targetLabel || "已绑定"}</strong>
-        </div>
-        <div className="channel-actions">
-          <button className="btn-primary-soft" onClick={onTest} disabled={testing}>
-            <Send size={14} /> {testing ? "发送中..." : "测试发送"}
-          </button>
-          <button className="skills-btn" onClick={onUnbind}>
-            <Unlink size={14} /> 解绑
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const [loading, setLoading] = useState(false);
+  const [bound, setBound] = useState(false);
+  const [targetLabel, setTargetLabel] = useState("");
+  const [code, setCode] = useState("");
+  const [instruction, setInstruction] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
 
-  if (status === "scanning") {
-    return (
-      <div className="channel-detail__body">
-        <div className="channel-status-icon"><QrCode size={26} /></div>
-        <h2 className="channel-detail__title">{scanTitle}</h2>
-        <p className="channel-detail__desc">{scanDesc}</p>
-        {qrcodeUrl ? (
-          <img
-            className="channel-qr"
-            src={"https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" + encodeURIComponent(qrcodeUrl)}
-            alt={`${channelLabel}绑定二维码`}
-          />
-        ) : null}
-        {verificationUri ? (
-          <div className="channel-meta">
-            <span>无法扫码？</span>
-            <strong>
-              <a href={verificationUri} target="_blank" rel="noreferrer">打开授权页</a>
-              {userCode ? ` · 输入 ${userCode}` : ""}
-            </strong>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
+  const refresh = async () => {
+    if (!adoptId) return;
+    const r = await fetch(`/api/claw/feishu/bidirectional/status?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" });
+    const d = await r.json().catch(() => ({}));
+    setBound(!!d.bound);
+    setTargetLabel(String(d.targetLabel || ""));
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, [adoptId]);
+
+  useEffect(() => {
+    if (!adoptId || !code || bound) return;
+    const timer = setInterval(() => { void refresh(); }, 2500);
+    return () => clearInterval(timer);
+  }, [adoptId, code, bound]);
+
+  const begin = async () => {
+    if (!adoptId) return;
+    setLoading(true);
+    try {
+      const r = await fetch("/api/claw/feishu/bidirectional/begin", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adoptId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error || "begin failed");
+      setCode(String(d.code || ""));
+      setInstruction(String(d.instruction || ""));
+      setExpiresAt(String(d.expiresAt || ""));
+      setBound(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const unbind = async () => {
+    if (!adoptId) return;
+    setLoading(true);
+    try {
+      await fetch("/api/claw/feishu/bidirectional/unbind", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adoptId }),
+      });
+      setBound(false);
+      setTargetLabel("");
+      setCode("");
+      setInstruction("");
+      setExpiresAt("");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="channel-detail__body">
-      <div className="channel-status-icon"><MessageCircle size={26} /></div>
-      <h2 className="channel-detail__title">{idleTitle}</h2>
-      <p className="channel-detail__desc">{idleDesc}</p>
-      <div className="channel-bullets">
-        {bullets.map((bullet, idx) => {
-          const Icon = idx === 0 ? Bell : idx === 1 ? MessageCircle : CheckCircle2;
-          return <span key={bullet}><Icon size={14} /> {bullet}</span>;
-        })}
+      <div className={bound ? "channel-status-icon channel-status-icon--ok" : "channel-status-icon"}>
+        <MessageCircle size={26} />
       </div>
-      <button className="page-primary-action" onClick={onStartBind} disabled={status === "loading"}>
-        <QrCode size={14} /> {status === "loading" ? "获取中..." : `扫码绑定${channelLabel}`}
-      </button>
+      <h2 className="channel-detail__title">飞书绑定</h2>
+      <p className="channel-detail__desc">
+        通过 JiuwenSwarm 飞书 Bot 接收消息，并绑定到当前员工智能体。任务通知会复用这个频道能力。
+      </p>
+      <div className="channel-bullets">
+        <span><CheckCircle2 size={14} /> {bound ? "已绑定飞书双向交互" : "支持飞书 Bot 双向交互"}</span>
+        <span><CheckCircle2 size={14} /> 适合定时任务和协作提醒</span>
+        <span><CheckCircle2 size={14} /> 微信和企业微信等待 JiuwenSwarm 支持后适配</span>
+      </div>
+      {notificationBound ? (
+        <div className="channel-meta">
+          <span>通知投递</span>
+          <strong>{notificationTarget || "已连接"}</strong>
+        </div>
+      ) : null}
+      {bound ? (
+        <div className="channel-meta">
+          <span>飞书身份</span>
+          <strong>{targetLabel || "已绑定"}</strong>
+        </div>
+      ) : null}
+      {code && !bound ? (
+        <div className="channel-bind-code">
+          <span>{code}</span>
+          <p>{instruction || `请在飞书 Bot 私聊发送：绑定 ${code}`}</p>
+          {expiresAt ? <small>有效期至 {new Date(expiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</small> : null}
+        </div>
+      ) : null}
+      <div className="channel-actions">
+        {bound ? (
+          <button className="skills-btn" onClick={unbind} disabled={loading}>
+            <Unlink size={14} /> 解绑双向
+          </button>
+        ) : (
+          <button className="page-primary-action" onClick={begin} disabled={loading || !adoptId}>
+            <MessageCircle size={14} /> {loading ? "生成中..." : "生成绑定码"}
+          </button>
+        )}
+        {!bound && code ? (
+          <button className="skills-btn" onClick={() => void refresh()} disabled={loading}>
+            检查状态
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

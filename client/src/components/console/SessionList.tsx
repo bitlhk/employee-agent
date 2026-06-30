@@ -293,7 +293,7 @@ export function SessionList({
                       }}
                     >
                       {active && !isMobile ? <span className="sidebar-item-indicator" /> : null}
-                      <MessageSquareText size={20} strokeWidth={1.7} className="sidebar-item-icon" style={{ flexShrink: 0 }} />
+                      <MessageSquareText size={18} strokeWidth={1.7} className="sidebar-item-icon" style={{ flexShrink: 0 }} />
                       <div className="min-w-0 flex-1">
                         {editing ? (
                           <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>

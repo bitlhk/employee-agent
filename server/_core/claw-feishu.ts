@@ -8,6 +8,7 @@
 import express from "express";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
 import path from "path";
+import { randomInt } from "crypto";
 import { APP_ROOT, requireClawOwner } from "./helpers";
 import type {
   ChannelBindHandle,
@@ -25,9 +26,13 @@ const REGISTRATION_PATH = "/oauth/v1/app/registration";
 const REQUEST_TIMEOUT_MS = 10_000;
 
 const FEISHU_CONFIG_DIR = path.join(APP_ROOT, "data/feishu-accounts");
+const FEISHU_BRIDGE_DIR = path.join(APP_ROOT, "data/feishu-bridge");
 mkdirSync(FEISHU_CONFIG_DIR, { recursive: true });
+mkdirSync(FEISHU_BRIDGE_DIR, { recursive: true });
 
 const tenantTokenCache = new Map<string, { token: string; expiresAt: number }>();
+const BIND_CODE_TTL_MS = 10 * 60 * 1000;
+const BIND_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 type FeishuDomain = "feishu" | "lark";
 
@@ -47,8 +52,34 @@ type FeishuPollToken = {
   domainSwitched?: boolean;
 };
 
+type FeishuBridgeBindCode = {
+  code: string;
+  adoptId: string;
+  userId: number;
+  createdAt: string;
+  expiresAt: string;
+};
+
+type FeishuBridgeBinding = {
+  adoptId: string;
+  userId: number;
+  openId: string;
+  chatId: string;
+  channelId: string;
+  messageId?: string;
+  boundAt: string;
+};
+
 function accountPath(adoptId: string) {
   return path.join(FEISHU_CONFIG_DIR, `${adoptId}.json`);
+}
+
+function bridgeBindingPath(adoptId: string) {
+  return path.join(FEISHU_BRIDGE_DIR, `${adoptId}.json`);
+}
+
+function bridgeCodesPath() {
+  return path.join(FEISHU_BRIDGE_DIR, "pending-codes.json");
 }
 
 function loadAccount(adoptId: string): FeishuAccount | null {
@@ -70,6 +101,95 @@ function removeAccount(adoptId: string) {
   } catch {
     // Already unbound.
   }
+}
+
+function loadPendingCodes(): Record<string, FeishuBridgeBindCode> {
+  try {
+    const raw = existsSync(bridgeCodesPath()) ? readFileSync(bridgeCodesPath(), "utf-8") : "{}";
+    const parsed = JSON.parse(raw || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePendingCodes(codes: Record<string, FeishuBridgeBindCode>) {
+  writeFileSync(bridgeCodesPath(), JSON.stringify(codes, null, 2), "utf-8");
+}
+
+function loadBridgeBinding(adoptId: string): FeishuBridgeBinding | null {
+  try {
+    const p = bridgeBindingPath(adoptId);
+    return existsSync(p) ? JSON.parse(readFileSync(p, "utf-8")) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveBridgeBinding(binding: FeishuBridgeBinding) {
+  writeFileSync(bridgeBindingPath(binding.adoptId), JSON.stringify(binding, null, 2), "utf-8");
+}
+
+function removeBridgeBinding(adoptId: string) {
+  try {
+    unlinkSync(bridgeBindingPath(adoptId));
+  } catch {
+    // Already unbound.
+  }
+}
+
+function randomBindCode(): string {
+  let code = "";
+  for (let i = 0; i < 6; i += 1) code += BIND_CODE_ALPHABET[randomInt(BIND_CODE_ALPHABET.length)];
+  return code;
+}
+
+function pruneExpiredCodes(codes: Record<string, FeishuBridgeBindCode>) {
+  const now = Date.now();
+  for (const [code, item] of Object.entries(codes)) {
+    if (!item?.expiresAt || Date.parse(item.expiresAt) <= now) delete codes[code];
+  }
+}
+
+function createBridgeBindCode(adoptId: string, userId: number): FeishuBridgeBindCode {
+  const codes = loadPendingCodes();
+  pruneExpiredCodes(codes);
+  for (const [code, item] of Object.entries(codes)) {
+    if (item.adoptId === adoptId) delete codes[code];
+  }
+  let code = randomBindCode();
+  while (codes[code]) code = randomBindCode();
+  const now = new Date();
+  const item: FeishuBridgeBindCode = {
+    code,
+    adoptId,
+    userId,
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + BIND_CODE_TTL_MS).toISOString(),
+  };
+  codes[code] = item;
+  savePendingCodes(codes);
+  return item;
+}
+
+function normalizeBindCode(value: unknown): string {
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function extractBindCode(input: unknown): string {
+  const text = String(input || "").trim();
+  const match = text.match(/(?:^|\s)(?:绑定|bind)\s*[:：]?\s*([A-Za-z0-9]{4,12})(?:\s|$)/i);
+  return normalizeBindCode(match?.[1] || text);
+}
+
+function expectedBridgeToken(): string {
+  return String(process.env.LINGGAN_JIUWEN_WEBHOOK_TOKEN || process.env.INTERNAL_API_KEY || "").trim();
+}
+
+function requestBearerToken(req: express.Request): string {
+  const authorization = String(req.headers.authorization || "").trim();
+  if (authorization.toLowerCase().startsWith("bearer ")) return authorization.slice(7).trim();
+  return String(req.headers["x-internal-key"] || req.headers["x-linggan-token"] || "").trim();
 }
 
 function accountsBaseUrl(domain: FeishuDomain) {
@@ -135,12 +255,21 @@ function toBindHandle(userId: number, account: FeishuAccount): ChannelBindHandle
   };
 }
 
-export function getFeishuStatus(adoptId: string): { bound: boolean; targetLabel?: string; domain?: string } {
+export function getFeishuStatus(adoptId: string): {
+  bound: boolean;
+  targetLabel?: string;
+  domain?: string;
+  bidirectionalBound?: boolean;
+  bidirectionalTargetLabel?: string;
+} {
   const account = loadAccount(adoptId);
+  const bridge = loadBridgeBinding(adoptId);
   return {
     bound: !!(account?.appId && account?.appSecret),
-    targetLabel: account?.openId || "",
+    targetLabel: bridge?.openId || account?.openId || "",
     domain: account?.domain,
+    bidirectionalBound: !!bridge?.openId,
+    bidirectionalTargetLabel: bridge?.openId || "",
   };
 }
 
@@ -296,6 +425,7 @@ export async function sendFeishuMessage(adoptId: string, text: string): Promise<
 
 export async function unbindFeishu(adoptId: string): Promise<void> {
   removeAccount(adoptId);
+  removeBridgeBinding(adoptId);
 }
 
 export function registerFeishuRoutes(app: express.Express) {
@@ -380,6 +510,99 @@ export function registerFeishuRoutes(app: express.Express) {
       res.json(result.ok ? { ok: true } : { ok: false, error: result.error });
     } catch (error: any) {
       res.status(500).json({ ok: false, error: error?.message || "feishu test failed" });
+    }
+  });
+
+  app.get("/api/claw/feishu/bidirectional/status", async (req, res) => {
+    try {
+      const adoptId = String(req.query.adoptId || "").trim();
+      if (!adoptId) return res.status(400).json({ error: "adoptId required" });
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      const binding = loadBridgeBinding(adoptId);
+      res.json({
+        bound: !!binding?.openId,
+        targetLabel: binding?.openId || "",
+        chatId: binding?.chatId || "",
+        boundAt: binding?.boundAt || "",
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "feishu bridge status failed" });
+    }
+  });
+
+  app.post("/api/claw/feishu/bidirectional/begin", async (req, res) => {
+    try {
+      const adoptId = String(req.body?.adoptId || "").trim();
+      if (!adoptId) return res.status(400).json({ error: "adoptId required" });
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      const code = createBridgeBindCode(adoptId, Number(claw.userId || 0));
+      res.json({
+        code: code.code,
+        expiresAt: code.expiresAt,
+        instruction: `请在飞书 Bot 私聊发送：绑定 ${code.code}`,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "feishu bridge begin failed" });
+    }
+  });
+
+  app.post("/api/claw/feishu/bidirectional/unbind", async (req, res) => {
+    try {
+      const adoptId = String(req.body?.adoptId || "").trim();
+      if (!adoptId) return res.status(400).json({ error: "adoptId required" });
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      removeBridgeBinding(adoptId);
+      res.json({ ok: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "feishu bridge unbind failed" });
+    }
+  });
+
+  app.post("/api/internal/jiuwen/feishu/bind-code", async (req, res) => {
+    try {
+      const configuredToken = expectedBridgeToken();
+      if (configuredToken && requestBearerToken(req) !== configuredToken) {
+        return res.status(401).json({ ok: false, error: "UNAUTHORIZED", reply: "绑定失败：服务授权未通过。" });
+      }
+
+      const code = extractBindCode(req.body?.code || req.body?.content || "");
+      const openId = String(req.body?.open_id || req.body?.openId || req.body?.feishu_open_id || "").trim();
+      const chatId = String(req.body?.chat_id || req.body?.chatId || req.body?.feishu_chat_id || "").trim();
+      const channelId = String(req.body?.channel_id || req.body?.channelId || "feishu").trim();
+      const messageId = String(req.body?.message_id || req.body?.messageId || "").trim();
+      if (!code) return res.status(400).json({ ok: false, error: "code required", reply: "绑定失败：没有识别到绑定码。" });
+      if (!openId) return res.status(400).json({ ok: false, error: "open_id required", reply: "绑定失败：没有获取到飞书用户身份。" });
+
+      const codes = loadPendingCodes();
+      pruneExpiredCodes(codes);
+      const pending = codes[code];
+      if (!pending) {
+        savePendingCodes(codes);
+        return res.status(404).json({ ok: false, error: "code not found", reply: "绑定码无效或已过期，请回到 EA 频道页重新生成。" });
+      }
+
+      saveBridgeBinding({
+        adoptId: pending.adoptId,
+        userId: pending.userId,
+        openId,
+        chatId,
+        channelId,
+        messageId,
+        boundAt: new Date().toISOString(),
+      });
+      delete codes[code];
+      savePendingCodes(codes);
+      return res.json({
+        ok: true,
+        adoptId: pending.adoptId,
+        reply: "飞书已绑定到你的员工智能体，后续可以通过这个 Bot 进行双向交互。",
+      });
+    } catch (error: any) {
+      console.error("[FEISHU-BRIDGE] bind-code failed", error?.message || error);
+      return res.status(500).json({ ok: false, error: error?.message || "bind failed", reply: "绑定失败：EA 服务处理异常。" });
     }
   });
 }

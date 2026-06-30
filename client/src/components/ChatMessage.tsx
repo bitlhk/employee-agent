@@ -780,7 +780,7 @@ function ChatMessageInner({
   return (
     <div className="flex items-start gap-3 lingxia-ai-bubble-wrap lingxia-msg-fade">
       <div className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center lingxia-avatar-ai" style={{ marginTop: 2 }}><BrandIcon size={22} /></div>
-      <div>
+      <div className="min-w-0 flex-1">
         {showToolCalls && effectiveToolCalls.length > 0 && (
           <div className="mb-2">
             <ToolCallTimeline toolCalls={effectiveToolCalls} />
