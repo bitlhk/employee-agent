@@ -521,6 +521,13 @@ export async function sendFeishuBridgeMessage(adoptId: string, text: string): Pr
   }
 }
 
+function maskRouteTarget(value?: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.length <= 12) return raw;
+  return `${raw.slice(0, 6)}...${raw.slice(-4)}`;
+}
+
 export async function unbindFeishu(adoptId: string): Promise<void> {
   removeAccount(adoptId);
   removeBridgeBinding(adoptId);
@@ -608,6 +615,107 @@ export function registerFeishuRoutes(app: express.Express) {
       res.json(result.ok ? { ok: true } : { ok: false, error: result.error });
     } catch (error: any) {
       res.status(500).json({ ok: false, error: error?.message || "feishu test failed" });
+    }
+  });
+
+  app.get("/api/claw/channels/capabilities", async (req, res) => {
+    try {
+      const adoptId = String(req.query.adoptId || "").trim();
+      if (!adoptId) return res.status(400).json({ error: "adoptId required" });
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+
+      const feishuBinding = loadBridgeBinding(adoptId);
+      const feishuSender = loadBridgeSenderAccount();
+      const feishuConfigured = !!(feishuSender?.appId && feishuSender?.appSecret);
+      const feishuBound = !!feishuBinding?.openId;
+      res.json({
+        adoptId,
+        userId: Number(claw.userId || 0) || null,
+        routeModel: "employee_adopt_channel_routes",
+        channels: {
+          feishu: {
+            key: "feishu",
+            label: "飞书",
+            configured: feishuConfigured,
+            bound: feishuBound,
+            routeReady: feishuConfigured && feishuBound,
+            bindMode: "code",
+            routeMode: "openId_to_adoptId",
+            targetLabel: maskRouteTarget(feishuBinding?.openId),
+            boundAt: feishuBinding?.boundAt || "",
+            capabilities: {
+              inbound: feishuConfigured,
+              outbound: feishuConfigured,
+              dm: feishuConfigured,
+              group: false,
+              scheduleDelivery: feishuConfigured && feishuBound,
+              coopNotify: feishuConfigured && feishuBound,
+              files: false,
+            },
+            reason: !feishuConfigured ? "not_configured" : !feishuBound ? "not_bound" : null,
+          },
+          dingtalk: {
+            key: "dingtalk",
+            label: "钉钉",
+            configured: false,
+            bound: false,
+            routeReady: false,
+            bindMode: "pending",
+            routeMode: "pending",
+            capabilities: {
+              inbound: false,
+              outbound: false,
+              dm: false,
+              group: false,
+              scheduleDelivery: false,
+              coopNotify: false,
+              files: false,
+            },
+            reason: "ea_adapter_pending",
+          },
+          wechat: {
+            key: "wechat",
+            label: "微信",
+            configured: false,
+            bound: false,
+            routeReady: false,
+            bindMode: "pending",
+            routeMode: "pending",
+            capabilities: {
+              inbound: false,
+              outbound: false,
+              dm: false,
+              group: false,
+              scheduleDelivery: false,
+              coopNotify: false,
+              files: false,
+            },
+            reason: "waiting_jiuwenswarm_support",
+          },
+          wecom: {
+            key: "wecom",
+            label: "企业微信",
+            configured: false,
+            bound: false,
+            routeReady: false,
+            bindMode: "pending",
+            routeMode: "pending",
+            capabilities: {
+              inbound: false,
+              outbound: false,
+              dm: false,
+              group: false,
+              scheduleDelivery: false,
+              coopNotify: false,
+              files: false,
+            },
+            reason: "waiting_jiuwenswarm_support",
+          },
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "channel capabilities failed" });
     }
   });
 

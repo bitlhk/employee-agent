@@ -5,6 +5,35 @@ import { PageContainer } from "@/components/console/PageContainer";
 
 type ChannelKey = "feishu" | "dingtalk" | "wechat" | "wecom";
 
+type ChannelCapability = {
+  key: ChannelKey;
+  label: string;
+  configured: boolean;
+  bound: boolean;
+  routeReady: boolean;
+  bindMode: string;
+  routeMode: string;
+  targetLabel?: string;
+  boundAt?: string;
+  reason?: string | null;
+  capabilities: {
+    inbound: boolean;
+    outbound: boolean;
+    dm: boolean;
+    group: boolean;
+    scheduleDelivery: boolean;
+    coopNotify: boolean;
+    files: boolean;
+  };
+};
+
+type ChannelCapabilitiesResp = {
+  adoptId: string;
+  userId: number | null;
+  routeModel: string;
+  channels: Partial<Record<ChannelKey, ChannelCapability>>;
+};
+
 const CHANNELS: Array<{
   key: ChannelKey;
   label: string;
@@ -18,26 +47,47 @@ const CHANNELS: Array<{
   { key: "wecom", label: "企业微信", desc: "等待 JiuwenSwarm 频道支持后适配", iconSrc: "/channel-icons/wecom.webp", status: "unsupported" },
 ];
 
+function channelStatusLabel(channel: (typeof CHANNELS)[number], cap?: ChannelCapability): string {
+  if (!cap) {
+    if (channel.status === "unsupported") return "适配中";
+    return "未绑定";
+  }
+  if (cap.routeReady) return "已绑定";
+  if (cap.bound && !cap.routeReady) return "路由待就绪";
+  if (cap.reason === "not_bound") return "未绑定";
+  if (cap.reason === "not_configured") return "未配置";
+  if (cap.reason === "ea_adapter_pending") return "接入中";
+  if (cap.reason === "waiting_jiuwenswarm_support") return "适配中";
+  if (cap.configured) return "未绑定";
+  return "未配置";
+}
+
+function channelPillClass(label: string): string {
+  if (label === "已绑定") return "channel-pill channel-pill--ok";
+  if (label === "未绑定" || label === "路由待就绪" || label === "未配置") return "channel-pill channel-pill--info";
+  return "channel-pill";
+}
+
 export function ChannelsPage({ adoptId }: { adoptId?: string }) {
   const [active, setActive] = useState<ChannelKey>("feishu");
-  const [feishuBridgeBound, setFeishuBridgeBound] = useState(false);
+  const [channelCaps, setChannelCaps] = useState<ChannelCapabilitiesResp | null>(null);
 
-  const refreshFeishuBridge = async () => {
+  const refreshChannelCapabilities = async () => {
     if (!adoptId) {
-      setFeishuBridgeBound(false);
+      setChannelCaps(null);
       return;
     }
     try {
-      const r = await fetch(`/api/claw/feishu/bidirectional/status?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" });
+      const r = await fetch(`/api/claw/channels/capabilities?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" });
       const d = await r.json().catch(() => ({}));
-      setFeishuBridgeBound(!!d.bound);
+      setChannelCaps(r.ok ? d : null);
     } catch {
-      setFeishuBridgeBound(false);
+      setChannelCaps(null);
     }
   };
 
   useEffect(() => {
-    void refreshFeishuBridge();
+    void refreshChannelCapabilities();
   }, [adoptId]);
 
   return (
@@ -46,7 +96,8 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
         <aside className="settings-card channel-list" aria-label="频道列表">
           {CHANNELS.map((channel) => {
             const activeChannel = active === channel.key;
-            const bound = channel.key === "feishu" ? feishuBridgeBound : false;
+            const cap = channelCaps?.channels?.[channel.key];
+            const statusLabel = channelStatusLabel(channel, cap);
             return (
               <button
                 key={channel.key}
@@ -62,12 +113,9 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
                 <span className="channel-list__copy">
                   <span className="channel-list__title">
                     {channel.label}
-                    {bound ? <span className="channel-pill channel-pill--ok">已绑定</span> : null}
-                    {!bound && channel.status === "ready" ? <span className="channel-pill channel-pill--info">未绑定</span> : null}
-                    {!bound && channel.status === "jiuwen-ready" ? <span className="channel-pill channel-pill--info">未绑定</span> : null}
-                    {channel.status === "unsupported" ? <span className="channel-pill">适配中</span> : null}
+                    <span className={channelPillClass(statusLabel)}>{statusLabel}</span>
                   </span>
-                  <span className="channel-list__desc">{channel.desc}</span>
+                  <span className="channel-list__desc">{cap ? channelDesc(channel, cap) : channel.desc}</span>
                 </span>
               </button>
             );
@@ -76,7 +124,11 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
 
         <section className="settings-card channel-detail">
           {active === "feishu" ? (
-            <FeishuBridgePanel adoptId={adoptId} onStatusChange={setFeishuBridgeBound} />
+            <FeishuBridgePanel
+              adoptId={adoptId}
+              capability={channelCaps?.channels?.feishu}
+              onChanged={() => void refreshChannelCapabilities()}
+            />
           ) : active === "dingtalk" ? (
             <ComingSoonDetail
               icon={<MessageCircle size={22} />}
@@ -94,44 +146,40 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
   );
 }
 
+function channelDesc(channel: (typeof CHANNELS)[number], cap: ChannelCapability): string {
+  if (cap.routeReady) {
+    if (channel.key === "feishu") return "已路由到当前员工智能体，支持私聊对话和协作提醒";
+    return "已绑定";
+  }
+  if (cap.reason === "not_configured") return "平台飞书应用未配置，配置后即可绑定到员工智能体";
+  if (cap.reason === "ea_adapter_pending") return "JiuwenSwarm 支持该频道，EA 绑定和投递能力接入中";
+  if (cap.reason === "waiting_jiuwenswarm_support") return channel.desc;
+  if (cap.reason === "not_bound") return "平台已配置，当前员工智能体尚未绑定";
+  return channel.desc;
+}
+
 function FeishuBridgePanel({
   adoptId,
-  onStatusChange,
+  capability,
+  onChanged,
 }: {
   adoptId?: string;
-  onStatusChange?: (bound: boolean) => void;
+  capability?: ChannelCapability;
+  onChanged?: () => void;
 }) {
   const [loading, setLoading] = useState(false);
-  const [bound, setBound] = useState(false);
-  const [targetLabel, setTargetLabel] = useState("");
   const [code, setCode] = useState("");
   const [instruction, setInstruction] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
-
-  const refresh = async () => {
-    if (!adoptId) return;
-    try {
-      const r = await fetch(`/api/claw/feishu/bidirectional/status?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" });
-      const d = await r.json().catch(() => ({}));
-      setBound(!!d.bound);
-      onStatusChange?.(!!d.bound);
-      setTargetLabel(String(d.targetLabel || ""));
-    } catch {
-      setBound(false);
-      onStatusChange?.(false);
-      setTargetLabel("");
-    }
-  };
-
-  useEffect(() => {
-    void refresh();
-  }, [adoptId]);
+  const bound = !!capability?.bound;
+  const routeReady = !!capability?.routeReady;
+  const targetLabel = String(capability?.targetLabel || "");
 
   useEffect(() => {
     if (!adoptId || !code || bound) return;
-    const timer = setInterval(() => { void refresh(); }, 2500);
+    const timer = setInterval(() => { onChanged?.(); }, 2500);
     return () => clearInterval(timer);
-  }, [adoptId, code, bound]);
+  }, [adoptId, code, bound, onChanged]);
 
   const begin = async () => {
     if (!adoptId) return;
@@ -148,8 +196,7 @@ function FeishuBridgePanel({
       setCode(String(d.code || ""));
       setInstruction(String(d.instruction || ""));
       setExpiresAt(String(d.expiresAt || ""));
-      setBound(false);
-      onStatusChange?.(false);
+      onChanged?.();
     } finally {
       setLoading(false);
     }
@@ -165,12 +212,10 @@ function FeishuBridgePanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ adoptId }),
       });
-      setBound(false);
-      onStatusChange?.(false);
-      setTargetLabel("");
       setCode("");
       setInstruction("");
       setExpiresAt("");
+      onChanged?.();
     } finally {
       setLoading(false);
     }
@@ -178,7 +223,7 @@ function FeishuBridgePanel({
 
   return (
     <div className="channel-detail__body">
-      <div className={bound ? "channel-status-icon channel-status-icon--ok" : "channel-status-icon"}>
+      <div className={routeReady ? "channel-status-icon channel-status-icon--ok" : "channel-status-icon"}>
         <MessageCircle size={26} />
       </div>
       <h2 className="channel-detail__title">飞书绑定</h2>
@@ -190,13 +235,13 @@ function FeishuBridgePanel({
         <span><CheckCircle2 size={14} /> 在飞书中添加灵感智能体应用</span>
         <span><CheckCircle2 size={14} /> 点击按钮获取绑定码，并在智能体私聊中输入完成绑定</span>
       </div>
-      {bound ? (
+      {routeReady ? (
         <div className="channel-meta">
-          <span>绑定状态</span>
-          <strong>{targetLabel ? `已绑定 ${targetLabel}` : "已绑定飞书双向交互"}</strong>
+          <span>路由状态</span>
+          <strong>{targetLabel ? `已路由 ${targetLabel} → 当前员工智能体` : "已绑定飞书双向交互"}</strong>
         </div>
       ) : null}
-      {code && !bound ? (
+      {code && !routeReady ? (
         <div className="channel-bind-code">
           <span>{code}</span>
           <p>{instruction || `请在飞书 Bot 私聊发送：绑定 ${code}`}</p>
@@ -214,7 +259,7 @@ function FeishuBridgePanel({
           </button>
         )}
         {!bound && code ? (
-          <button className="skills-btn" onClick={() => void refresh()} disabled={loading}>
+          <button className="skills-btn" onClick={() => onChanged?.()} disabled={loading}>
             检查状态
           </button>
         ) : null}

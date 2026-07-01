@@ -22,6 +22,7 @@ import {
   upsertSessionRegistry,
 } from "./helpers";
 import { createContext } from "./context";
+import { clearSessionCookieVariants, setLogoutLockCookieVariants } from "./cookies";
 import { skillInstaller } from "./skills/skill-installer";
 import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer } from "./skills/skill-source";
 
@@ -1830,30 +1831,10 @@ export function registerMiscRoutes(app: express.Express) {
   // ── Logout all sessions/cookies ───────────────────────
   app.post("/api/auth/logout-all", async (req, res) => {
     try {
-      const cookieDomain = process.env.COOKIE_DOMAIN || "";
-      const clearOpts = [
-        { path: "/" },
-        ...(cookieDomain ? [
-          { domain: cookieDomain, path: "/" },
-          { domain: cookieDomain.replace(/^\./, ""), path: "/" },
-          { domain: `www.${cookieDomain.replace(/^\./, "")}`, path: "/" },
-        ] : []),
-      ];
-
-      for (const opt of clearOpts) {
-        try { res.clearCookie(COOKIE_NAME, { ...opt, httpOnly: true, secure: true, sameSite: "none" as const }); } catch {}
-        try { res.clearCookie(COOKIE_NAME, { ...opt, httpOnly: true, secure: false, sameSite: "lax" as const }); } catch {}
-      }
+      clearSessionCookieVariants(req, res);
 
       // lock sso-bridge for 3 minutes to avoid immediate auto-login after logout
-      res.cookie("logout_lock", "1", {
-        ...(cookieDomain ? { domain: cookieDomain } : {}),
-        httpOnly: true,
-        path: "/",
-        sameSite: "none",
-        secure: true,
-        maxAge: 3 * 60 * 1000,
-      });
+      setLogoutLockCookieVariants(req, res);
 
       // best-effort site data clear (supported browsers only)
       res.setHeader("Clear-Site-Data", '"cookies", "storage"');

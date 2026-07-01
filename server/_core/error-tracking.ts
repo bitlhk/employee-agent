@@ -44,6 +44,7 @@ function isErrorTrackingExemptPath(req: Request): boolean {
   if (path === "/api/claw/mcp-tools/status") return true;
   if (path === "/api/claw/skills/registry") return true;
   if (path === "/api/embed/auth-check") return true;
+  if (path.startsWith("/api/ea/session-view/")) return true;
   if (path === "/api/trpc/coop.iswhitelisted") return true;
   if (path === "/api/trpc/ipaccesslogs.getmytodaycount") return true;
   if (path.startsWith("/claw/")) return true;
@@ -340,4 +341,3 @@ setInterval(() => {
     autoBlockedIps.delete(ip);
   });
 }, CLEANUP_INTERVAL);
-

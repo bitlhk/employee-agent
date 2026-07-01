@@ -62,7 +62,6 @@ export default defineConfig(({ mode }) => {
     react(),
     tailwindcss(),
     jsxLocPlugin(),
-    vitePluginManusRuntime(),
     imagetools({
       defaultDirectives: (url) => {
         // 默认压缩图片，转换为 WebP 格式（如果浏览器支持）
@@ -76,6 +75,9 @@ export default defineConfig(({ mode }) => {
     fontDisplayPlugin(), // 添加字体加载优化
     htmlEnvPlugin(env),
   ];
+  if (env.VITE_MANUS_RUNTIME === "1") {
+    plugins.splice(3, 0, vitePluginManusRuntime());
+  }
 
   return {
     plugins,
@@ -205,4 +207,3 @@ export default defineConfig(({ mode }) => {
     },
   };
 });
-

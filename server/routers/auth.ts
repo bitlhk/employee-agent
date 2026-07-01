@@ -1,5 +1,5 @@
 import { COOKIE_NAME } from "@shared/const";
-import { clearSessionCookieVariants, getSessionCookieOptions } from "../_core/cookies";
+import { clearSessionCookieVariants, getSessionCookieOptions, setLogoutLockCookieVariants } from "../_core/cookies";
 import { sdk } from "../_core/sdk";
 import { publicProcedure, adminProcedure, router } from "../_core/trpc";
 import { z } from "zod";
@@ -44,6 +44,7 @@ export const authRouter = router({
         metadata: { localCacheClearRequested: true },
       });
       clearSessionCookieVariants(ctx.req, ctx.res);
+      setLogoutLockCookieVariants(ctx.req, ctx.res);
       return {
         success: true,
       } as const;

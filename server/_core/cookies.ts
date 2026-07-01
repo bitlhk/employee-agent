@@ -76,6 +76,10 @@ export function clearSessionCookieVariants(req: Request, res: Response) {
     domains.add(normalizedDomain);
     domains.add(`.${normalizedDomain}`);
   }
+  if (hostname === "linggan.top" || hostname.endsWith(".linggan.top")) {
+    domains.add("linggan.top");
+    domains.add(".linggan.top");
+  }
   if (hostname && hostname !== normalizedDomain) domains.add(hostname);
 
   for (const domain of domains) {
@@ -92,6 +96,47 @@ export function clearSessionCookieVariants(req: Request, res: Response) {
       res.clearCookie(COOKIE_NAME, {
         ...base,
         httpOnly: true,
+        secure: false,
+        sameSite: "lax",
+      });
+    } catch {}
+  }
+}
+
+export function setLogoutLockCookieVariants(req: Request, res: Response, maxAgeMs = 3 * 60 * 1000) {
+  const hostname = req.hostname || "";
+  const configuredDomain = process.env.COOKIE_DOMAIN || "";
+  const normalizedDomain = configuredDomain.replace(/^\./, "");
+  const domains = new Set<string | undefined>([undefined]);
+
+  if (configuredDomain) domains.add(configuredDomain);
+  if (normalizedDomain) {
+    domains.add(normalizedDomain);
+    domains.add(`.${normalizedDomain}`);
+  }
+  if (hostname === "linggan.top" || hostname.endsWith(".linggan.top")) {
+    domains.add("linggan.top");
+    domains.add(".linggan.top");
+  }
+  if (hostname && hostname !== normalizedDomain) domains.add(hostname);
+
+  for (const domain of domains) {
+    const base = {
+      ...(domain ? { domain } : {}),
+      httpOnly: true,
+      path: "/",
+      maxAge: maxAgeMs,
+    };
+    try {
+      res.cookie("logout_lock", "1", {
+        ...base,
+        secure: true,
+        sameSite: "none",
+      });
+    } catch {}
+    try {
+      res.cookie("logout_lock", "1", {
+        ...base,
         secure: false,
         sameSite: "lax",
       });
