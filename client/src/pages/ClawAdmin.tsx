@@ -33,10 +33,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck, Building2, Trash2, KeyRound, UserCog, Activity, Server, Database, Radio, GitBranch, Download, FileText, Eye } from "lucide-react";
+import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, BarChart3, ShieldCheck, Building2, Trash2, KeyRound, UserCog, Activity, Server, Database, Radio, GitBranch, Download, FileText, Eye } from "lucide-react";
 import { UsageStatsTab } from "@/components/pages/UsageStatsTab";
 import { TenantAuditTab } from "@/components/pages/TenantAuditTab";
-import { BizAgentsPanel } from "@/components/BizAgentsPanel";
 import { CollaborationTab } from "@/components/pages/CollaborationTab";
 import { toast } from "sonner";
 import { useBrand, invalidateBrandClientCache } from "@/lib/useBrand";
@@ -751,7 +750,6 @@ export default function ClawAdmin() {
     { value: "security-audit", label: "安全审计", description: "Ledger 查询与导出", icon: ShieldCheck },
     { value: "settings", label: "系统设置", description: "智能体运行配置", icon: Settings },
     { value: "brand", label: "品牌设置", description: "名称、视觉与身份", icon: Sparkles },
-    { value: "collab", label: "智能体协作", description: "协作能力管理", icon: Zap },
     { value: "tenant-audit", label: "隔离审计", description: "租户隔离检查", icon: ShieldCheck },
   ];
 
@@ -1343,12 +1341,6 @@ export default function ClawAdmin() {
             )}
           </TabsContent>
 
-          {/* ── 智能体协作 ── */}
-          <TabsContent value="collab" className="space-y-4">
-            <Card className="admin-panel-card p-6">
-              <BizAgentsPanel />
-            </Card>
-          </TabsContent>
           <TabsContent value="collaboration" className="space-y-4">
             <CollaborationTab />
           </TabsContent>

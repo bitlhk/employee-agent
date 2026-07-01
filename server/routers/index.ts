@@ -9,7 +9,6 @@ import { ipAccessLogsRouter } from "./ipAccessLogs";
 import { systemConfigsRouter } from "./systemConfigs";
 import { collabRouter } from "./collab";
 import { coopRouter } from "./coop";
-import { agentHealthRouter, bizAgentsRouter } from "./agents";
 import { auditRouter } from "./audit";
 
 export const appRouter = router({
@@ -31,8 +30,6 @@ export const appRouter = router({
   systemConfigs: systemConfigsRouter,
   collab: collabRouter,
   coop: coopRouter,
-  agentHealth: agentHealthRouter,
-  bizAgents: bizAgentsRouter,
   audit: auditRouter,
 });
 
