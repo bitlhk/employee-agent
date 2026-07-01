@@ -242,6 +242,29 @@ function apiBaseUrl(domain: FeishuDomain) {
   return domain === "lark" ? LARK_API_URL : FEISHU_API_URL;
 }
 
+function loadBridgeSenderAccount(): FeishuAccount | null {
+  const appId = String(
+    process.env.LINGGAN_FEISHU_APP_ID ||
+      process.env.FEISHU_APP_ID ||
+      process.env.JIUWENSWARM_FEISHU_APP_ID ||
+      ""
+  ).trim();
+  const appSecret = String(
+    process.env.LINGGAN_FEISHU_APP_SECRET ||
+      process.env.FEISHU_APP_SECRET ||
+      process.env.JIUWENSWARM_FEISHU_APP_SECRET ||
+      ""
+  ).trim();
+  if (!appId || !appSecret) return null;
+  const rawDomain = String(process.env.LINGGAN_FEISHU_DOMAIN || process.env.FEISHU_DOMAIN || "feishu").trim();
+  return {
+    appId,
+    appSecret,
+    domain: rawDomain === "lark" ? "lark" : "feishu",
+    boundAt: new Date(0).toISOString(),
+  };
+}
+
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -462,6 +485,39 @@ export async function sendFeishuMessage(adoptId: string, text: string): Promise<
     return { ok: true };
   } catch (error: any) {
     return { ok: false, error: error?.message || "feishu send failed" };
+  }
+}
+
+export async function sendFeishuBridgeMessage(adoptId: string, text: string): Promise<{ ok: boolean; error?: string }> {
+  const binding = loadBridgeBinding(adoptId);
+  if (!binding?.openId) {
+    return { ok: false, error: "feishu bridge not bound" };
+  }
+  const account = loadBridgeSenderAccount();
+  if (!account?.appId || !account?.appSecret) {
+    return { ok: false, error: "feishu bridge app not configured" };
+  }
+  try {
+    const token = await getTenantAccessToken(account);
+    const response = await fetchWithTimeout(`${apiBaseUrl(account.domain)}/im/v1/messages?receive_id_type=open_id`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        receive_id: binding.openId,
+        msg_type: "text",
+        content: JSON.stringify({ text }),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (data?.code !== 0) {
+      return { ok: false, error: data?.msg || `Feishu bridge send failed with HTTP ${response.status}` };
+    }
+    return { ok: true };
+  } catch (error: any) {
+    return { ok: false, error: error?.message || "feishu bridge send failed" };
   }
 }
 

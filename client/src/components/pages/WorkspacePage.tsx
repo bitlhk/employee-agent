@@ -51,14 +51,6 @@ async function readResponse(r: Response): Promise<{ data: any; errorText: string
   return { data: null, errorText: `${r.status} ${preview}` };
 }
 
-function formatSize(bytes?: number): string {
-  if (bytes === undefined || bytes === null) return "-";
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)}GB`;
-}
-
 function formatTime(iso?: string): string {
   if (!iso) return "";
   try {
@@ -247,15 +239,43 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
     return parts.map((seg, i) => ({ name: seg, path: parts.slice(0, i + 1).join("/") }));
   }, [currentPath]);
 
+  const crumbBar = (
+    <div className="workspace-crumb-bar">
+      {currentPath ? (
+        <button
+          type="button"
+          onClick={() => setCurrentPath("")}
+          className="lingxia-soft-link lingxia-soft-link--accent"
+        >
+          根目录
+        </button>
+      ) : (
+        <span className="workspace-crumb-current">根目录</span>
+      )}
+      {crumbs.map((c) => (
+        <span key={c.path} className="inline-flex items-center gap-1">
+          <ChevronRight className="w-3 h-3 text-muted-foreground" />
+          {c.path === currentPath ? (
+            <span className="workspace-crumb-current">{c.name}</span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCurrentPath(c.path)}
+              className="lingxia-soft-link"
+            >
+              {c.name}
+            </button>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+
   return (
     <PageContainer title="工作空间">
       <div className="ea-data-page workspace-data-page">
       <div className="ea-data-toolbar workspace-data-toolbar">
         <div className="ea-data-toolbar__actions">
-        <button type="button" onClick={load} disabled={loading} className="ea-data-btn ea-data-btn--ghost">
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          刷新
-        </button>
         {caps?.supportsUpload && (
           <label className="inline-flex">
             <input type="file" className="hidden" onChange={handleFilePick} disabled={uploading} />
@@ -265,36 +285,15 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
             </span>
           </label>
         )}
+        <button type="button" onClick={load} disabled={loading} className="ea-data-btn ea-data-btn--ghost">
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          刷新
+        </button>
         </div>
       </div>
       {uploadError && (
         <div className="mb-3 px-3 py-2 text-xs rounded-md" style={{ background: "#fef2f2", color: "#ef4444", border: "1px solid #fecaca" }}>
           上传失败: {uploadError}
-        </div>
-      )}
-
-      {/* 面包屑导航 */}
-      {(currentPath || files.length > 0) && (
-        <div className="mb-2 text-xs flex items-center gap-1 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setCurrentPath("")}
-            className={`px-1.5 py-0.5 lingxia-soft-link ${currentPath ? "lingxia-soft-link--accent" : ""}`}
-          >
-            根目录
-          </button>
-          {crumbs.map((c) => (
-            <span key={c.path} className="flex items-center gap-1">
-              <ChevronRight className="w-3 h-3 text-muted-foreground" />
-              <button
-                type="button"
-                onClick={() => setCurrentPath(c.path)}
-                className="px-1.5 py-0.5 lingxia-soft-link font-mono"
-              >
-                {c.name}
-              </button>
-            </span>
-          ))}
         </div>
       )}
 
@@ -305,7 +304,8 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
       )}
 
       {sorted.length === 0 && !loading && (
-        <div className="ea-data-card">
+        <div className="ea-data-card workspace-file-list">
+        {crumbBar}
         <div className="ea-data-empty">
           <Folder className="w-12 h-12 mx-auto mb-2 opacity-30" />
           <div>工作空间还是空的</div>
@@ -315,10 +315,10 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
       )}
 
       {sorted.length > 0 && (
-        <div className="ea-data-card workspace-file-list" style={{ "--ea-data-columns": "minmax(240px, 1fr) 100px 120px 120px minmax(220px, 0.6fr)" } as CSSProperties}>
+        <div className="ea-data-card workspace-file-list" style={{ "--ea-data-columns": "minmax(240px, 1fr) 140px 120px minmax(200px, 0.5fr)" } as CSSProperties}>
+          {crumbBar}
           <div className="ea-data-header">
             <span>名称</span>
-            <span className="text-right">大小</span>
             <span>修改时间</span>
             <span>来源</span>
             <span className="text-right">操作</span>
@@ -330,11 +330,9 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
                   onClick={() => f.type === "directory" && setCurrentPath(f.path)}
                 >
                   <div className="ea-data-title">
-                      {f.type === "directory" ? <Folder className="w-4 h-4 workspace-folder-icon" /> : <FileText className="w-4 h-4 text-gray-500" />}
-                      <span className="font-mono text-xs">{f.name}</span>
-                      {f.type === "directory" && <ChevronRight className="w-3 h-3 text-muted-foreground" />}
+                      {f.type === "directory" ? <Folder className="w-[18px] h-[18px] workspace-folder-icon" /> : <FileText className="w-[18px] h-[18px] text-gray-500" />}
+                      <span className="workspace-file-name">{f.name}</span>
                   </div>
-                  <div className="ea-data-cell justify-end ea-data-muted">{f.type === "directory" ? "-" : formatSize(f.size)}</div>
                   <div className="ea-data-cell ea-data-muted">{formatTime(f.modifiedAt)}</div>
                   <div className="ea-data-cell ea-data-muted">
                     <span className="workspace-source-pill">{fileSourceHint(f)}</span>

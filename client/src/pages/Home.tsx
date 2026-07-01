@@ -68,6 +68,13 @@ function toolCallsSignature(toolCalls?: ToolCallEntry[]) {
     .join("|");
 }
 
+function normalizeIncomingToolName(chunk: any): string {
+  const fn = chunk?.function && typeof chunk.function === "object" ? chunk.function : {};
+  const raw = chunk?.name ?? chunk?.toolName ?? chunk?.tool_name ?? chunk?.tool ?? fn?.name;
+  const value = String(raw || "").trim();
+  return value || "tool";
+}
+
 // 2026-04-28 批次 2 A1：lingxiaMsgs 加稳定 id，恢复时按 id 替换不按 findLastIndex
 // 用于 SSE 截断 recover 时精确匹配目标消息——用户在 recover 期间发新消息也不串
 const makeLxMsgId = () => `lx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2373,7 +2380,7 @@ export default function Home() {
                 return;
               }
               if (chunk._event === "tool_call") {
-                const toolName = String(chunk.name || "unknown");
+                const toolName = normalizeIncomingToolName(chunk);
                 const toolTs = Date.now();
                 const isGateway = Boolean(chunk._gateway);
                 const executor = chunk.executor as ToolCallEntry["executor"] | undefined;
@@ -2690,7 +2697,7 @@ export default function Home() {
               continue;
             }
             if (currentEvent === "tool_call") {
-              const toolName = String(chunk.name || "unknown");
+              const toolName = normalizeIncomingToolName(chunk);
               const toolTs = Date.now();
               const isGateway = Boolean(chunk._gateway);
               const executor = chunk.executor as ToolCallEntry["executor"] | undefined;

@@ -3,11 +3,13 @@
  * 
  * 职责：当 coop 事件发生时，把通知推送到：
  *   (1) 被通知人的微信（通过 claw-weixin-bridge）
- *   (2) 未来：浏览器 toast / 左侧红点（WS 广播）
+ *   (2) 被通知人的飞书（通过 JiuwenSwarm 飞书 Bot 双向绑定）
+ *   (3) 未来：浏览器 toast / 左侧红点（WS 广播）
  *
- * 当前实现：只做微信推送；WS 广播交给 Step 4 实时化
+ * 当前实现：微信 + 飞书私聊推送；WS 广播交给 Step 4 实时化
  */
 import { sendMessageToWeixin } from "./claw-weixin-bridge";
+import { sendFeishuBridgeMessage } from "./claw-feishu";
 import { getDb } from "../db/connection";
 import { eq, and, inArray, desc } from "drizzle-orm";
 import { clawAdoptions, users } from "../../drizzle/schema";
@@ -28,6 +30,19 @@ async function getActiveAdoptIdByUserId(userId: number): Promise<string | null> 
     .orderBy(desc(clawAdoptions.id))
     .limit(1);
   return rows[0]?.adoptId || null;
+}
+
+async function sendBestEffortFeishu(adoptId: string, text: string, context: string): Promise<void> {
+  try {
+    const result = await sendFeishuBridgeMessage(adoptId, text);
+    if (!result.ok) {
+      console.log(`[coop-notify] feishu skipped (${context}, adopt ${adoptId}): ${result.error || "unknown"}`);
+      return;
+    }
+    console.log(`[coop-notify] feishu sent (${context}, adopt ${adoptId})`);
+  } catch (e) {
+    console.error(`[coop-notify] feishu send failed (${context}, adopt ${adoptId}):`, e);
+  }
 }
 
 export type CoopNotifyEvent =
@@ -54,6 +69,15 @@ export type CoopNotifyEvent =
       title: string;
     }
   | {
+      type: "group_message";
+      sessionId: string;
+      actorUserId: number;
+      actorName: string;
+      title: string;
+      text: string;
+      recipientUserIds: number[];
+    }
+  | {
       type: "session_published";
       sessionId: string;
       title: string;
@@ -67,10 +91,10 @@ export async function notifyCoopEvent(ev: CoopNotifyEvent): Promise<void> {
   try {
     switch (ev.type) {
       case "session_created": {
-        // 给每个被邀请人发微信
+        // 给每个被邀请人发微信/飞书。通知是 best-effort，不影响协作创建。
         const sessionUrl = `${PUBLIC_BASE_URL}/coop/${ev.sessionId}`;
         for (const m of ev.members) {
-          const targetAdoptId = await getActiveAdoptIdByUserId(m.userId);
+          const targetAdoptId = m.adoptId || await getActiveAdoptIdByUserId(m.userId);
           if (!targetAdoptId) {
             console.log(`[coop-notify] user ${m.userId} has no active adoption, skip weixin`);
             continue;
@@ -82,6 +106,7 @@ export async function notifyCoopEvent(ev: CoopNotifyEvent): Promise<void> {
           } catch (e) {
             console.error(`[coop-notify] weixin send failed for user ${m.userId}:`, e);
           }
+          await sendBestEffortFeishu(targetAdoptId, msg, `session_created:${ev.sessionId}`);
         }
         break;
       }
@@ -104,6 +129,20 @@ export async function notifyCoopEvent(ev: CoopNotifyEvent): Promise<void> {
         } catch (e) {
           console.error(`[coop-notify] weixin send failed:`, e);
         }
+        await sendBestEffortFeishu(targetAdoptId, msg, `result_submitted:${ev.sessionId}`);
+        break;
+      }
+
+      case "group_message": {
+        const sessionUrl = `${PUBLIC_BASE_URL}/coop/${ev.sessionId}`;
+        const snippet = ev.text.trim().replace(/\s+/g, " ").slice(0, 180);
+        const msg = `【协作消息】${ev.actorName} 在「${ev.title}」发来新消息\n${snippet}\n打开协作查看：\n${sessionUrl}`;
+        const uniqueUserIds = Array.from(new Set(ev.recipientUserIds.filter((uid) => uid && uid !== ev.actorUserId)));
+        for (const uid of uniqueUserIds) {
+          const targetAdoptId = await getActiveAdoptIdByUserId(uid);
+          if (!targetAdoptId) continue;
+          await sendBestEffortFeishu(targetAdoptId, msg, `group_message:${ev.sessionId}`);
+        }
         break;
       }
 
@@ -118,6 +157,7 @@ export async function notifyCoopEvent(ev: CoopNotifyEvent): Promise<void> {
           } catch (e) {
             console.error(`[coop-notify] weixin send failed for user ${uid}:`, e);
           }
+          await sendBestEffortFeishu(targetAdoptId, msg, `session_published:${ev.sessionId}`);
         }
         break;
       }

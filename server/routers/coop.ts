@@ -392,6 +392,19 @@ export const coopRouter = router({
         actorUserId: ctx.user!.id,
         payload: { text: input.text.trim(), attachments: input.attachments || [] },
       });
+      const recipientUserIds = [
+        Number((ses.creator as any)?.userId || 0),
+        ...((ses.members || []) as any[]).map((m) => Number(m.targetUserId || 0)),
+      ].filter((uid) => uid > 0);
+      notifyCoopEvent({
+        type: "group_message",
+        sessionId: input.sessionId,
+        actorUserId: ctx.user!.id,
+        actorName: ctx.user!.name || ctx.user!.email || "协作成员",
+        title: String((ses.session as any).title || "协作任务"),
+        text: input.text.trim(),
+        recipientUserIds,
+      }).catch((e) => console.error("[coop] group message notify failed:", e));
       const currentTitle = String((ses.session as any).title || "").trim();
       if (!currentTitle || currentTitle === "未命名协作") {
         const { getDb } = await import("../db");

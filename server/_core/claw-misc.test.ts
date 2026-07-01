@@ -106,4 +106,58 @@ describe("claw misc admin routes", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("hydrates JiuwenSwarm tool calls from embedded assistant history", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "ea-jiuwen-tool-history-"));
+    try {
+      const { extractJiuwenChatMessages } = await import("./claw-misc");
+      const historyFile = path.join(root, "history.json");
+      writeFileSync(historyFile, [
+        JSON.stringify({ id: "u1", role: "user", request_id: "r1", timestamp: 1779000000, content: "获取我的客户信息" }),
+        JSON.stringify({
+          id: "a1",
+          role: "assistant",
+          request_id: "r1",
+          timestamp: 1779000001,
+          content: "先加载工具",
+          tool_calls: [{
+            id: "call-load",
+            type: "function",
+            function: {
+              arguments: JSON.stringify({
+                tool_names: [
+                  "mcp_wealth_assistant_customer_wealth_assistant_context_probe",
+                  "mcp_wealth_assistant_customer_wealth_assistant_customer_list",
+                ],
+              }),
+            },
+          }],
+        }),
+        JSON.stringify({
+          id: "a2",
+          role: "assistant",
+          request_id: "r1",
+          timestamp: 1779000002,
+          content: "查询客户",
+          tool_calls: [{
+            id: "call-customers",
+            type: "function",
+            function: {
+              name: "mcp_wealth_assistant_customer_wealth_assistant_customer_list",
+              arguments: "{}",
+            },
+          }],
+        }),
+      ].join("\n"), "utf8");
+
+      const messages = extractJiuwenChatMessages(historyFile, 20);
+      const assistant = messages.find((message) => message.role === "assistant" && message.toolCalls?.length);
+      expect(assistant?.toolCalls?.map((tool) => tool.name)).toEqual([
+        "load_tools",
+        "mcp_wealth_assistant_customer_wealth_assistant_customer_list",
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

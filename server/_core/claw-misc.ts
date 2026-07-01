@@ -484,19 +484,81 @@ function compactJiuwenToolPayload(value: unknown, max = 6000): string {
   return text.length > max ? `${text.slice(0, max)}\n...` : text;
 }
 
+function firstNonEmptyString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function jiuwenToolNameFromPayload(payload: any): string {
+  const nested = payload && typeof payload === "object" ? payload : {};
+  const fn = nested?.function && typeof nested.function === "object" ? nested.function : {};
+  const direct = firstNonEmptyString(nested?.name, nested?.toolName, nested?.tool_name, nested?.tool, fn?.name);
+  if (direct) return direct;
+
+  const args = nested?.arguments ?? nested?.args ?? fn?.arguments;
+  if (typeof args === "string") {
+    if (args.includes('"tool_names"') || args.includes("'tool_names'")) return "load_tools";
+    return "";
+  }
+  if (args && typeof args === "object") {
+    if (Array.isArray((args as any).tool_names) || Array.isArray((args as any).toolNames)) return "load_tools";
+  }
+  return "";
+}
+
+function jiuwenToolCallIdFromPayload(payload: any, fallback = ""): string {
+  const nested = payload && typeof payload === "object" ? payload : {};
+  return firstNonEmptyString(nested?.tool_call_id, nested?.toolCallId, nested?.id, nested?.call_id, fallback);
+}
+
+function jiuwenToolArgumentsFromPayload(payload: any): unknown {
+  const nested = payload && typeof payload === "object" ? payload : {};
+  const fn = nested?.function && typeof nested.function === "object" ? nested.function : {};
+  return nested?.arguments ?? nested?.args ?? fn?.arguments ?? {};
+}
+
+function jiuwenToolCallsFromAssistantEvent(event: any, timestamp: number): ChatHistoryToolCall[] {
+  const rawCalls = Array.isArray(event?.tool_calls)
+    ? event.tool_calls
+    : Array.isArray(event?.message?.tool_calls)
+      ? event.message.tool_calls
+      : Array.isArray(event?.toolCalls)
+        ? event.toolCalls
+        : [];
+  const calls: ChatHistoryToolCall[] = [];
+  for (const raw of rawCalls) {
+    if (!raw || typeof raw !== "object") continue;
+    const nested = raw?.tool_call && typeof raw.tool_call === "object" ? raw.tool_call : raw;
+    const name = jiuwenToolNameFromPayload(nested);
+    if (!name) continue;
+    calls.push({
+      id: jiuwenToolCallIdFromPayload(nested, `jiuwen-tool-${timestamp || Date.now()}-${calls.length}`),
+      name,
+      arguments: compactJiuwenToolPayload(jiuwenToolArgumentsFromPayload(nested)),
+      status: "running",
+      ts: timestamp || Date.now(),
+      executor: "jiuwenswarm",
+    });
+  }
+  return calls;
+}
+
 function jiuwenToolCallFromEvent(event: any, timestamp: number, fallbackIndex: number): ChatHistoryToolCall | null {
   const eventType = String(event?.event_type || event?.type || "").toLowerCase();
   if (eventType !== "chat.tool_call") return null;
   const nested = event?.tool_call && typeof event.tool_call === "object" ? event.tool_call : event;
   const fn = nested?.function && typeof nested.function === "object" ? nested.function : {};
-  const name = String(nested?.name || nested?.toolName || nested?.tool_name || nested?.tool || fn?.name || "").trim();
+  const name = jiuwenToolNameFromPayload({ ...nested, function: fn });
   if (!name) return null;
-  const id = String(nested?.tool_call_id || nested?.toolCallId || nested?.id || nested?.call_id || event?.tool_call_id || "").trim()
+  const id = jiuwenToolCallIdFromPayload({ ...nested, tool_call_id: nested?.tool_call_id || event?.tool_call_id })
     || `jiuwen-tool-${timestamp || Date.now()}-${fallbackIndex}`;
   return {
     id,
     name,
-    arguments: compactJiuwenToolPayload(nested?.arguments ?? nested?.args ?? fn?.arguments ?? event?.arguments ?? event?.args ?? {}),
+    arguments: compactJiuwenToolPayload(jiuwenToolArgumentsFromPayload({ ...nested, arguments: nested?.arguments ?? event?.arguments, args: nested?.args ?? event?.args, function: fn })),
     status: "running",
     ts: timestamp || Date.now(),
     executor: "jiuwenswarm",
@@ -601,6 +663,11 @@ export function extractJiuwenChatMessages(historyFile: string, maxMessages = 200
       existing.toolCalls.push(toolCall);
       if (!existing.timestamp && timestamp) existing.timestamp = timestamp;
       continue;
+    }
+    const embeddedToolCalls = jiuwenToolCallsFromAssistantEvent(event, timestamp);
+    if (embeddedToolCalls.length > 0) {
+      existing.toolCalls.push(...embeddedToolCalls);
+      if (!existing.timestamp && timestamp) existing.timestamp = timestamp;
     }
     if (eventType === "chat.tool_result") {
       existing.toolCalls = applyJiuwenToolResultToCalls(existing.toolCalls, event, timestamp);

@@ -58,12 +58,21 @@ function normalizeFinishReason(value: unknown): ChatRuntimeFinishReason | undefi
     : undefined;
 }
 
+function normalizeToolName(payload: JsonRecord): string | undefined {
+  const fn = isRecord(payload.function) ? payload.function : undefined;
+  return asString(payload.name)
+    ?? asString(payload.toolName)
+    ?? asString(payload.tool_name)
+    ?? asString(payload.tool)
+    ?? (fn ? asString(fn.name) : undefined);
+}
+
 function normalizeToolStart(payload: JsonRecord): ChatEvent {
   return {
     type: "tool_call",
     phase: "start",
     toolCallId: String(payload.id ?? payload.tool_call_id ?? ""),
-    name: asString(payload.name),
+    name: normalizeToolName(payload),
     args: typeof payload.arguments === "string" ? payload.arguments : JSON.stringify(payload.arguments ?? {}),
     gateway: Boolean(payload._gateway),
   };
