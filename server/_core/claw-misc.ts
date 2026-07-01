@@ -418,7 +418,7 @@ function isListableJiuwenWebSession(sessionId: string, adoptId: string): boolean
   const value = String(sessionId || "").trim();
   if (!value.startsWith(`sess_${adoptId}_web_`)) return false;
   if (value.includes("_conv_linggan_channel_")) return false;
-  return !/(?:^|[_-])(smoke|debug|test)(?:[_-]|$)/i.test(value);
+  return !/(?:^|[_-])(smoke|debug|test|bench|bash_approval)(?:[_-]|$)/i.test(value);
 }
 
 function jiuwenHistoryFileForSession(sessionsDir: string, sessionId: string): string | null {

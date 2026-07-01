@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { CheckCircle2, MessageCircle, ShieldOff, Unlink } from "lucide-react";
 import { PageContainer } from "@/components/console/PageContainer";
-import { useChannelBinding } from "@/hooks/useChannelBinding";
 
 type ChannelKey = "feishu" | "dingtalk" | "wechat" | "wecom";
 
@@ -13,7 +12,7 @@ const CHANNELS: Array<{
   iconSrc?: string;
   status: "ready" | "jiuwen-ready" | "unsupported";
 }> = [
-  { key: "feishu", label: "飞书", desc: "JiuwenSwarm 支持，已接入扫码授权和任务推送", iconSrc: "/channel-icons/feishu.webp", status: "ready" },
+  { key: "feishu", label: "飞书", desc: "通过灵感智能体应用绑定当前员工智能体", iconSrc: "/channel-icons/feishu.webp", status: "ready" },
   { key: "dingtalk", label: "钉钉", desc: "JiuwenSwarm 支持，EA 绑定接入中", iconSrc: "/channel-icons/dingtalk.png", status: "jiuwen-ready" },
   { key: "wechat", label: "微信", desc: "等待 JiuwenSwarm 频道支持后适配", iconSrc: "/channel-icons/wechat.png", status: "unsupported" },
   { key: "wecom", label: "企业微信", desc: "等待 JiuwenSwarm 频道支持后适配", iconSrc: "/channel-icons/wecom.webp", status: "unsupported" },
@@ -21,7 +20,25 @@ const CHANNELS: Array<{
 
 export function ChannelsPage({ adoptId }: { adoptId?: string }) {
   const [active, setActive] = useState<ChannelKey>("feishu");
-  const feishu = useChannelBinding("feishu", adoptId);
+  const [feishuBridgeBound, setFeishuBridgeBound] = useState(false);
+
+  const refreshFeishuBridge = async () => {
+    if (!adoptId) {
+      setFeishuBridgeBound(false);
+      return;
+    }
+    try {
+      const r = await fetch(`/api/claw/feishu/bidirectional/status?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" });
+      const d = await r.json().catch(() => ({}));
+      setFeishuBridgeBound(!!d.bound);
+    } catch {
+      setFeishuBridgeBound(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshFeishuBridge();
+  }, [adoptId]);
 
   return (
     <PageContainer title="频道" desc="管理员工智能体与你的触达方式。日常对话、协作提醒和定时任务都可以复用这些频道。">
@@ -29,8 +46,7 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
         <aside className="settings-card channel-list" aria-label="频道列表">
           {CHANNELS.map((channel) => {
             const activeChannel = active === channel.key;
-            const binding = channel.key === "feishu" ? feishu : null;
-            const bound = binding?.status === "bound";
+            const bound = channel.key === "feishu" ? feishuBridgeBound : false;
             return (
               <button
                 key={channel.key}
@@ -60,7 +76,7 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
 
         <section className="settings-card channel-detail">
           {active === "feishu" ? (
-            <FeishuBridgePanel adoptId={adoptId} notificationBound={feishu.status === "bound"} notificationTarget={feishu.targetLabel || ""} />
+            <FeishuBridgePanel adoptId={adoptId} onStatusChange={setFeishuBridgeBound} />
           ) : active === "dingtalk" ? (
             <ComingSoonDetail
               icon={<MessageCircle size={22} />}
@@ -80,12 +96,10 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
 
 function FeishuBridgePanel({
   adoptId,
-  notificationBound,
-  notificationTarget,
+  onStatusChange,
 }: {
   adoptId?: string;
-  notificationBound: boolean;
-  notificationTarget: string;
+  onStatusChange?: (bound: boolean) => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [bound, setBound] = useState(false);
@@ -96,10 +110,17 @@ function FeishuBridgePanel({
 
   const refresh = async () => {
     if (!adoptId) return;
-    const r = await fetch(`/api/claw/feishu/bidirectional/status?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" });
-    const d = await r.json().catch(() => ({}));
-    setBound(!!d.bound);
-    setTargetLabel(String(d.targetLabel || ""));
+    try {
+      const r = await fetch(`/api/claw/feishu/bidirectional/status?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" });
+      const d = await r.json().catch(() => ({}));
+      setBound(!!d.bound);
+      onStatusChange?.(!!d.bound);
+      setTargetLabel(String(d.targetLabel || ""));
+    } catch {
+      setBound(false);
+      onStatusChange?.(false);
+      setTargetLabel("");
+    }
   };
 
   useEffect(() => {
@@ -128,6 +149,7 @@ function FeishuBridgePanel({
       setInstruction(String(d.instruction || ""));
       setExpiresAt(String(d.expiresAt || ""));
       setBound(false);
+      onStatusChange?.(false);
     } finally {
       setLoading(false);
     }
@@ -144,6 +166,7 @@ function FeishuBridgePanel({
         body: JSON.stringify({ adoptId }),
       });
       setBound(false);
+      onStatusChange?.(false);
       setTargetLabel("");
       setCode("");
       setInstruction("");
@@ -160,23 +183,17 @@ function FeishuBridgePanel({
       </div>
       <h2 className="channel-detail__title">飞书绑定</h2>
       <p className="channel-detail__desc">
-        通过 JiuwenSwarm 飞书 Bot 接收消息，并绑定到当前员工智能体。任务通知会复用这个频道能力。
+        将飞书账号绑定到当前员工智能体后，可以在飞书里直接对话，后续也可复用到定时任务和协作提醒。
       </p>
       <div className="channel-bullets">
-        <span><CheckCircle2 size={14} /> {bound ? "已绑定飞书双向交互" : "支持飞书 Bot 双向交互"}</span>
-        <span><CheckCircle2 size={14} /> 适合定时任务和协作提醒</span>
-        <span><CheckCircle2 size={14} /> 微信和企业微信等待 JiuwenSwarm 支持后适配</span>
+        <span><CheckCircle2 size={14} /> 联系灵感大王加入企业组织</span>
+        <span><CheckCircle2 size={14} /> 在飞书中添加灵感智能体应用</span>
+        <span><CheckCircle2 size={14} /> 点击按钮获取绑定码，并在智能体私聊中输入完成绑定</span>
       </div>
-      {notificationBound ? (
-        <div className="channel-meta">
-          <span>通知投递</span>
-          <strong>{notificationTarget || "已连接"}</strong>
-        </div>
-      ) : null}
       {bound ? (
         <div className="channel-meta">
-          <span>飞书身份</span>
-          <strong>{targetLabel || "已绑定"}</strong>
+          <span>绑定状态</span>
+          <strong>{targetLabel ? `已绑定 ${targetLabel}` : "已绑定飞书双向交互"}</strong>
         </div>
       ) : null}
       {code && !bound ? (
@@ -193,7 +210,7 @@ function FeishuBridgePanel({
           </button>
         ) : (
           <button className="page-primary-action" onClick={begin} disabled={loading || !adoptId}>
-            <MessageCircle size={14} /> {loading ? "生成中..." : "生成绑定码"}
+            <MessageCircle size={14} /> {loading ? "生成中..." : "获取绑定码"}
           </button>
         )}
         {!bound && code ? (

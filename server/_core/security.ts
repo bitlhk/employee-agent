@@ -57,6 +57,9 @@ export const generalLimiter = rateLimit({
   skip: (req: Request) => {
     // 静态资源和健康检查不限流
     if (req.path.startsWith("/assets/") || req.path === "/health") return true;
+    // Jiuwen/EA internal callbacks use their own bearer token and can be called
+    // by gateway fan-out; do not let browser-facing API quota block them.
+    if (req.path.startsWith("/api/internal/jiuwen/")) return true;
     const trusted = (process.env.CLAW_CHAT_RATELIMIT_TRUSTED_IPS || "").split(",").map(s => s.trim()).filter(Boolean);
     if (trusted.length > 0) {
       const ip = getClientIp(req);
