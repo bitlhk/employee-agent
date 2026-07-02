@@ -54,7 +54,7 @@ import {
   provisionEmployeeAgentInstance,
   writeClawExecAudit,
 } from "./helpers";
-import { hermesProfileSkillsDir, isJiuwenClawAdoptId, resolveRuntimeAgentId } from "../_core/helpers";
+import { isJiuwenClawAdoptId, resolveRuntimeAgentId } from "../_core/helpers";
 import { getAuditBaselineHealth } from "../_core/audit-health";
 import { auditActor, auditErrorMetadata, auditRequest, recordAuditBestEffort, recordAuditRequired } from "../_core/audit-events";
 import { onboardBuiltinSkillsForAdopt } from "../_core/skills/skill-onboarding";
@@ -73,10 +73,12 @@ import { resolveRoleRuntimeProvisionPlan } from "../_core/role-runtime-adapter";
 import { getRoleRuntimeAdapter, isJiuwenSwarmProvisionEnabled } from "./role-runtime-adapters";
 import { listConfiguredMcpServers, listMcpToolGroups } from "../_core/claw-skills";
 
-const resolveClawRuntime = (adoptId: unknown): "openclaw" | "hermes" | "jiuwenclaw" => {
+type ResolvedClawRuntime = "openclaw" | "jiuwenclaw" | "hermes_archived";
+
+const resolveClawRuntime = (adoptId: unknown): ResolvedClawRuntime => {
   const id = String(adoptId || "");
   if (id.startsWith("lgj-")) return "jiuwenclaw";
-  if (id.startsWith("lgh-")) return "hermes";
+  if (id.startsWith("lgh-")) return "hermes_archived";
   return "openclaw";
 };
 
@@ -283,7 +285,7 @@ const getAvailableJiuwenModels = (): RuntimeModelOption[] => {
 const getAvailableModelsForRuntime = (adoptId?: unknown): RuntimeModelOption[] => {
   const runtime = resolveClawRuntime(adoptId);
   if (runtime === "jiuwenclaw") return getAvailableJiuwenModels();
-  if (runtime === "hermes") return [{ id: "hermes/default", name: "Hermes 默认模型", desc: "Hermes", isDefault: true }];
+  if (runtime === "hermes_archived") return [];
   return getAvailableClawModelsFromConfig();
 };
 
@@ -520,6 +522,12 @@ export const clawRouter = router({
       .input(z.object({ adoptId: z.string().min(1).max(64), modelId: z.string().min(1).max(120) }))
       .mutation(async ({ input, ctx }) => {
         const runtimeType = resolveClawRuntime(input.adoptId);
+        if (runtimeType === "hermes_archived") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Hermes runtime has been archived. Provision a JiuwenClaw agent instead.",
+          });
+        }
         const allowed = new Set(getAvailableModelsForRuntime(input.adoptId).map((m) => m.id));
         if (!allowed.has(input.modelId)) {
           throw new Error("不支持的模型");
@@ -958,10 +966,6 @@ export const clawRouter = router({
         };
       }),
 
-    // ── Hermes runtime 专属虾 provisioning（admin 手动发放） ──
-    // 灰度期给指定用户开一张 lgh-* 虾，跑本机 Hermes profile。
-    // 内部调 /root/linggan-platform/scripts/provision-hermes-claw.sh
-    // 脚本做：创 profile + 分配端口 + 启 systemd + INSERT claw_adoptions
     adminProvisionHermesClaw: adminProcedure
       .input(z.object({
         userId: z.number().int().positive(),
@@ -969,28 +973,7 @@ export const clawRouter = router({
         profileName: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
       }))
       .mutation(async ({ input }) => {
-        const { execFileSync } = await import("child_process");
-        const scriptPath = `${APP_ROOT}/scripts/provision-hermes-claw.sh`;
-        if (!existsSync(scriptPath)) {
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "provisioning script not found" });
-        }
-        try {
-          const out = execFileSync(
-            "bash",
-            [scriptPath, input.profileName, String(input.userId)],
-            { encoding: "utf8", timeout: 60_000 },
-          );
-          return {
-            ok: true,
-            adoptId: `lgh-${input.profileName}`,
-            log: out.slice(-2000),
-          };
-        } catch (err: any) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: `provisioning failed: ${String(err?.stdout || err?.stderr || err?.message || err).slice(0, 500)}`,
-          });
-        }
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Hermes runtime has been archived. Provision JiuwenClaw agents instead." });
       }),
 
     // ── 技能市场管理 ──
@@ -1508,12 +1491,10 @@ export const clawRouter = router({
     marketInstall: protectedProcedure
       .input(z.object({ marketId: z.number(), adoptId: z.string().min(1).max(64) }))
       .mutation(async ({ input, ctx }) => {
-        // Hermes runtime 虾（lgh-*）的技能由 Hermes 自动管理，不支持手动安装市场技能。
-        // 相关 cp 路径对 Hermes 无效，前端也应该隐藏安装按钮；这里做硬拦截防止走到后面制造脏目录。
         if (String(input.adoptId).startsWith("lgh-")) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "Hermes 虾的技能由 Hermes 自动管理，暂不支持手动安装市场技能。请在 OpenClaw 虾中使用此功能。",
+            message: "Hermes runtime has been archived.",
           });
         }
         const item = await getSkillMarketItem(input.marketId);
@@ -2200,56 +2181,8 @@ export const clawRouter = router({
           };
         }
 
-        // Hermes runtime (lgh-*) 走专属 skill provider，读 /root/.hermes/profiles/<name>/skills/
         if (String(input.adoptId).startsWith("lgh-")) {
-          const profileName = String(claw.agentId || "").replace(/^hermes:/, "").trim();
-          if (!profileName) {
-            return { shared: [], system: [], private: [], privateNotInstalled: [] };
-          }
-          const { listHermesSkills } = await import("../_core/hermes-skills");
-          const hermesSkills = listHermesSkills(profileName);
-          const hermesSkillsRoot = hermesProfileSkillsDir(profileName);
-          // 复用 SkillsPage 现有 UI 三栏（shared/system/private）：
-          //   bundled Hermes skills → system（"系统/平台技能"）
-          //   auto-generated skills → private（"我的技能"，强调"自进化"卖点）
-          const system = hermesSkills
-            .filter((s) => !s.meta?.createdByLLM)
-            .map((s) => ({
-              id: s.id,
-              label: s.name,
-              desc: s.description || "Hermes 自带技能",
-              emoji: s.emoji || "🧩",
-              source: "system" as const,
-              scope: "system" as const,
-              sourcePath: `${hermesSkillsRoot}/${s.id}`,
-              visible: true,
-              runnable: true,
-              reason: "",
-              active: true,
-              category: s.category,
-            }));
-          const privateSkills = hermesSkills
-            .filter((s) => s.meta?.createdByLLM)
-            .map((s) => ({
-              id: s.id,
-              label: `🌱 ${s.name}`,
-              desc: s.description || "Hermes 自动沉淀",
-              emoji: "🌱",
-              source: "private" as const,
-              scope: "private" as const,
-              sourcePath: `${hermesSkillsRoot}/${s.id}`,
-              visible: true,
-              runnable: true,
-              reason: "",
-              active: true,
-              category: s.category,
-            }));
-          return {
-            shared: [],
-            system,
-            private: privateSkills,
-            privateNotInstalled: [],
-          };
+          return { shared: [], system: [], private: [], privateNotInstalled: [], summary: { discovered: 0, runnable: 0 } };
         }
 
         const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";

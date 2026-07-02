@@ -272,33 +272,8 @@ export function registerChatStreamRoutes(app: express.Express) {
       return;
     }
 
-    // ── Hermes runtime branch (lgh-*) ──────────────────────────────
-    // Frozen compatibility path. New JiuwenClaw agents must use lgj-*.
     if (String(adoptId).startsWith("lgh-")) {
-      const msgStrForRuntime = String(message || "").slice(0, 4000);
-      if (msgStrForRuntime.trim().length === 0) {
-        res.status(400).json({ error: "message is empty" });
-        return;
-      }
-
-      const { forwardToHermes } = await import("./hermes-bridge");
-      await forwardToHermes(
-        {
-          adoptId: String(claw.adoptId),
-          agentId: String(claw.agentId),
-          userId: Number(claw.userId),
-          hermesPort: (claw as any).hermesPort ?? null,
-        },
-        msgStrForRuntime,
-        res,
-        {
-          // 不传 sessionId 让 bridge 用 makeSessionId(adoptId) 生成固定 session_id
-          // 这样跨请求 Hermes state.db 的 conversation history 累积
-          model,
-          req,  // 传 req 让 bridge 监听 close 事件做 upstream abort
-        },
-      );
-      return;
+      return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED", message: "Hermes runtime has been archived. Use a JiuwenClaw adoption instead." });
     }
 
     // 安全校验：agentId 必须符合预期格式，防止 shell 注入

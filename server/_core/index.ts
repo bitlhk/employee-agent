@@ -52,8 +52,6 @@ import { registerMiscRoutes } from "./claw-misc";
 import { registerAuditExportRoutes } from "./audit-export-routes";
 import { registerAuditIngestRoutes } from "./claw-audit-ingest";
 import { registerDesktopRoutes, registerDesktopWSProxy } from "./desktop";
-import { registerAgentClusterLabRoutes } from "../_routes/agent-cluster-lab";
-import { registerOfficeTaskWorkbenchRoutes, registerTaskWorkbenchLabRoutes } from "../_routes/task-workbench-lab";
 import { APP_ROOT } from "./helpers";
 import { getRoleSkillMcpBaseline, listAgentRoleTemplates } from "./role-templates";
 import { sdk } from "./sdk";
@@ -340,7 +338,6 @@ async function startServer() {
   registerFilesRoutes(app);
   registerOfficeExcelRoutes(app);
   registerOfficeVideoRoutes(app);
-  registerOfficeTaskWorkbenchRoutes(app);
   registerSandboxRoutes(app);
   registerManagedBrowserRoutes(app);
   registerChatStreamRoutes(app);
@@ -354,8 +351,6 @@ async function startServer() {
   registerAuditExportRoutes(app);
   registerAuditIngestRoutes(app);
   registerDesktopRoutes(app);
-  registerAgentClusterLabRoutes(app);
-  registerTaskWorkbenchLabRoutes(app);
 
   // ── 灵虾流式聊天 SSE 端点 ──
   // Session/auth helpers extracted to ./helpers.ts

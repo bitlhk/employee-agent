@@ -3,14 +3,12 @@
  *
  * 不做意图分类/维度映射，让 LLM 以 tool calling 模式自主决定：
  *   - passthrough: 交给主聊天 Agent（普通对话）
- *   - dispatch_task: 分发给业务 Agent
  *   - schedule/send/channels: 平台操作
  *
  * 短消息（< 15 字且无关键词）直接 passthrough，不调 LLM。
  */
 import type { StreamWriter } from "./stream-writer";
 import { getBoundChannelsForAdopt } from "./cron/channel-binding-query";
-import { internalApiUrl } from "./helpers";
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || "";
 const DEEPSEEK_BASE = "https://api.deepseek.com";
@@ -20,10 +18,10 @@ function isMainChatProjectManagerEnabled(): boolean {
 }
 
 // ── 短消息快速过滤（不调 LLM）──
-const DISPATCH_KEYWORDS = /定时|每天|每隔|提醒|发到|微信|飞书|企微|任务|渠道|技能|插件|工具包|帮我做个|帮我生成|信贷|债券|理财|保险|PPT|幻灯片|股票|分析|评估|报告|代码|协作/;
+const PLATFORM_KEYWORDS = /定时|每天|每隔|提醒|发到|微信|飞书|企微|任务|渠道|技能|插件|工具包|帮我做个|帮我生成|协作/;
 
 function needsProjectManager(msg: string): boolean {
-  if (msg.length < 15 && !DISPATCH_KEYWORDS.test(msg)) return false;
+  if (msg.length < 15 && !PLATFORM_KEYWORDS.test(msg)) return false;
   return true;
 }
 
@@ -75,29 +73,10 @@ function quickScheduleAction(message: string): { tool: string; args: any } | nul
   return null;
 }
 
-// ── 从 DB 加载可用 Agent 列表 ──
-async function loadAgentList(): Promise<{ id: string; name: string; description: string }[]> {
-  try {
-    const resp = await fetch(internalApiUrl("/api/claw/business-agents"), {
-      headers: { "X-Internal-Key": process.env.INTERNAL_API_KEY || "lingxia-bridge-2026" },
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!resp.ok) return [];
-    const data = await resp.json() as any;
-    return (data?.agents || []).map((a: any) => ({
-      id: a.id,
-      name: a.name,
-      description: (a.description || "").split("\\n\\n")[0].slice(0, 100),
-    }));
-  } catch { return []; }
-}
-
 // ── 项目经理 System Prompt ──
 function buildPMSystemPrompt(
-  agents: { id: string; name: string; description: string }[],
   boundChannels: string[],
 ): string {
-  const agentList = agents.map(a => `  - ${a.id}: ${a.name} — ${a.description}`).join("\n");
   const channelList = boundChannels.length > 0
     ? boundChannels.map((channel) => `  - ${channel}`).join("\n")
     : "  - 暂无已绑定频道";
@@ -119,31 +98,24 @@ function buildPMSystemPrompt(
 你有以下工具可用：
 
 1. passthrough — 普通对话、闲聊、简单问题、查天气、翻译等。交给主聊天 AI 处理。
-2. dispatch_task — 把任务分发给专业 Agent。可以同时分发多个（并行执行）。
-3. create_schedule — 创建定时任务。
-4. send_message — 立即发消息到某个渠道（飞书/钉钉）。
-5. list_schedules — 查看已有定时任务。
-6. delete_schedule — 删除定时任务。
-7. create_skill — 生成一个用户自有技能。仅当用户明确要求"做一个技能/插件/工具包"时使用。
-
-可用的专业 Agent：
-${agentList}
+2. create_schedule — 创建定时任务。
+3. send_message — 立即发消息到某个渠道（飞书/钉钉）。
+4. list_schedules — 查看已有定时任务。
+5. delete_schedule — 删除定时任务。
+6. create_skill — 生成一个用户自有技能。仅当用户明确要求"做一个技能/插件/工具包"时使用。
 
 当前用户已绑定的推送频道：
 ${channelList}
 
 决策原则：
 - 简单问题（聊天、翻译、查天气）→ passthrough
-- 需要专业能力的（信贷分析、债券、PPT、代码）→ dispatch_task 到对应 Agent
-- 跨领域问题 → 拆成多个 dispatch_task，每个发给不同 Agent
 - 定时/提醒/推送 → create_schedule 或 send_message。只能选择已绑定频道；${scheduleChannelRule}
 - 生成技能/插件/工具包 → create_skill。生成的技能必须包含 SKILL.md；不要生成 child_process、eval、rm -rf、curl/wget 外部地址、删除 workspace 外文件等危险行为。
+- 业务分析、风控评估、PPT、代码、股票等专业任务 → passthrough，由主聊天运行时和显式 Agent 工具处理。
 - 如果没有已绑定频道但用户要创建定时推送，仍可调用 create_schedule，执行器会提示用户先去「频道」绑定。
-- 不确定时 → passthrough（宁可不分发也不误分发）
+- 不确定时 → passthrough（宁可不做平台操作也不误操作）
 
-${scheduleGuide}
-
-dispatch_task 时，prompt 参数要把用户原始需求转述清楚，让目标 Agent 能独立理解和执行。`;
+${scheduleGuide}`;
 }
 
 // ── Tool 定义 ──
@@ -155,21 +127,6 @@ function buildPMTools() {
       name: "passthrough",
       description: "普通对话，交给主聊天 AI 处理",
       parameters: { type: "object", properties: {}, required: [] },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "dispatch_task",
-      description: "分发任务给专业 Agent。可多次调用实现并行分发。",
-      parameters: {
-        type: "object",
-        properties: {
-          agent_id: { type: "string", description: "目标 Agent ID" },
-          prompt: { type: "string", description: "发给该 Agent 的任务描述" },
-        },
-        required: ["agent_id", "prompt"],
-      },
     },
   },
   {
@@ -264,17 +221,15 @@ function buildPMTools() {
       },
     },
   },
-  ].filter((tool) => tool.function.name !== "dispatch_task");
+  ];
 }
 
 // ── 调用项目经理 LLM ──
 async function callProjectManager(
   message: string,
-  agents: { id: string; name: string; description: string }[],
   boundChannels: string[],
 ): Promise<{ tool: string; args: any }[]> {
-  const systemPrompt = buildPMSystemPrompt(agents, boundChannels)
-    + "\n\n【重要】主对话已关闭业务 Agent 自动派发。不要推荐或调用专业 Agent；如用户需要多个专业 Agent，请引导其进入「智能体集群」显式选择。";
+  const systemPrompt = buildPMSystemPrompt(boundChannels);
 
   const resp = await fetch(`${DEEPSEEK_BASE}/v1/chat/completions`, {
     method: "POST",
@@ -315,85 +270,6 @@ async function callProjectManager(
   return mapped;
 }
 
-// ── 执行 dispatch_task: 调业务 Agent ──
-async function dispatchToAgent(
-  adoptId: string,
-  agentId: string,
-  prompt: string,
-  agentName: string,
-  writer: StreamWriter,
-): Promise<string> {
-  const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
-
-  try {
-    const resp = await fetch(internalApiUrl("/api/claw/business-chat-stream"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Internal-Key": INTERNAL_KEY,
-        "Cookie": `lingxia_session=internal_dispatch_${adoptId}`,
-      },
-      body: JSON.stringify({
-        agentId,
-        message: prompt,
-      }),
-      signal: AbortSignal.timeout(120000),
-    });
-
-    if (!resp.ok || !resp.body) {
-      writer.writeText(`\n> ${agentName} 调用失败 (${resp.status})\n`);
-      return "";
-    }
-
-    // 读取 SSE 流，提取文本
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let result = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split("\n");
-      for (const line of lines) {
-        if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
-        try {
-          const d = JSON.parse(line.slice(6));
-          const content = d?.choices?.[0]?.delta?.content;
-          if (content) result += content;
-        } catch {}
-      }
-    }
-
-    return result;
-  } catch (e: any) {
-    writer.writeText(`\n> ${agentName} 调用超时或失败\n`);
-    return "";
-  }
-}
-
-// Main chat no longer auto-dispatches to business agents. Users should enter the
-// Agent Cluster/Directory explicitly when they want specialist agents.
-const FORCE_ROUTE_ADOPT_IDS = new Set<string>();
-const FORCE_ROUTE_MAP: Array<{ pattern: RegExp; agentId: string }> = [
-  // 顶部优先匹配，均走 Hermes（发 __hermes_tool 事件，被原生 ToolCallCard 渲染）
-  // EV 理财
-  { pattern: /电池|EV理财|新能源.*保险|新能源.*理财|电动车.*理财|动力电池|全损|残值|梯次利用/, agentId: "task-claim-ev" },
-  // 信贷风控
-  { pattern: /信贷|贷款|征信|风控|贷前调查|贷后管理|三表分析|担保物|五级分类|风险定价/, agentId: "task-credit-risk" },
-  // 债券投研
-  { pattern: /债券|国开债|国债|信用债|中债估值|收益率曲线|久期|违约预警/, agentId: "task-bond" },
-  // 深度求索 / 复杂任务拆解
-  { pattern: /深度分析|深度求索|拆解.*任务|复杂.*任务|帮我规划|深度思考/, agentId: "task-trace" },
-];
-
-function matchForceRoute(message: string): { agentId: string } | null {
-  for (const rule of FORCE_ROUTE_MAP) {
-    if (rule.pattern.test(message)) return { agentId: rule.agentId };
-  }
-  return null;
-}
-
 function isScheduleManagementQuery(message: string): boolean {
   return /(?:查看|列出|有哪些|有啥|任务列表|当前|我的|你有哪些|你有啥).*?(?:定时任务|任务|cron|schedule)/i.test(message) ||
     /(?:删除|取消|关闭|停止).*?(?:定时任务|任务|cron|schedule)/i.test(message);
@@ -421,16 +297,6 @@ export async function routeMessage(
     return false;
   }
 
-  // Phase 1 强制路由：特定 adoptId + 正则命中 → 跳过所有门禁直接 dispatch
-  let forcedActions: { tool: string; args: any }[] | null = null;
-  if (FORCE_ROUTE_ADOPT_IDS.has(adoptId)) {
-    const m = matchForceRoute(message);
-    if (m) {
-      console.log("[FORCE-ROUTE] adoptId=" + adoptId + " -> " + m.agentId);
-      forcedActions = [{ tool: "dispatch_task", args: { agent_id: m.agentId, prompt: message } }];
-    }
-  }
-
   const quickSchedule = quickScheduleAction(message);
   if (quickSchedule) {
     const { executePlatformIntent } = await import("./intent-executor");
@@ -444,55 +310,40 @@ export async function routeMessage(
     return false;
   }
 
-  if (!forcedActions) {
-    const hasSkillOp = /(?:创建|生成|做|写|开发).*(?:技能|插件|工具包)|(?:技能|插件|工具包).*(?:创建|生成|做|写|开发)/.test(message);
+  const hasSkillOp = /(?:创建|生成|做|写|开发).*(?:技能|插件|工具包)|(?:技能|插件|工具包).*(?:创建|生成|做|写|开发)/.test(message);
 
-    // 短消息快速通过，不调 LLM
-    if (!needsProjectManager(message)) return false;
+  // 短消息快速通过，不调 LLM
+  if (!needsProjectManager(message)) return false;
 
-    // L1 门禁：主对话只允许平台操作进入 PM（定时任务/渠道/技能生成）。
-    // 业务 Agent 自动推荐/自动派发已关闭，避免普通问题被误路由成 Agent 卡片。
-    const hasScheduleManagementOp = isScheduleManagementQuery(message);
-    const hasPlatformOp =
-      hasScheduleManagementOp ||
-      /(?:发|推|送)(?:到|给|去)?\s*(?:我的?)?\s*(?:微信|企微|飞书|webhook)/i.test(message) ||
-      /(?:删除|取消|关闭|停止).*任务|任务列表|哪些.*任务|通知渠道|哪些渠道/.test(message) ||
-      hasSkillOp;
-    if (!hasPlatformOp) {
-      console.log("[PM-L1] 未命中平台操作，走主聊天");
-      return false;
-    }
-    console.log("[PM-L1] 命中平台操作关键字，进 PM");
-    if (!DEEPSEEK_API_KEY) return false;
+  // L1 门禁：主对话只允许平台操作进入 PM（定时任务/渠道/技能生成）。
+  // 业务 Agent 自动推荐/自动派发已关闭，避免普通问题被误路由成 Agent 卡片。
+  const hasScheduleManagementOp = isScheduleManagementQuery(message);
+  const hasPlatformOp =
+    hasScheduleManagementOp ||
+    /(?:发|推|送)(?:到|给|去)?\s*(?:我的?)?\s*(?:微信|企微|飞书|webhook)/i.test(message) ||
+    /(?:删除|取消|关闭|停止).*任务|任务列表|哪些.*任务|通知渠道|哪些渠道/.test(message) ||
+    hasSkillOp;
+  if (!hasPlatformOp) {
+    console.log("[PM-L1] 未命中平台操作，走主聊天");
+    return false;
   }
+  console.log("[PM-L1] 命中平台操作关键字，进 PM");
+  if (!DEEPSEEK_API_KEY) return false;
 
-  // 主对话不再暴露业务 Agent 列表，避免 PM 误路由；Agent 使用改走显式智能体集群入口。
-  const agents: { id: string; name: string; description: string }[] = [];
-
-  // 调项目经理（强制路由时跳过）
+  // 调项目经理
   let actions: { tool: string; args: any }[];
-  if (forcedActions) {
-    actions = forcedActions;
-  } else {
-    try {
-      const boundChannels = (await getBoundChannelsForAdopt(adoptId)).map((channel) => channel.channelId);
-      actions = await callProjectManager(message, agents, boundChannels);
-    } catch (e: any) {
-      console.warn("[PM] project manager error:", e?.message?.slice(0, 80));
-      return false; // 失败 → passthrough
-    }
+  try {
+    const boundChannels = (await getBoundChannelsForAdopt(adoptId)).map((channel) => channel.channelId);
+    actions = await callProjectManager(message, boundChannels);
+  } catch (e: any) {
+    console.warn("[PM] project manager error:", e?.message?.slice(0, 80));
+    return false; // 失败 → passthrough
   }
 
   // 全是 passthrough → 交给主聊天
   if (actions.every(a => a.tool === "passthrough")) return false;
 
-  // 收集 dispatch_task 和平台操作
-  const requestedDispatches = actions.filter(a => a.tool === "dispatch_task");
-  if (requestedDispatches.length > 0) {
-    console.warn("[PM-DISPATCH-DISABLED] main chat ignored business-agent dispatch", requestedDispatches.map((a) => a.args?.agent_id || "unknown"));
-  }
-  const dispatches: typeof requestedDispatches = [];
-  const platformOps = actions.filter(a => a.tool !== "dispatch_task" && a.tool !== "passthrough");
+  const platformOps = actions.filter(a => a.tool !== "passthrough");
 
   // 创建定时任务交给 OpenClaw 原生工具判断和执行，employee-agent 只保留查看/删除等管理动作。
   // 这样“每天10点发吗？”这类业务查询不会被平台层误建成定时任务。
@@ -514,153 +365,6 @@ export async function routeMessage(
       };
       const intent = { type: typeMap[op.tool] || op.tool, ...op.args };
       await executePlatformIntent(adoptId, intent, writer);
-    }
-  }
-
-  // Agent dispatch with tool_call cards
-    // Agent Team dispatch with structured events
-  if (dispatches.length > 0) {
-    const agentMap = new Map(agents.map(a => [a.id, a.name]));
-
-    // Single-agent: inline toolCall conveys status, no placeholder text.
-    // Multi-agent: keep text placeholder (bubble then receives PM summary).
-    const singleAgent = dispatches.length === 1;
-    if (!singleAgent) {
-      writer.writeText("🤖 已拆解为 " + dispatches.length + " 个子任务，并行执行中...");
-    }
-
-    // Send agent_dispatch event (frontend creates AgentTaskCards)
-    const taskDefs = dispatches.map((d, i) => ({
-      id: "pm_" + i + "_" + Date.now(),
-      agentId: d.args.agent_id,
-      name: agentMap.get(d.args.agent_id) || d.args.agent_id,
-      prompt: (d.args.prompt || "").slice(0, 100),
-    }));
-    // Phase 1 新增：单 agent 场景发 bind_agent 事件，前端给气泡打 fromAgent 标签
-    if (singleAgent) {
-      writer.writeRaw({ _event: "bind_agent", agentId: taskDefs[0].agentId, agentName: taskDefs[0].name });
-    }
-    writer.writeRaw({ _event: "agent_dispatch", agents: taskDefs });
-
-    // Parallel execution with event forwarding
-    const startTime = Date.now();
-    const results = await Promise.all(
-      dispatches.map(async (d, i) => {
-        const taskId = taskDefs[i].id;
-        const name = agentMap.get(d.args.agent_id) || d.args.agent_id;
-
-        // Dispatch and read SSE, forwarding tool events
-        const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
-        let resolvedUserId = 0;
-        try {
-          const { getClawByAdoptId } = await import("../db/claw");
-          const claw = await getClawByAdoptId(adoptId);
-          resolvedUserId = claw?.userId || 0;
-        } catch {}
-
-        let result = "";
-        const taskStartMs = Date.now();
-        // FIFO stack for matching hermes tool.completed (no id) back to tool.started id
-        const toolIdStack: string[] = [];
-        try {
-          const resp = await fetch(internalApiUrl("/api/claw/business-chat-stream"), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Internal-Key": INTERNAL_KEY,
-              "X-Internal-User-Id": String(resolvedUserId || 0),
-            },
-            body: JSON.stringify({ agentId: d.args.agent_id, message: d.args.prompt }),
-            signal: AbortSignal.timeout(300000),
-          });
-
-          if (!resp.ok || !resp.body) {
-            writer.writeRaw({ _event: "agent_complete", taskId, result: "调用失败 (" + resp.status + ")", durationMs: Date.now() - taskStartMs });
-            return { name, result: "" };
-          }
-
-          const reader = resp.body.getReader();
-          const decoder = new TextDecoder();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split("\n");
-            for (const line of lines) {
-              if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
-              try {
-                const ev = JSON.parse(line.slice(6));
-                const content = ev?.choices?.[0]?.delta?.content;
-                if (content) {
-                  result += content;
-                  if (singleAgent) writer.writeText(content);
-                }
-                // Forward hermes tool events as openclaw-native tool_call / tool_result
-                // 使用 _gateway=false 触发可折叠的 ToolCallCard（与 openclaw tool use 视觉一致）
-                if (ev?.__hermes_tool === "started") {
-                  const toolId = String(ev.id || `agent_tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-                  toolIdStack.push(toolId);
-                  writer.writeRaw({
-                    _event: "tool_call",
-                    id: toolId,
-                    name: String(ev.name || "tool"),
-                    arguments: ev.preview ? JSON.stringify({ preview: String(ev.preview) }) : "",
-                  });
-                }
-                if (ev?.__hermes_tool === "completed") {
-                  const toolId = toolIdStack.shift() || "";
-                  writer.writeRaw({
-                    _event: "tool_result",
-                    tool_call_id: toolId,
-                    result: "",
-                    is_error: Boolean(ev.is_error),
-                    durationMs: Number(ev.durationMs || Math.round((ev.duration || 0) * 1000)),
-                  });
-                }
-              } catch {}
-            }
-          }
-        } catch (e) {
-          console.warn("[PM-DISPATCH] error:", (e as Error)?.message?.slice(0, 60));
-        }
-
-        // Send agent_complete. Single-agent: result already streamed into bubble, only send status+duration.
-        writer.writeRaw({ _event: "agent_complete", taskId, result: singleAgent ? "" : result.slice(0, 2000), durationMs: Date.now() - taskStartMs });
-        return { name, agentId: d.args.agent_id, result };
-      }),
-    );
-
-    // PM summary
-    if (results.length > 1 && results.some(r => r.result)) {
-      try {
-        const summaryPrompt = results
-          .filter(r => r.result)
-          .map(r => "[" + r.name + "]:\n" + r.result.slice(0, 1500))
-          .join("\n\n---\n\n");
-        const summaryResp = await fetch(DEEPSEEK_BASE + "/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + DEEPSEEK_API_KEY },
-          body: JSON.stringify({
-            model: "deepseek-chat",
-            messages: [
-              { role: "system", content: "你是综合分析师。基于多个专业智能体的分析结果，写一份简洁的综合方案。用中文，500字内。重点突出各智能体结论的关联和综合建议。" },
-              { role: "user", content: summaryPrompt },
-            ],
-            temperature: 0.3,
-            max_tokens: 800,
-          }),
-          signal: AbortSignal.timeout(15000),
-        });
-        if (summaryResp.ok) {
-          const sd = await summaryResp.json();
-          const st = sd?.choices?.[0]?.message?.content || "";
-          if (st) writer.writeText("\n\n📋 **综合方案**\n\n" + st);
-        }
-      } catch (e) {
-        console.warn("[PM] summary failed:", (e as Error)?.message?.slice(0, 60));
-      }
-    } else if (results.length === 1 && results[0].result) {
-      writer.writeText("\n\n" + results[0].result);
     }
   }
 

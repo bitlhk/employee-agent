@@ -53,10 +53,10 @@ function getRuntimeCardMeta(adoptId: unknown) {
   }
   if (id.startsWith("lgh-")) {
     return {
-      name: "HermesAgent",
-      icon: "/uploads/hermesagent.png",
-      badgeClass: "bg-purple-100 text-purple-700",
-      buttonClass: "bg-purple-600 hover:bg-purple-700",
+      name: "Hermes 已归档",
+      icon: "/uploads/jiuwenswarm.svg",
+      badgeClass: "bg-slate-100 text-slate-600",
+      buttonClass: "bg-emerald-600 hover:bg-emerald-700",
     };
   }
   return {
@@ -266,7 +266,6 @@ export default function ClawHome() {
     window.location.reload();
   };
 
-  // 2026-04-19: 支持多 runtime（lgc-* OpenClaw + lgh-* Hermes）
   // 向后兼容：若服务端尚未升级，回退到单张 adoption
   const adoptions: any[] = Array.isArray((clawMe as any)?.adoptions)
     ? (clawMe as any).adoptions
@@ -395,13 +394,15 @@ export default function ClawHome() {
                 </div>
               )}
 
-              {/* 已有虾 → 进入（支持 OpenClaw / JiuwenClaw / HermesAgent 多 runtime） */}
+              {/* 已有虾 → 进入（支持 OpenClaw / JiuwenClaw） */}
               {user && !isLoading && hasAnyClaw && (
                 <div className="space-y-3">
                   {adoptions.map((a: any) => {
                     const runtime = getRuntimeCardMeta(a.adoptId);
                     const adoptId = String(a.adoptId || "");
                     const isOpenClaw = adoptId.startsWith("lgc-");
+                    const isHermesArchived = adoptId.startsWith("lgh-") || a.actualRuntime === "hermes_archived";
+                    const shouldMigrate = isOpenClaw || isHermesArchived;
                     const isMigrationOpen = migrationOpenFor === adoptId;
                     return (
                       <Card key={a.adoptId} className="border-border/50 bg-white/80 backdrop-blur-sm overflow-hidden">
@@ -436,10 +437,18 @@ export default function ClawHome() {
                               </p>
                             </div>
                           ) : null}
+                          {isHermesArchived ? (
+                            <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left">
+                              <p className="text-sm font-medium text-slate-900">Hermes Runtime 已归档</p>
+                              <p className="mt-1 text-xs leading-5 text-slate-700">
+                                该历史实例不再提供工作台服务，请按岗位职责迁移到 JiuwenSwarm 智能体。
+                              </p>
+                            </div>
+                          ) : null}
                           <Button
                             className={`w-full text-white ${runtime.buttonClass}`}
                             onClick={() => {
-                              if (!isOpenClaw) {
+                              if (!shouldMigrate) {
                                 setLocation(`/claw/${a.adoptId}`);
                                 return;
                               }
@@ -452,10 +461,10 @@ export default function ClawHome() {
                               setMigrationOpenFor(isMigrationOpen ? "" : adoptId);
                             }}
                           >
-                            {isOpenClaw ? (jiuwenAdoption ? "进入 JiuwenSwarm" : "申请 JiuwenSwarm") : "进入工作台"}
+                            {shouldMigrate ? (jiuwenAdoption ? "进入 JiuwenSwarm" : "申请 JiuwenSwarm") : "进入工作台"}
                             <ArrowRight className="w-4 h-4 ml-2" />
                           </Button>
-                          {isOpenClaw && isMigrationOpen && !jiuwenAdoption ? (
+                          {shouldMigrate && isMigrationOpen && !jiuwenAdoption ? (
                             <div className="mt-3 space-y-3">
                               {rolePicker}
                               <Button

@@ -3,7 +3,6 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from "fs
 import {
   isJiuwenClawAdoptId, requireClawOwner, resolveClawWorkspace, computeEtag,
 } from "./helpers";
-import { adoptIdToProfilePath, resolveHermesCoreFilePath, listHermesCoreFileMeta } from "./hermes-memory";
 
 export function registerCoreFileRoutes(app: express.Express) {
 
@@ -37,11 +36,7 @@ export function registerCoreFileRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      if (adoptId.startsWith("lgh-")) {
-        const meta = listHermesCoreFileMeta(adoptId);
-        if (!meta) return res.status(400).json({ error: "invalid hermes adoptId" });
-        return res.json({ adoptId, workspace: meta.workspace, files: meta.files });
-      }
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
 
       const workspace = resolveClawWorkspace(claw);
       const files = Object.keys(CORE_FILE_MAP).map((name) => {
@@ -68,14 +63,7 @@ export function registerCoreFileRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      if (adoptId.startsWith("lgh-")) {
-        const r = resolveHermesCoreFilePath(adoptId, name);
-        if (!r.ok) return res.status(400).json({ error: "invalid core file" });
-        const content = existsSync(r.path) ? String(readFileSync(r.path, "utf8") || "") : "";
-        const updatedAt = existsSync(r.path) ? statSync(r.path).mtime.toISOString() : null;
-        const etag = computeEtag(content);
-        return res.json({ adoptId, workspace: adoptIdToProfilePath(adoptId), name, content, updatedAt, etag, exists: existsSync(r.path) });
-      }
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
 
       const workspace = resolveClawWorkspace(claw);
       const fp = resolveCoreFilePath(workspace, name, adoptId);
@@ -95,8 +83,7 @@ export function registerCoreFileRoutes(app: express.Express) {
       const body = (req.body || {}) as any;
       const adoptId = String(body.adoptId || "").trim();
       const name = String(body.name || "").trim();
-      // Hermes 走 /api/claw/memory/write（带 budget+audit），不走 raw save
-      if (adoptId.startsWith("lgh-")) return res.status(400).json({ error: "use /api/claw/memory/write for hermes" });
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
       const content = String(body.content || "");
       const etag = String(body.etag || "").trim();
       if (!adoptId || !name) return res.status(400).json({ error: "adoptId and name required" });

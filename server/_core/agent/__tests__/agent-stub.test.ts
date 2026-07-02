@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { StubAgentClusterRunner } from "../agent-cluster-runner";
 import { JsonAgentRegistry } from "../agent-registry";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -206,17 +205,5 @@ describe("agent registry Phase 2 read path and stubs", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe("not_implemented");
-  });
-
-  it("AgentClusterRunner.runCluster returns not_implemented", async () => {
-    const result = await new StubAgentClusterRunner().runCluster("cluster-1", {
-      input: "run it",
-      agentDefinitionIds: ["stock-analysis"],
-      executionMode: "parallel-append",
-    });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.kind).toBe("not_implemented");
-    expect(result.error.detail).toContain("AgentClusterRunner.runCluster");
   });
 });

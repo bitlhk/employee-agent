@@ -16,7 +16,6 @@ const CoopNew = lazy(() => import("./pages/CoopNew"));
 const Login = lazy(() => import("./pages/Login"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
-const TaskWorkbenchLab = lazy(() => import("./pages/TaskWorkbenchLab"));
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -64,12 +63,6 @@ function Router() {
           <Home />
         </Route>
 
-        {/* Admin-only standalone lab for task workbench validation. Not linked from main nav. */}
-        <Route path={"/task-workbench-lab"}>
-          <AdminRoute>
-            <TaskWorkbenchLab />
-          </AdminRoute>
-        </Route>
         {/* ── 协作 session 窗口（V2）── */}
         <Route path={"/coop/new"}>
           <CoopNew />

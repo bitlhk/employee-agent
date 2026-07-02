@@ -117,24 +117,6 @@ export const agentDefinitionSchema = z.object({
 });
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>;
 
-export const agentClusterExecutionModeSchema = z.enum(["parallel-append", "parallel", "sequential-2stage"]);
-export type AgentClusterExecutionMode = z.infer<typeof agentClusterExecutionModeSchema>;
-
-export const agentClusterSchema = z.object({
-  id: z.string().min(1),
-  userId: z.number().int().positive(),
-  spaceId: z.number().int().positive().nullable().optional(),
-  name: z.string().min(1),
-  description: z.string().optional(),
-  lastUsedAgentIdsJson: z.array(z.string().min(1)),
-  lastInput: z.string().optional(),
-  lastExecutionMode: agentClusterExecutionModeSchema,
-  status: z.enum(["active", "archived"]),
-  createdAt: z.string().min(1),
-  updatedAt: z.string().min(1),
-});
-export type AgentCluster = z.infer<typeof agentClusterSchema>;
-
 export const agentArtifactSchema = z.object({
   id: z.string().min(1),
   type: z.enum(["pptx", "html", "code", "markdown", "xlsx", "pdf", "image", "zip", "file"]),
@@ -179,40 +161,6 @@ export const agentRunResultSchema = z.object({
 });
 export type AgentRunResult = z.infer<typeof agentRunResultSchema>;
 
-export const agentSummaryArtifactSchema = z.object({
-  envelopeVersion: z.literal("v1"),
-  kind: z.literal("summary"),
-  clusterRunId: z.string().min(1),
-  summarizerDefinitionId: z.literal("lingxia-summarizer"),
-  summary: z.string().min(1),
-  citations: z.array(z.object({
-    agentDefinitionId: z.string().min(1),
-    runResultId: z.string().min(1),
-    excerpt: z.string().min(1),
-  })).min(1),
-  producedAt: z.string().min(1),
-});
-export type AgentSummaryArtifact = z.infer<typeof agentSummaryArtifactSchema>;
-
-export const agentClusterRunSchema = z.object({
-  id: z.string().min(1),
-  clusterId: z.string().min(1).nullable().optional(),
-  userId: z.number().int().positive(),
-  spaceId: z.number().int().positive().nullable().optional(),
-  input: z.string(),
-  selectedAgentIdsJson: z.array(z.string().min(1)),
-  status: z.enum(["running", "completed", "partial_success", "failed", "cancelled", "timeout"]),
-  resultsJson: z.array(agentRunResultSchema),
-  runtimeSnapshotJson: z.record(z.string(), z.unknown()).optional(),
-  startedAt: z.string().min(1).optional(),
-  completedAt: z.string().min(1).optional(),
-  inputBytes: z.number().int().nonnegative().optional(),
-  outputBytes: z.number().int().nonnegative().optional(),
-  errorSummary: z.string().optional(),
-  createdAt: z.string().min(1),
-});
-export type AgentClusterRun = z.infer<typeof agentClusterRunSchema>;
-
 export const agentCallContextSchema = z.object({
   adoptId: z.string().min(1),
   userId: z.number().int().positive(),
@@ -223,31 +171,6 @@ export const agentCallContextSchema = z.object({
   timeoutMs: z.number().int().positive().optional(),
 });
 export type AgentCallContext = z.infer<typeof agentCallContextSchema>;
-
-export const createClusterInputSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().optional(),
-  agentDefinitionIds: z.array(z.string().min(1)).min(1),
-  input: z.string().optional(),
-});
-export type CreateClusterInput = z.infer<typeof createClusterInputSchema>;
-
-export const runClusterInputSchema = z.object({
-  agentDefinitionIds: z.array(z.string().min(1)).min(1).optional(),
-  input: z.string().min(1),
-  executionMode: agentClusterExecutionModeSchema.optional(),
-});
-export type RunClusterInput = z.infer<typeof runClusterInputSchema>;
-
-export const agentClusterPlanSchema = z.object({
-  suggestions: z.array(z.object({
-    agentDefinitionId: z.string().min(1),
-    reason: z.string().min(1),
-  })),
-  executionMode: z.enum(["parallel", "sequential-2stage"]),
-  requiresUserConfirmation: z.literal(true),
-});
-export type AgentClusterPlan = z.infer<typeof agentClusterPlanSchema>;
 
 export type AgentRegistryError =
   | { kind: "not_found"; detail: string }
@@ -268,11 +191,4 @@ export interface AgentRegistry {
   setEnabled(definitionId: string, enabled: boolean, actorUserId: number): Promise<AgentResult<AgentDefinition>>;
   dispatchToDefinition(definitionId: string, input: string, context: AgentCallContext): Promise<AgentResult<AgentRunResult>>;
   healthCheck(target: { providerId?: string; definitionId?: string }): Promise<AgentResult<HealthStatus>>;
-}
-
-export interface AgentClusterRunner {
-  createCluster(userId: number, input: CreateClusterInput): Promise<AgentResult<AgentCluster>>;
-  loadLastUsed(userId: number, spaceId?: number | null): Promise<AgentResult<AgentCluster | null>>;
-  runCluster(clusterId: string | null, input: RunClusterInput): Promise<AgentResult<{ runId: string }>>;
-  getRunResult(runId: string): Promise<AgentResult<AgentClusterRun>>;
 }

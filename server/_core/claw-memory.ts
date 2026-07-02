@@ -6,7 +6,6 @@ import {
   isJiuwenClawAdoptId, requireClawOwner, resolveClawWorkspace, computeEtag, appendLogAsync,
   APP_ROOT,
 } from "./helpers";
-import { resolveHermesMemoryTarget } from "./hermes-memory";
 
 export function registerMemoryRoutes(app: express.Express) {
 
@@ -96,9 +95,8 @@ export function registerMemoryRoutes(app: express.Express) {
       if (!target) return sendError(res, "BAD_REQUEST", "target required");
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      const r = adoptId.startsWith("lgh-")
-        ? resolveHermesMemoryTarget(adoptId, target)
-        : resolveMemoryTargetForRuntime(adoptId, resolveClawWorkspace(claw), target);
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
+      const r = resolveMemoryTargetForRuntime(adoptId, resolveClawWorkspace(claw), target);
       if (!r.ok) return sendError(res, "BAD_REQUEST", "path_not_allowed");
 
       const content = existsSync(r.path) ? String(readFileSync(r.path, "utf8") || "") : "";
@@ -123,9 +121,8 @@ export function registerMemoryRoutes(app: express.Express) {
 
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      const r = adoptId.startsWith("lgh-")
-        ? resolveHermesMemoryTarget(adoptId, target)
-        : resolveMemoryTargetForRuntime(adoptId, resolveClawWorkspace(claw), target);
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
+      const r = resolveMemoryTargetForRuntime(adoptId, resolveClawWorkspace(claw), target);
       if (!r.ok) return sendError(res, "BAD_REQUEST", "path_not_allowed");
 
       const before = existsSync(r.path) ? String(readFileSync(r.path, "utf8") || "") : "";

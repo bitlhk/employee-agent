@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   agentArtifactSchema,
-  agentClusterPlanSchema,
-  agentClusterRunSchema,
   agentDefinitionSchema,
   agentProviderSchema,
   agentRunResultSchema,
-  agentSummaryArtifactSchema,
   type AgentRunResult,
 } from "../../../../shared/types/agent";
 
@@ -68,58 +65,6 @@ describe("agent shared schemas", () => {
     expect(agentArtifactSchema.safeParse(value).success).toBe(false);
   });
 
-  it("rejects summary artifacts with empty citations", () => {
-    expect(agentSummaryArtifactSchema.safeParse({
-      envelopeVersion: "v1",
-      kind: "summary",
-      clusterRunId: "run-1",
-      summarizerDefinitionId: "lingxia-summarizer",
-      summary: "summary",
-      citations: [],
-      producedAt: "2026-05-03T00:00:00.000Z",
-    }).success).toBe(false);
-  });
-
-  it("rejects summary artifacts from non-summarizer definitions", () => {
-    expect(agentSummaryArtifactSchema.safeParse({
-      envelopeVersion: "v1",
-      kind: "summary",
-      clusterRunId: "run-1",
-      summarizerDefinitionId: "other-summarizer",
-      summary: "summary",
-      citations: [{ agentDefinitionId: "a", runResultId: "r", excerpt: "x" }],
-      producedAt: "2026-05-03T00:00:00.000Z",
-    }).success).toBe(false);
-  });
-
-  it("rejects invalid cluster plan executionMode", () => {
-    expect(agentClusterPlanSchema.safeParse({
-      suggestions: [{ agentDefinitionId: "stock-analysis", reason: "needs analysis" }],
-      executionMode: "dag",
-      requiresUserConfirmation: true,
-    }).success).toBe(false);
-  });
-
-  it("requires cluster plan user confirmation to be literal true", () => {
-    expect(agentClusterPlanSchema.safeParse({
-      suggestions: [{ agentDefinitionId: "stock-analysis", reason: "needs analysis" }],
-      executionMode: "parallel",
-      requiresUserConfirmation: false,
-    }).success).toBe(false);
-  });
-
-  it("rejects cluster run status partial", () => {
-    expect(agentClusterRunSchema.safeParse({
-      id: "run-1",
-      userId: 1,
-      input: "x",
-      selectedAgentIdsJson: ["stock-analysis"],
-      status: "partial",
-      resultsJson: [],
-      createdAt: "2026-05-03T00:00:00.000Z",
-    }).success).toBe(false);
-  });
-
   it("rejects per-agent envelope status partial", () => {
     expect(agentRunResultSchema.safeParse({ ...baseEnvelope, status: "partial" }).success).toBe(false);
   });
@@ -129,7 +74,7 @@ describe("agent shared schemas", () => {
       id: "provider-1",
       providerKey: "bad-provider",
       displayName: "Bad",
-      runtimeFamily: "task-stock",
+      runtimeFamily: "invalid-runtime",
       protocol: "http-json",
       baseEndpointRef: "BAD_URL",
       authType: "none",

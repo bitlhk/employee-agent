@@ -22,8 +22,8 @@ interface SlideData {
 interface SlidePreviewModalProps {
   open: boolean;
   onClose: () => void;
-  previewUrl: string;          // /api/claw/remote-file?...&preview=1
-  downloadUrl: string;         // /api/claw/business-files/download?... (pptx)
+  previewUrl: string;
+  downloadUrl: string;
   fileName: string;
 }
 

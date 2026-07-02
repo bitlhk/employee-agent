@@ -77,23 +77,6 @@ export const jiuwenClawAgentDir = (adoptId: string, dbAgentIdRaw: any) =>
 export const jiuwenClawSessionsDir = (adoptId: string, dbAgentIdRaw: any) =>
   path.join(jiuwenClawAgentDir(adoptId, dbAgentIdRaw), "sessions");
 
-export function normalizeHermesProfilesDir(raw?: string): string {
-  const value = expandHomePath(
-    raw
-      || process.env.HERMES_HOME_BASE
-      || process.env.HERMES_PROFILES_DIR
-      || process.env.HERMES_HOME
-      || path.join(processHome, ".hermes")
-  );
-  if (path.basename(value) === "profiles") return value;
-  return path.join(value, "profiles");
-}
-
-export const HERMES_PROFILES_DIR = normalizeHermesProfilesDir();
-export const hermesProfileDir = (profileName: string) => path.join(HERMES_PROFILES_DIR, String(profileName || "").trim());
-export const hermesProfileWorkspaceDir = (profileName: string) => path.join(hermesProfileDir(profileName), "workspace");
-export const hermesProfileSkillsDir = (profileName: string) => path.join(hermesProfileDir(profileName), "skills");
-
 export const INTERNAL_BASE_URL = String(
   process.env.LINGXIA_INTERNAL_BASE_URL || `http://127.0.0.1:${process.env.PORT || "5180"}`
 ).replace(/\/+$/, "");

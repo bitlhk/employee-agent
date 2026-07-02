@@ -1,6 +1,5 @@
 import express from "express";
 import { isJiuwenClawAdoptId, requireClawOwner, resolveRuntimeAgentId } from "./helpers";
-import { hermesCron, type CronProviderHandle } from "./hermes-cron";
 import { OpenClawCronProvider } from "./cron/openclaw-cron-provider";
 import { JiuwenClawCronProvider } from "./cron/jiuwenclaw-cron-provider";
 import { startCronRunWatcher } from "./cron/cron-run-watcher";
@@ -13,15 +12,6 @@ const jiuwenClawCronProvider = new JiuwenClawCronProvider();
 
 function isHermesAdopt(adoptId: string): boolean {
   return String(adoptId || "").startsWith("lgh-");
-}
-
-function toHermesHandle(claw: any): CronProviderHandle {
-  return {
-    adoptId: claw.adoptId,
-    agentId: String(claw.agentId || ""),
-    userId: Number(claw.userId || 0),
-    hermesPort: claw.hermesPort,
-  };
 }
 
 function toOpenClawHandle(claw: any): SharedCronProviderHandle {
@@ -153,6 +143,10 @@ function providerError(error: any) {
   });
 }
 
+function hermesArchivedError() {
+  return Object.assign(new Error("Hermes runtime has been archived"), { status: 410 });
+}
+
 export async function listCronJobsForClaw(claw: any, options?: {
   limit?: number;
   offset?: number;
@@ -167,12 +161,7 @@ export async function listCronJobsForClaw(claw: any, options?: {
   const enabled = String(options?.enabled || "all");
   const scheduleKind = String(options?.scheduleKind || "all");
 
-  if (isHermesAdopt(adoptId)) {
-    let jobs = await hermesCron.listJobs(toHermesHandle(claw));
-    if (query) jobs = jobs.filter((j) => j.name.toLowerCase().includes(query) || (j.description || "").toLowerCase().includes(query));
-    const total = jobs.length;
-    return { runtime: "hermes", capabilities: hermesCron.capabilities(), jobs: jobs.slice(offset, offset + limit), total, limit, offset };
-  }
+  if (isHermesAdopt(adoptId)) throw hermesArchivedError();
 
   if (isJiuwenClawAdoptId(adoptId)) {
     const listed = await jiuwenClawCronProvider.listJobs(toJiuwenClawHandle(claw));
@@ -204,9 +193,7 @@ export async function listCronRunsForClaw(claw: any, options?: {
   scope?: string;
 }) {
   const adoptId = String(claw?.adoptId || "").trim();
-  if (isHermesAdopt(adoptId)) {
-    throw Object.assign(new Error("Hermes cron runs are not supported yet"), { status: 501 });
-  }
+  if (isHermesAdopt(adoptId)) throw hermesArchivedError();
 
   const limit = Math.max(1, Math.min(200, Number(options?.limit || 20)));
   const offset = Math.max(0, Number(options?.offset || 0));
@@ -241,19 +228,7 @@ export function registerCronRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      if (isHermesAdopt(adoptId)) {
-        const jobs = await hermesCron.listJobs(toHermesHandle(claw));
-        const enabled = jobs.filter((j) => j.enabled);
-        const nextRunIso = enabled.map((j) => j.state.nextRunAt).filter(Boolean).sort()[0];
-        return res.json({
-          enabled: true,
-          runtime: "hermes",
-          jobs: jobs.length,
-          enabledJobs: enabled.length,
-          nextRunAt: nextRunIso || undefined,
-          nextWakeAtMs: nextRunIso ? new Date(nextRunIso).getTime() : undefined,
-        });
-      }
+      if (isHermesAdopt(adoptId)) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
 
       if (isJiuwenClawAdoptId(adoptId)) {
         const listed = await jiuwenClawCronProvider.listJobs(toJiuwenClawHandle(claw));
@@ -293,7 +268,7 @@ export function registerCronRoutes(app: express.Express) {
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      if (isHermesAdopt(adoptId)) return res.json({ runtime: "hermes", capabilities: hermesCron.capabilities() });
+      if (isHermesAdopt(adoptId)) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
       if (isJiuwenClawAdoptId(adoptId)) return res.json({ runtime: "jiuwenclaw", capabilities: jiuwenClawCronProvider.capabilities() });
       return res.json({ runtime: "openclaw", capabilities: openClawCronProvider.capabilities() });
     } catch (e: any) {
@@ -314,12 +289,7 @@ export function registerCronRoutes(app: express.Express) {
       const enabled = String(req.query.enabled || "all");
       const scheduleKind = String(req.query.scheduleKind || "all");
 
-      if (isHermesAdopt(adoptId)) {
-        let jobs = await hermesCron.listJobs(toHermesHandle(claw));
-        if (query) jobs = jobs.filter((j) => j.name.toLowerCase().includes(query) || (j.description || "").toLowerCase().includes(query));
-        const total = jobs.length;
-        return res.json({ runtime: "hermes", capabilities: hermesCron.capabilities(), jobs: jobs.slice(offset, offset + limit), total, limit, offset });
-      }
+      if (isHermesAdopt(adoptId)) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
 
       if (isJiuwenClawAdoptId(adoptId)) {
         const listed = await jiuwenClawCronProvider.listJobs(toJiuwenClawHandle(claw));
@@ -353,7 +323,7 @@ export function registerCronRoutes(app: express.Express) {
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
       const claw = await resolveClaw(req, res, adoptId);
       if (!claw) return;
-      if (isHermesAdopt(adoptId)) return res.status(501).json({ error: "Hermes cron runs are not supported yet" });
+      if (isHermesAdopt(adoptId)) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
 
       const limit = Math.max(1, Math.min(200, Number(req.query.limit || 20)));
       const offset = Math.max(0, Number(req.query.offset || 0));
@@ -409,7 +379,7 @@ export function registerCronRoutes(app: express.Express) {
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      if (isHermesAdopt(adoptId)) return res.status(501).json({ error: "Hermes cron preview is not supported yet" });
+      if (isHermesAdopt(adoptId)) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
       if (isJiuwenClawAdoptId(adoptId)) {
         const result = await jiuwenClawCronProvider.previewRuns({
           adoptId,
@@ -443,25 +413,7 @@ export function registerCronRoutes(app: express.Express) {
       const claw = await resolveClaw(req, res, adoptId);
       if (!claw) return;
 
-      if (isHermesAdopt(adoptId)) {
-        const sched = job?.schedule || {};
-        const k = String(sched.kind || "interval");
-        const linggKind: "interval" | "cron" | "once" = k === "every" ? "interval" : k === "at" ? "once" : k === "interval" ? "interval" : k === "cron" ? "cron" : k === "once" ? "once" : "interval";
-        const created = await hermesCron.addJob(toHermesHandle(claw), {
-          prompt: job?.payload?.message || job?.prompt || "",
-          schedule: {
-            kind: linggKind,
-            intervalMinutes: k === "every" && sched.everyMs ? Math.round(Number(sched.everyMs) / 60000) : sched.intervalMinutes,
-            cronExpr: sched.expr || sched.cronExpr,
-            runAt: sched.at || sched.runAt,
-          },
-          name: job?.name,
-          description: job?.description,
-          delivery: job?.delivery?.mode ? { mode: String(job.delivery.mode) } : undefined,
-          meta: { skills: job?.skills, model: job?.payload?.model || job?.model },
-        });
-        return res.json({ runtime: "hermes", job: created });
-      }
+      if (isHermesAdopt(adoptId)) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
 
       if (isJiuwenClawAdoptId(adoptId)) {
         const handle = toJiuwenClawHandle(claw);
@@ -529,31 +481,7 @@ export function registerCronRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      if (isHermesAdopt(adoptId)) {
-        const linggPatch: any = {};
-        if (patch.name !== undefined) linggPatch.name = patch.name;
-        if (patch.enabled !== undefined) linggPatch.enabled = patch.enabled;
-        if (patch?.payload?.message !== undefined) linggPatch.prompt = patch.payload.message;
-        if (patch.prompt !== undefined) linggPatch.prompt = patch.prompt;
-        if (patch.schedule !== undefined) {
-          const sk = String(patch.schedule?.kind || "");
-          const linggKind = sk === "every" ? "interval" : sk === "at" ? "once" : (sk === "interval" || sk === "cron" || sk === "once") ? sk : undefined;
-          if (linggKind) {
-            linggPatch.schedule = {
-              kind: linggKind as any,
-              intervalMinutes: sk === "every" && patch.schedule.everyMs ? Math.round(Number(patch.schedule.everyMs) / 60000) : patch.schedule.intervalMinutes,
-              cronExpr: patch.schedule.expr || patch.schedule.cronExpr,
-              runAt: patch.schedule.at || patch.schedule.runAt,
-            };
-          }
-        }
-        if (patch.delivery?.mode !== undefined) linggPatch.delivery = { mode: String(patch.delivery.mode), target: patch.delivery?.to };
-        if (patch.skills !== undefined) linggPatch.meta = { ...(linggPatch.meta || {}), skills: patch.skills };
-        if (patch?.payload?.model !== undefined) linggPatch.meta = { ...(linggPatch.meta || {}), model: patch.payload.model };
-        if (patch.model !== undefined) linggPatch.meta = { ...(linggPatch.meta || {}), model: patch.model };
-        const out = await hermesCron.updateJob(toHermesHandle(claw), id, linggPatch);
-        return res.json({ runtime: "hermes", job: out });
-      }
+      if (isHermesAdopt(adoptId)) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
 
       if (isJiuwenClawAdoptId(adoptId)) {
         const result = await jiuwenClawCronProvider.updateJob(toJiuwenClawHandle(claw), id, patch);
@@ -586,10 +514,7 @@ export function registerCronRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
 
-      if (isHermesAdopt(adoptId)) {
-        const out = await hermesCron.triggerJob(toHermesHandle(claw), id);
-        return res.json({ runtime: "hermes", job: out });
-      }
+      if (isHermesAdopt(adoptId)) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
 
       if (isJiuwenClawAdoptId(adoptId)) {
         const result = await jiuwenClawCronProvider.runJobNow(toJiuwenClawHandle(claw), id);
@@ -632,11 +557,7 @@ export function registerCronRoutes(app: express.Express) {
       const claw = await resolveClaw(req, res, adoptId);
       if (!claw) return;
 
-      if (isHermesAdopt(adoptId)) {
-        await hermesCron.removeJob(toHermesHandle(claw), id);
-        await deleteCronDeliveryConfig(adoptId, id);
-        return res.json({ runtime: "hermes", ok: true });
-      }
+      if (isHermesAdopt(adoptId)) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
 
       if (isJiuwenClawAdoptId(adoptId)) {
         const result = await jiuwenClawCronProvider.removeJob(toJiuwenClawHandle(claw), id);

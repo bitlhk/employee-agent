@@ -7,8 +7,24 @@ import { createHash } from "crypto";
 import path from "path";
 import { existsSync, statSync, readdirSync, readFileSync, createReadStream, mkdirSync, writeFileSync, unlinkSync, rmSync } from "fs";
 import { isJiuwenClawAdoptId, requireClawOwner, resolveRuntimeWorkspace } from "./helpers";
-import { hermesFiles, type LinggFileNode, type FilesProviderCapabilities, type FilesProviderHandle, adoptIdToWorkspace } from "./hermes-files";
 import { auditActor, auditErrorMetadata, auditRequest, recordAuditBestEffort, recordAuditRequired } from "./audit-events";
+
+type LinggFileNode = {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size?: number;
+  modifiedAt?: string;
+};
+
+type FilesProviderCapabilities = {
+  supportsList: boolean;
+  supportsRead: boolean;
+  supportsDownload: boolean;
+  supportsUpload: boolean;
+  supportsDelete: boolean;
+  maxUploadBytes: number;
+};
 
 const OPENCLAW_FILES_CAPABILITIES: FilesProviderCapabilities = {
   supportsList: true,
@@ -23,7 +39,6 @@ const MAX_LIST_DEPTH = 4;
 const MAX_FILES_PER_LIST = 2000;
 const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
-const TASK_WORKBENCH_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_FILES_PER_WORKSPACE = 2000;
 const PROTECTED_ROOT_FILES = new Set([
   "AGENT.md",
@@ -44,10 +59,6 @@ const ALLOWED_EXTENSIONS = new Set([
   "html", "htm", "css",
   "zip", "tar", "gz",
 ]);
-const TASK_WORKBENCH_AUDIO_EXTENSIONS = new Set([
-  "mp3", "wav", "m4a", "aac", "webm", "ogg", "mp4",
-]);
-
 function safeFilename(name: string): string {
   // Strip path separators / dangerous chars / leading dots / collapse '..'
   return name.replace(/[\\/:*?"<>|]/g, "_").replace(/\.\.+/g, "_").replace(/^\.+/, "_").slice(0, 200);
@@ -58,35 +69,17 @@ function getExt(filename: string): string {
   return i < 0 ? "" : filename.slice(i + 1).toLowerCase();
 }
 
-function isTaskWorkbenchInputUpload(subPath: string): boolean {
-  const normalized = path.posix.normalize(String(subPath || "").replace(/\\/g, "/"));
-  return normalized.startsWith("office/task-workbench/") && normalized.endsWith("/inputs");
-}
-
 function isAllowedUploadExtension(ext: string, subPath: string): boolean {
-  if (ALLOWED_EXTENSIONS.has(ext)) return true;
-  return isTaskWorkbenchInputUpload(subPath) && TASK_WORKBENCH_AUDIO_EXTENSIONS.has(ext);
+  return ALLOWED_EXTENSIONS.has(ext);
 }
 
-function uploadLimitFor(ext: string, subPath: string): number {
-  if (isTaskWorkbenchInputUpload(subPath) && TASK_WORKBENCH_AUDIO_EXTENSIONS.has(ext)) {
-    return TASK_WORKBENCH_AUDIO_UPLOAD_BYTES;
-  }
+function uploadLimitFor(_ext: string, _subPath: string): number {
   return MAX_UPLOAD_BYTES;
 }
 
-function isHermesAdopt(adoptId: string): boolean {
-  return String(adoptId || "").startsWith("lgh-");
-}
-
-function runtimeName(adoptId: string): "openclaw" | "hermes" | "jiuwenclaw" {
-  if (isHermesAdopt(adoptId)) return "hermes";
+function runtimeName(adoptId: string): "openclaw" | "jiuwenclaw" {
   if (isJiuwenClawAdoptId(adoptId)) return "jiuwenclaw";
   return "openclaw";
-}
-
-function toFilesHandle(claw: any): FilesProviderHandle {
-  return { adoptId: claw.adoptId, agentId: String(claw.agentId || ""), userId: Number(claw.userId || 0) };
 }
 
 function runtimeWorkspace(claw: any, adoptId: string): string {
@@ -227,7 +220,7 @@ export function registerFilesRoutes(app: express.Express) {
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      if (isHermesAdopt(adoptId)) return res.json({ runtime: "hermes", capabilities: hermesFiles.capabilities() });
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
       return res.json({ runtime: runtimeName(adoptId), capabilities: OPENCLAW_FILES_CAPABILITIES });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || "capabilities failed") });
@@ -241,10 +234,7 @@ export function registerFilesRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       const subPath = String(req.query.path || "").trim();
-      if (isHermesAdopt(adoptId)) {
-        const files = hermesFiles.listFiles(toFilesHandle(claw), subPath);
-        return res.json({ runtime: "hermes", capabilities: hermesFiles.capabilities(), files });
-      }
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
       const workspace = runtimeWorkspace(claw, adoptId);
       const files = openclawListFiles(workspace, subPath);
       return res.json({ runtime: runtimeName(adoptId), capabilities: OPENCLAW_FILES_CAPABILITIES, files });
@@ -260,21 +250,7 @@ export function registerFilesRoutes(app: express.Express) {
       if (!adoptId || !relPath) return res.status(400).json({ error: "adoptId and path required" });
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      if (isHermesAdopt(adoptId)) {
-        const r = hermesFiles.readFile(toFilesHandle(claw), relPath);
-        if (!r) return res.status(404).json({ error: "file not found or too large" });
-        await recordFileAudit({
-          req,
-          claw,
-          adoptId,
-          action: "file.read",
-          path: relPath,
-          size: Number(r.size || 0),
-          runtime: "hermes",
-          metadata: { readLimitBytes: MAX_READ_BYTES },
-        });
-        return res.json({ runtime: "hermes", path: relPath, ...r });
-      }
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
       const workspace = runtimeWorkspace(claw, adoptId);
       const abs = safeJoin(workspace, relPath);
       if (!abs || !existsSync(abs)) return res.status(404).json({ error: "file not found" });
@@ -305,13 +281,10 @@ export function registerFilesRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       let absPath: string | null = null;
-      if (isHermesAdopt(adoptId)) {
-        absPath = hermesFiles.resolveAbsPath(toFilesHandle(claw), relPath);
-      } else {
-        const workspace = runtimeWorkspace(claw, adoptId);
-        absPath = safeJoin(workspace, relPath);
-        if (absPath && (!existsSync(absPath) || !statSync(absPath).isFile())) absPath = null;
-      }
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
+      const workspace = runtimeWorkspace(claw, adoptId);
+      absPath = safeJoin(workspace, relPath);
+      if (absPath && (!existsSync(absPath) || !statSync(absPath).isFile())) absPath = null;
       if (!absPath) return res.status(404).json({ error: "file not found" });
       const filename = path.basename(absPath);
       const st = statSync(absPath);
@@ -323,7 +296,7 @@ export function registerFilesRoutes(app: express.Express) {
         path: relPath,
         filename,
         size: Number(st.size),
-        runtime: isHermesAdopt(adoptId) ? "hermes" : runtimeName(adoptId),
+        runtime: runtimeName(adoptId),
         required: true,
       });
       res.setHeader("Content-Disposition", `attachment; filename=\"${encodeURIComponent(filename)}\"`);
@@ -396,12 +369,8 @@ export function registerFilesRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       const sha256 = fileSha256(buf);
-      let existingFiles: LinggFileNode[];
-      if (isHermesAdopt(adoptId)) {
-        existingFiles = hermesFiles.listFiles(toFilesHandle(claw));
-      } else {
-        existingFiles = openclawListFiles(runtimeWorkspace(claw, adoptId));
-      }
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
+      const existingFiles: LinggFileNode[] = openclawListFiles(runtimeWorkspace(claw, adoptId));
       const fileCount = existingFiles.filter(f => f.type === "file").length;
       if (fileCount >= MAX_FILES_PER_WORKSPACE) {
         await recordFileAudit({
@@ -416,7 +385,7 @@ export function registerFilesRoutes(app: express.Express) {
           ext,
           size: buf.length,
           sha256,
-          runtime: isHermesAdopt(adoptId) ? "hermes" : runtimeName(adoptId),
+          runtime: runtimeName(adoptId),
           errorCode: "WORKSPACE_FILE_QUOTA_EXCEEDED",
           policyCode: "workspace_file_quota",
           metadata: { fileCount, maxFilesPerWorkspace: MAX_FILES_PER_WORKSPACE },
@@ -424,24 +393,6 @@ export function registerFilesRoutes(app: express.Express) {
         return res.status(429).json({ error: `workspace file count >= ${MAX_FILES_PER_WORKSPACE}` });
       }
       const targetRel = subPath ? `${subPath}/${filename}` : filename;
-      if (isHermesAdopt(adoptId)) {
-        const r = hermesFiles.writeFile(toFilesHandle(claw), targetRel, buf);
-        if (!r.ok) return res.status(400).json({ error: r.reason });
-        await recordFileAudit({
-          req,
-          claw,
-          adoptId,
-          action: "file.uploaded",
-          path: targetRel,
-          filename,
-          ext,
-          size: r.size,
-          sha256,
-          runtime: "hermes",
-          metadata: { uploadLimitBytes: maxUploadBytes, sourcePath: subPath || null },
-        });
-        return res.json({ runtime: "hermes", ok: true, path: targetRel, size: r.size });
-      }
       const ws = runtimeWorkspace(claw, adoptId);
       const abs = safeJoin(ws, targetRel);
       if (!abs) {
@@ -520,19 +471,7 @@ export function registerFilesRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      if (isHermesAdopt(adoptId)) {
-        const r = hermesFiles.deleteFile(toFilesHandle(claw), relPath);
-        if (!r.ok) return res.status(400).json({ error: r.reason });
-        await recordFileAudit({
-          req,
-          claw,
-          adoptId,
-          action: "file.deleted",
-          path: relPath,
-          runtime: "hermes",
-        });
-        return res.json({ runtime: "hermes", ok: true });
-      }
+      if (adoptId.startsWith("lgh-")) return res.status(410).json({ error: "HERMES_RUNTIME_ARCHIVED" });
       const ws = runtimeWorkspace(claw, adoptId);
       const abs = safeJoin(ws, relPath);
       if (!abs || !existsSync(abs)) return res.status(404).json({ error: "file not found" });

@@ -458,7 +458,8 @@ function coerceArtifacts(raw: unknown): AgentArtifact[] {
       const obj = item as Record<string, unknown>;
       const name = String(obj.name || obj.fileName || `artifact-${index + 1}`);
       const type = String(obj.type || "file") as AgentArtifact["type"];
-      const downloadUrl = String(obj.downloadUrl || obj.url || `/api/admin/agent-cluster-lab/artifacts/${encodeURIComponent(name)}`);
+      const downloadUrl = String(obj.downloadUrl || obj.url || "");
+      if (!downloadUrl) return null;
       const artifact: AgentArtifact = {
         id: String(obj.id || `artifact-${index + 1}`),
         type,
