@@ -777,6 +777,34 @@ export const agentCallLogs = mysqlTable("agent_call_logs", {
 
 export type AgentCallLog = typeof agentCallLogs.$inferSelect;
 
+export const agentTasks = mysqlTable("agent_tasks", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  adoptId: varchar("adopt_id", { length: 64 }).notNull(),
+  userId: int("user_id").notNull(),
+  agentId: varchar("agent_id", { length: 64 }).notNull(),
+  sourceConversationId: varchar("source_conversation_id", { length: 128 }),
+  sourceSessionId: varchar("source_session_id", { length: 160 }),
+  sourceMessageId: varchar("source_message_id", { length: 128 }),
+  status: mysqlEnum("status", ["pending", "running", "succeeded", "failed", "cancelled"]).notNull().default("pending"),
+  input: text("input").notNull(),
+  resultMarkdown: text("result_markdown"),
+  errorMessage: text("error_message"),
+  adapterProtocol: varchar("adapter_protocol", { length: 96 }),
+  remoteTaskId: varchar("remote_task_id", { length: 128 }),
+  rawEventsJson: text("raw_events_json"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  adoptStatusIdx: index("idx_agent_tasks_adopt_status").on(table.adoptId, table.status, table.createdAt),
+  sourceConversationIdx: index("idx_agent_tasks_source_conversation").on(table.sourceConversationId),
+  agentStatusIdx: index("idx_agent_tasks_agent_status").on(table.agentId, table.status),
+}));
+
+export type AgentTask = typeof agentTasks.$inferSelect;
+export type InsertAgentTask = typeof agentTasks.$inferInsert;
+
 // ── 技能市场 ──
 export const skillMarketplace = mysqlTable("skill_marketplace", {
   id:            int("id").autoincrement().primaryKey(),

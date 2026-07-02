@@ -167,7 +167,7 @@
 | 技能系统 | SKILL.md(frontmatter + 操作步骤) + 自动创建/更新 |
 | 记忆 | MEMORY.md(策展式,§分隔,2200 char) + USER.md(1375 char) + background review(每10轮自动提取) |
 | 会话 | session_id 多轮上下文 |
-| MCP 反向调用 | lingxia-mcp-server(stdio JSON-RPC): 定时任务/通知推送/频道查询 |
+| MCP 反向调用 | platform-tools-mcp(stdio JSON-RPC): 定时任务/通知推送/频道查询 |
 
 **JiuwenClaw**：独立部署的对话服务，后端+前端一体。
 

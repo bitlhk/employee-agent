@@ -4,6 +4,7 @@ import type { AgentRoleTemplate } from "./role-templates";
 import type { EffectiveRoleAssets } from "./role-asset-grants";
 
 export const JIUWENSWARM_ROLE_SCOPE_MANIFEST = ".linggan-role-scope.json";
+export const JIUWENSWARM_PLATFORM_MCP_SERVER_IDS = ["platform_tools"];
 
 export type JiuwenSwarmRoleScopeManifest = {
   version: 1;
@@ -45,10 +46,24 @@ function activeRoleSkillIds(effectiveAssets: EffectiveRoleAssets, activeSkillIds
   ]);
 }
 
+function withJiuwenSwarmPlatformMcp(effectiveAssets: EffectiveRoleAssets): EffectiveRoleAssets {
+  return {
+    ...effectiveAssets,
+    mcpServers: {
+      ...effectiveAssets.mcpServers,
+      default: uniqueSorted([
+        ...effectiveAssets.mcpServers.default,
+        ...JIUWENSWARM_PLATFORM_MCP_SERVER_IDS,
+      ]),
+    },
+  };
+}
+
 export function buildJiuwenSwarmRoleScopeManifest(
   role: AgentRoleTemplate,
   effectiveAssets: EffectiveRoleAssets,
 ): JiuwenSwarmRoleScopeManifest {
+  const scopedAssets = withJiuwenSwarmPlatformMcp(effectiveAssets);
   return {
     version: 1,
     runtime: "jiuwenswarm",
@@ -58,7 +73,7 @@ export function buildJiuwenSwarmRoleScopeManifest(
       industry: role.industry,
       status: role.status,
     },
-    effectiveAssets,
+    effectiveAssets: scopedAssets,
     enforcement: {
       skills: "per-agent-workspace",
       mcp: "service-side-agent-context",
@@ -108,13 +123,18 @@ function roleGuidance(role: AgentRoleTemplate): string {
   switch (role.id) {
     case "wealth-manager":
       return "重点支持客户经营、资产配置、产品匹配、客户沟通和财富管理材料整理。涉及投资建议时保持审慎，避免承诺收益。";
-    case "risk-manager":
-      return "重点支持风险识别、贷后监控、异常线索归因、风险报告和处置建议。输出应区分事实、判断和待核验信息。";
-    case "review-specialist":
+    case "post-loan-risk-control":
+      return [
+        "重点支持风险识别、贷后监控、异常线索归因、风险报告和处置建议。输出应区分事实、判断和待核验信息。",
+        "工具选择规则：轻量数据查询、字段核验、风险因子查看、单项指标解释，优先使用本地已安装的岗位技能和贷后风控 MCP。",
+        "完整企业风险评估、批量尽调、生成正式风控报告、预计耗时较长或用户明确要求调用风控 Agent 时，优先使用平台工具提交远程风控 Agent 异步任务。",
+        "如果远程风控 Agent 不可用，可基于本地技能/MCP 给出初步评估，并明确说明这是本地轻量版本。",
+      ].join(" ");
+    case "credential-compliance":
       return "重点支持材料审核、凭证识别、合规检查、审核意见生成和异常点提示。输出应明确依据、缺口和下一步补充材料。";
     case "insurance-advisor":
       return "重点支持保险需求分析、产品解释、销售陪练、话术推荐和异议处理。严格遵守合规边界，不承诺收益，不替代人工核保或理赔结论。";
-    case "investment-analyst":
+    case "investment-researcher":
       return "重点支持投研分析、行情解读、基金/股票/债券资料整理、组合对比和投资备忘。输出应标注数据口径和不确定性。";
     default:
       return "重点支持通用办公、资料整理、信息检索、文本生成和任务协作。遇到专业金融、合规或投资判断时应提示限制并建议人工复核。";

@@ -1,0 +1,57 @@
+INSERT INTO `business_agents`
+  (
+    `id`,
+    `name`,
+    `description`,
+    `kind`,
+    `api_url`,
+    `remote_agent_id`,
+    `icon`,
+    `enabled`,
+    `sort_order`,
+    `health_status`,
+    `allowed_profiles`,
+    `tags`,
+    `ui_config`,
+    `provider_type`,
+    `adapter_protocol`,
+    `capabilities_json`,
+    `endpoint_config_json`
+  )
+VALUES
+  (
+    'risk-control-a2a',
+    '风控 Agent',
+    '风控智能体，适合企业风险评估、贷后风控、批量尽调等长任务。',
+    'remote',
+    'http://113.44.127.99:19100',
+    'main',
+    '🛡️',
+    1,
+    10,
+    'healthy',
+    'plus,internal',
+    '风控,贷后,A2A,远端Agent',
+    '{"badge":"A2A","displayMode":"agent-task","resultFormat":"markdown"}',
+    'a2a',
+    'agent-a2a-v1',
+    '["agent","async-agent","a2a","risk-control","post-loan-risk"]',
+    '{"path":"/a2a","stream":false,"method":"message/send","timeoutMs":600000,"executionMode":"async","roleTemplates":["post-loan-risk-control"]}'
+  )
+ON DUPLICATE KEY UPDATE
+  `name` = VALUES(`name`),
+  `description` = VALUES(`description`),
+  `kind` = VALUES(`kind`),
+  `api_url` = VALUES(`api_url`),
+  `remote_agent_id` = VALUES(`remote_agent_id`),
+  `icon` = VALUES(`icon`),
+  `enabled` = VALUES(`enabled`),
+  `sort_order` = VALUES(`sort_order`),
+  `health_status` = VALUES(`health_status`),
+  `allowed_profiles` = VALUES(`allowed_profiles`),
+  `tags` = VALUES(`tags`),
+  `ui_config` = VALUES(`ui_config`),
+  `provider_type` = VALUES(`provider_type`),
+  `adapter_protocol` = VALUES(`adapter_protocol`),
+  `capabilities_json` = VALUES(`capabilities_json`),
+  `endpoint_config_json` = VALUES(`endpoint_config_json`);

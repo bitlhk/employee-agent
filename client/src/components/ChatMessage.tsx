@@ -1,6 +1,7 @@
 import { BrandIcon } from "@/components/BrandIcon";
 import { memo, useEffect, useMemo, useState, useRef } from "react";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { AgentTaskCard, type AgentTask } from "@/components/AgentTaskCard";
 import { cleanLeakedToolTags } from "@/lib/clean-leaked-tags";
 import { formatModelName } from "@/lib/modelDisplay";
 
@@ -75,6 +76,7 @@ type ChatMessageProps = {
   timeLabel: string;
   toolCalls?: ToolCallEntry[];
   messageEvents?: MessageEventEntry[];
+  agentTasks?: AgentTask[];
   showToolCalls?: boolean;
   usage?: { input: number; output: number };
   contextPercent?: number | null;
@@ -696,6 +698,20 @@ function messageEventsRenderSignature(events?: MessageEventEntry[]): string {
     .join("|");
 }
 
+function agentTasksRenderSignature(tasks?: AgentTask[]): string {
+  if (!tasks?.length) return "";
+  return tasks
+    .map((task) => [
+      task.id,
+      task.status,
+      task.resultMarkdown || task.result_markdown || task.result || "",
+      task.errorMessage || task.error_message || "",
+      task.remoteTaskId || task.remote_task_id || "",
+      task.updatedAt || task.updated_at || "",
+    ].join(":"))
+    .join("|");
+}
+
 function ChatMessageInner({
   role,
   text,
@@ -707,6 +723,7 @@ function ChatMessageInner({
   timeLabel,
   toolCalls,
   messageEvents,
+  agentTasks,
   showToolCalls = true,
   usage,
   contextPercent,
@@ -897,6 +914,11 @@ function ChatMessageInner({
             </div>
           </div>
         )}
+        {agentTasks && agentTasks.length > 0 ? (
+          <div className="agent-task-card-list agent-task-card-list--inline">
+            {agentTasks.map((task) => <AgentTaskCard key={task.id} task={task} />)}
+          </div>
+        ) : null}
         {/* 时间戳行 + 朗读/删除 */}
         <p className="text-[10px] mt-1 px-1 font-mono flex items-center gap-1.5 flex-wrap" style={{ color: "var(--oc-text-tertiary)" }}>
           <span>
@@ -976,6 +998,7 @@ export const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.showToolCalls === next.showToolCalls &&
     toolCallsRenderSignature(prev.toolCalls) === toolCallsRenderSignature(next.toolCalls) &&
     messageEventsRenderSignature(prev.messageEvents) === messageEventsRenderSignature(next.messageEvents) &&
+    agentTasksRenderSignature(prev.agentTasks) === agentTasksRenderSignature(next.agentTasks) &&
     JSON.stringify(prev.jiuwenPermission || null) === JSON.stringify(next.jiuwenPermission || null) &&
     prev.usage?.input === next.usage?.input &&
     prev.usage?.output === next.usage?.output &&

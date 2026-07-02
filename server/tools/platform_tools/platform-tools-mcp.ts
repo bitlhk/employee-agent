@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 /**
- * lingxia-mcp-server.ts — 灵虾平台 MCP Server
+ * platform-tools-mcp.ts — EA platform tools MCP server
  * 
  * 通过 MCP 协议向 OpenClaw Gateway 暴露平台能力：
  * - create_scheduled_task: 创建定时任务
  * - send_notification: 发送通知到用户渠道
  * - get_user_channels: 查询可用渠道
+ * - list_available_agents / submit_agent_task: 提交外部 Agent 异步任务
  */
-import { readFileSync } from "fs";
-import { INTERNAL_BASE_URL as BASE } from "./helpers";
-
 const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
-const ADOPT_ID = process.env.LINGXIA_ADOPT_ID || "";
+const ADOPT_ID = process.env.LINGXIA_ADOPT_ID || process.env.JIUWEN_CHANNEL_ID || "";
+const BASE = process.env.INTERNAL_BASE_URL || process.env.LINGXIA_INTERNAL_BASE_URL || "http://127.0.0.1:5180";
 
 // MCP stdio protocol: read JSON-RPC from stdin, write to stdout
 let buffer = "";
@@ -48,6 +47,10 @@ function sendResult(id: any, result: any) {
 
 function sendError(id: any, code: number, message: string) {
   send({ jsonrpc: "2.0", id, error: { code, message } });
+}
+
+function hasRequestId(id: any): boolean {
+  return id !== undefined && id !== null;
 }
 
 const TOOLS = [
@@ -87,6 +90,29 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "list_available_agents",
+    description: "List external business Agents available to the current EA employee agent. Call before submit_agent_task when the user asks for a task that should be delegated to a specialized Agent, especially requests like 调用风控 Agent, 外部 Agent, 异步 Agent, risk-control Agent.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "submit_agent_task",
+    description: "Submit an asynchronous task to an external specialized Agent. Use for long-running domain tasks that should be handled by another Agent, such as 风控 Agent risk-control analysis, insurance review, due diligence, or batch research. When the user explicitly asks to call 风控 Agent or external Agent, use this tool instead of acp_chat, search, grep, or generic MCP tools. The result will be written back to EA as a task result instead of blocking the current chat.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Agent id returned by list_available_agents" },
+        task: { type: "string", description: "Detailed task instruction for the external Agent" },
+        conversation_id: { type: "string", description: "Optional current EA conversation id for anchoring result card" },
+        session_id: { type: "string", description: "Optional current JiuwenSwarm session id for traceability" },
+        source_message_id: { type: "string", description: "Optional current user message id for anchoring result card" },
+      },
+      required: ["agent_id", "task"],
+    },
+  },
 ];
 
 async function handleMessage(msg: any) {
@@ -96,12 +122,27 @@ async function handleMessage(msg: any) {
     sendResult(id, {
       protocolVersion: "2024-11-05",
       capabilities: { tools: {} },
-      serverInfo: { name: "lingxia-platform", version: "1.0.0" },
+      serverInfo: { name: "platform-tools", version: "1.0.0" },
     });
     return;
   }
 
   if (method === "notifications/initialized") return; // no response needed
+
+  if (method === "ping") {
+    sendResult(id, {});
+    return;
+  }
+
+  if (method === "resources/list") {
+    sendResult(id, { resources: [] });
+    return;
+  }
+
+  if (method === "prompts/list") {
+    sendResult(id, { prompts: [] });
+    return;
+  }
 
   if (method === "tools/list") {
     sendResult(id, { tools: TOOLS });
@@ -135,6 +176,55 @@ async function handleMessage(msg: any) {
           if (cfg.webhook?.enabled) channels.push("webhook");
         } catch {}
         sendResult(id, { content: [{ type: "text", text: `Available channels: ${channels.join(", ")}` }] });
+        return;
+      }
+
+      if (toolName === "list_available_agents") {
+        const resp = await fetch(`${BASE}/api/claw/agents/available?adoptId=${encodeURIComponent(adoptId)}`, {
+          headers: { "X-Internal-Key": INTERNAL_KEY },
+        });
+        const data = await resp.json() as any;
+        if (!resp.ok) {
+          sendResult(id, { content: [{ type: "text", text: `Failed: ${data?.error || resp.status}` }], isError: true });
+          return;
+        }
+        const agents = Array.isArray(data?.agents) ? data.agents : [];
+        if (agents.length === 0) {
+          sendResult(id, { content: [{ type: "text", text: "No external Agents are available for this employee agent." }] });
+          return;
+        }
+        const lines = agents.map((agent: any) => {
+          const ready = agent.routeReady ? "ready" : `not ready: ${agent.reason || "unknown"}`;
+          const capabilities = Array.isArray(agent.capabilities) && agent.capabilities.length ? ` capabilities=${agent.capabilities.join(",")}` : "";
+          return `- ${agent.id}: ${agent.name} (${ready}; protocol=${agent.adapterProtocol || "unknown"}${capabilities}) ${agent.description || ""}`.trim();
+        });
+        sendResult(id, { content: [{ type: "text", text: `Available external Agents:\n${lines.join("\n")}` }] });
+        return;
+      }
+
+      if (toolName === "submit_agent_task") {
+        const agentId = String(args.agent_id || args.agentId || "").trim();
+        const task = String(args.task || args.message || "").trim();
+        if (!agentId) { sendResult(id, { content: [{ type: "text", text: "Error: agent_id is required" }], isError: true }); return; }
+        if (!task) { sendResult(id, { content: [{ type: "text", text: "Error: task is required" }], isError: true }); return; }
+        const resp = await fetch(`${BASE}/api/claw/agent-tasks/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Key": INTERNAL_KEY },
+          body: JSON.stringify({
+            adoptId,
+            agentId,
+            task,
+            conversationId: args.conversation_id || args.conversationId,
+            sessionId: args.session_id || args.sessionId,
+            sourceMessageId: args.source_message_id || args.sourceMessageId,
+          }),
+        });
+        const data = await resp.json() as any;
+        if (!resp.ok) {
+          sendResult(id, { content: [{ type: "text", text: `Agent task submit failed: ${data?.error || resp.status}` }], isError: true });
+          return;
+        }
+        sendResult(id, { content: [{ type: "text", text: `Agent task submitted. task_id=${data.taskId}. EA will track the asynchronous result in the Agent task record.` }] });
         return;
       }
 
@@ -215,5 +305,5 @@ async function handleMessage(msg: any) {
   }
 
   // Unknown method
-  if (id) sendError(id, -32601, `Method not found: ${method}`);
+  if (hasRequestId(id)) sendError(id, -32601, `Method not found: ${method}`);
 }

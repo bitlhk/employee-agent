@@ -38,8 +38,23 @@ const effectiveAssets: EffectiveRoleAssets = {
   },
 };
 
+const riskRole: AgentRoleTemplate = {
+  ...role,
+  id: "post-loan-risk-control",
+  name: "风控经理",
+  defaultSkills: ["post-loan-risk-prediction"],
+  mcpServers: ["post_loan_risk_data"],
+};
+
 describe("jiuwenswarm role scope manifest", () => {
   it("builds a deterministic role scope manifest", () => {
+    const scopedAssets = {
+      ...effectiveAssets,
+      mcpServers: {
+        ...effectiveAssets.mcpServers,
+        default: ["platform_tools", "wealth_assistant_customer"],
+      },
+    };
     expect(buildJiuwenSwarmRoleScopeManifest(role, effectiveAssets)).toEqual({
       version: 1,
       runtime: "jiuwenswarm",
@@ -49,7 +64,7 @@ describe("jiuwenswarm role scope manifest", () => {
         industry: "banking",
         status: "mvp",
       },
-      effectiveAssets,
+      effectiveAssets: scopedAssets,
       enforcement: {
         skills: "per-agent-workspace",
         mcp: "service-side-agent-context",
@@ -66,7 +81,30 @@ describe("jiuwenswarm role scope manifest", () => {
       expect(first.changed).toBe(true);
       expect(second.changed).toBe(false);
       expect(first.manifestPath).toBe(path.join(root, JIUWENSWARM_ROLE_SCOPE_MANIFEST));
-      expect(JSON.parse(readFileSync(first.manifestPath, "utf8")).effectiveAssets).toEqual(effectiveAssets);
+      expect(JSON.parse(readFileSync(first.manifestPath, "utf8")).effectiveAssets.mcpServers.default).toEqual([
+        "platform_tools",
+        "wealth_assistant_customer",
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("writes risk-control routing guidance into JiuwenSwarm identity", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "jiuwenswarm-role-scope-risk-"));
+    try {
+      const result = writeJiuwenSwarmRoleScopeManifest({
+        workspaceDir: root,
+        role: riskRole,
+        effectiveAssets,
+      });
+      const identityPath = path.join(root, "IDENTITY.md");
+      expect(result.identityChanged).toBe(true);
+      const identity = readFileSync(identityPath, "utf8");
+      expect(identity).toContain("轻量数据查询");
+      expect(identity).toContain("优先使用本地已安装的岗位技能和贷后风控 MCP");
+      expect(identity).toContain("完整企业风险评估");
+      expect(identity).toContain("远程风控 Agent 异步任务");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

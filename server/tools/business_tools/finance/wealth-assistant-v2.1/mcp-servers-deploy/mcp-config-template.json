@@ -1,0 +1,1 @@
+{"mcpServers": {"customer-server": {"type": "url", "url": "http://localhost:3101/mcp", "headers": {"Authorization": "Bearer ${WEALTH_API_TOKEN}"}}, "product-server": {"type": "url", "url": "http://localhost:3102/mcp", "headers": {"Authorization": "Bearer ${WEALTH_API_TOKEN}"}}}}

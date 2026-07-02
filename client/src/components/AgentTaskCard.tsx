@@ -1,12 +1,12 @@
 /**
- * AgentTaskCard.tsx — Agent Team 任务卡片
+ * AgentTaskCard.tsx
  *
- * 显示 PM 分派的子任务执行状态：
- * - 标题栏：agent 名字 + 状态（执行中/完成）
- * - 进度区：工具调用逐行叠加（✅ done / ⚙️ running）
- * - 结果区：完成后可展开查看 markdown 渲染的完整结果
+ * Displays async business-agent tasks submitted through EA platform tools.
+ * The card is intentionally self-contained: the main chat keeps local
+ * JiuwenSwarm replies, while remote Agent progress and result live here.
  */
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, CircleCheck, CircleX, Clock3, Loader2 } from "lucide-react";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 
 export interface AgentToolStep {
@@ -15,103 +15,221 @@ export interface AgentToolStep {
   durationMs?: number;
 }
 
+export type AgentTaskStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "done";
+
 export interface AgentTask {
   id: string;
-  agentId: string;
-  agentName: string;
-  prompt: string;
-  status: "running" | "done";
-  steps: AgentToolStep[];
+  adoptId?: string;
+  adopt_id?: string;
+  agentId?: string;
+  agent_id?: string;
+  agentName?: string;
+  agent_name?: string;
+  prompt?: string;
+  input?: string;
+  status: AgentTaskStatus | string;
+  steps?: AgentToolStep[];
   result?: string;
+  resultMarkdown?: string | null;
+  result_markdown?: string | null;
+  errorMessage?: string | null;
+  error_message?: string | null;
+  remoteTaskId?: string | null;
+  remote_task_id?: string | null;
+  adapterProtocol?: string | null;
+  adapter_protocol?: string | null;
+  createdAt?: string | Date | null;
+  created_at?: string | Date | null;
+  startedAt?: string | Date | null;
+  started_at?: string | Date | null;
+  completedAt?: string | Date | null;
+  completed_at?: string | Date | null;
+  updatedAt?: string | Date | null;
+  updated_at?: string | Date | null;
   durationMs?: number;
 }
 
+const STATUS_META: Record<string, { label: string; tone: string }> = {
+  pending: { label: "处理中", tone: "pending" },
+  running: { label: "处理中", tone: "running" },
+  succeeded: { label: "已完成", tone: "success" },
+  done: { label: "已完成", tone: "success" },
+  failed: { label: "失败", tone: "danger" },
+  cancelled: { label: "已取消", tone: "muted" },
+};
+
+function value<T>(primary: T | undefined | null, fallback: T | undefined | null): T | undefined {
+  return primary ?? fallback ?? undefined;
+}
+
+function toTime(value: string | Date | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(time) ? time : undefined;
+}
+
+function formatTime(value: string | Date | null | undefined): string {
+  const time = toTime(value);
+  if (!time) return "";
+  return new Date(time).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+function formatElapsed(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0s";
+  const total = Math.max(0, Math.floor(ms / 1000));
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  if (minutes < 60) return `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function compactId(id: string | null | undefined): string {
+  const s = String(id || "").trim();
+  if (s.length <= 18) return s;
+  return `${s.slice(0, 10)}...${s.slice(-6)}`;
+}
+
+function displayAgentName(agentId: string, name?: string): string {
+  const raw = String(name || agentId || "").trim();
+  if (agentId === "risk-control-a2a" || raw === "risk-control-a2a" || raw === "风控 Agent") {
+    return "风控 Agent";
+  }
+  return raw || "外部智能体";
+}
+
+function parseRawEvents(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return `${parsed.length} 条远端事件`;
+    if (parsed && typeof parsed === "object") return "已接收远端事件";
+  } catch {}
+  return undefined;
+}
+
 export function AgentTaskCard({ task }: { task: AgentTask }) {
+  const normalized = useMemo(() => {
+    const status = String(task.status || "pending");
+    const result = value(task.resultMarkdown, task.result_markdown) || task.result || "";
+    const error = value(task.errorMessage, task.error_message) || "";
+    const input = task.input || task.prompt || "";
+    const agentId = value(task.agentId, task.agent_id) || "";
+    const agentName = displayAgentName(agentId, value(task.agentName, task.agent_name));
+    const remoteTaskId = value(task.remoteTaskId, task.remote_task_id) || "";
+    const adapterProtocol = value(task.adapterProtocol, task.adapter_protocol) || "";
+    const createdAt = value(task.createdAt, task.created_at);
+    const startedAt = value(task.startedAt, task.started_at);
+    const completedAt = value(task.completedAt, task.completed_at);
+    const updatedAt = value(task.updatedAt, task.updated_at);
+    const isActive = status === "pending" || status === "running";
+    const isDone = status === "succeeded" || status === "done";
+    const isFailed = status === "failed" || status === "cancelled";
+
+    return {
+      status,
+      result,
+      error,
+      input,
+      agentId,
+      agentName,
+      remoteTaskId,
+      adapterProtocol,
+      createdAt,
+      startedAt,
+      completedAt,
+      updatedAt,
+      isActive,
+      isDone,
+      isFailed,
+      steps: task.steps || [],
+    };
+  }, [task]);
+
+  const [now, setNow] = useState(() => Date.now());
   const [expanded, setExpanded] = useState(false);
-  const isDone = task.status === "done";
+
+  useEffect(() => {
+    if (!normalized.isActive) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [normalized.isActive]);
+
+  const statusMeta = STATUS_META[normalized.status] || { label: normalized.status || "未知", tone: "muted" };
+  const startTime = toTime(normalized.startedAt) || toTime(normalized.createdAt) || now;
+  const endTime = toTime(normalized.completedAt) || now;
+  const elapsedMs = task.durationMs ?? Math.max(0, endTime - startTime);
+  const remoteEventText = parseRawEvents((task as any).rawEventsJson || (task as any).raw_events_json);
+  const metaItems = [
+    `任务 ${compactId(task.id)}`,
+    normalized.remoteTaskId ? `远端 ${compactId(normalized.remoteTaskId)}` : "",
+    normalized.adapterProtocol || "",
+    normalized.createdAt ? `提交 ${formatTime(normalized.createdAt)}` : "",
+    normalized.updatedAt ? `更新 ${formatTime(normalized.updatedAt)}` : "",
+  ].filter(Boolean);
+
+  const Icon = normalized.isDone ? CircleCheck : normalized.isFailed ? CircleX : normalized.isActive ? Loader2 : Clock3;
 
   return (
-    <div style={{
-      margin: "6px 0",
-      borderRadius: 12,
-      border: `1px solid ${isDone ? "rgba(34,197,94,0.2)" : "rgba(99,102,241,0.2)"}`,
-      background: isDone ? "rgba(34,197,94,0.03)" : "rgba(99,102,241,0.03)",
-      overflow: "hidden",
-    }}>
-      {/* Header */}
-      <div
-        onClick={() => isDone && setExpanded(!expanded)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "10px 14px",
-          cursor: isDone ? "pointer" : "default",
-          userSelect: "none",
-        }}
-      >
-        <span style={{ fontSize: 15 }}>{isDone ? "\u2705" : "\u23f3"}</span>
-        <span style={{
-          fontWeight: 600,
-          fontSize: 13,
-          color: "var(--oc-text-primary)",
-          flex: 1,
-        }}>
-          {task.agentName}
+    <section className={`agent-task-card agent-task-card--${statusMeta.tone}`}>
+      <button type="button" className="agent-task-card__header" onClick={() => setExpanded((v) => !v)}>
+        <span className="agent-task-card__icon">
+          <Icon size={16} className={normalized.isActive ? "agent-task-card__spin" : undefined} />
         </span>
-        {isDone && task.durationMs && (
-          <span style={{ fontSize: 11, color: "var(--oc-text-secondary)", opacity: 0.6 }}>
-            {(task.durationMs / 1000).toFixed(1)}s
+        <span className="agent-task-card__main">
+          <span className="agent-task-card__title-row">
+            <span className="agent-task-card__title">{normalized.agentName}</span>
+            <span className={`agent-task-card__badge agent-task-card__badge--${statusMeta.tone}`}>{statusMeta.label}</span>
           </span>
-        )}
-        {isDone && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.4, transition: "transform 0.2s", transform: expanded ? "rotate(180deg)" : "rotate(0)" }}>
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        )}
-        {!isDone && (
-          <span style={{ fontSize: 11, color: "#818cf8", animation: "pulse 1.5s ease-in-out infinite" }}>
-            \u6267\u884c\u4e2d...
+          <span className="agent-task-card__meta agent-task-card__meta--compact">
+            {metaItems.map((item) => <span key={item}>{item}</span>)}
           </span>
-        )}
-      </div>
+        </span>
+        <span className="agent-task-card__elapsed">{formatElapsed(elapsedMs)}</span>
+        <ChevronDown size={15} className={`agent-task-card__chevron ${expanded ? "is-open" : ""}`} />
+      </button>
 
-      {/* Steps progress */}
-      {task.steps.length > 0 && (
-        <div style={{ padding: "0 14px 8px", display: "flex", flexDirection: "column", gap: 3 }}>
-          {task.steps.map((step, i) => (
-            <div key={i} style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 11,
-              color: step.status === "running" ? "#818cf8" : "var(--oc-text-secondary)",
-              opacity: step.status === "running" ? 1 : 0.6,
-            }}>
-              <span style={{ fontSize: 10, width: 14, textAlign: "center" }}>
-                {step.status === "running" ? "\u2699\ufe0f" : step.status === "done" ? "\u2705" : "\u274c"}
-              </span>
-              <span style={{ fontFamily: "monospace" }}>{step.name}</span>
-              {step.durationMs != null && (
-                <span style={{ opacity: 0.5, marginLeft: "auto" }}>{(step.durationMs / 1000).toFixed(1)}s</span>
-              )}
+      {expanded ? (
+        <div className="agent-task-card__body">
+          {normalized.steps.length > 0 ? (
+            <div className="agent-task-card__steps">
+              {normalized.steps.map((step, i) => (
+                <div key={`${step.name}-${i}`} className={`agent-task-card__step agent-task-card__step--${step.status}`}>
+                  <span>{step.status === "running" ? "运行中" : step.status === "done" ? "完成" : "异常"}</span>
+                  <strong>{step.name}</strong>
+                  {step.durationMs != null ? <em>{formatElapsed(step.durationMs)}</em> : null}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          ) : null}
 
-      {/* Expanded result */}
-      {expanded && task.result && (
-        <div style={{
-          borderTop: "1px solid var(--oc-border)",
-          padding: "12px 14px",
-          fontSize: 13,
-          maxHeight: 400,
-          overflowY: "auto",
-        }}>
-          <ChatMarkdown content={task.result} />
+          {normalized.isActive ? (
+            <div className="agent-task-card__progress">
+              <span className="agent-task-card__progress-dot" />
+              <span>{normalized.status === "pending" ? "任务已提交，等待远端 Agent 接收。" : "远端 Agent 正在处理，结果完成后会写回此卡片。"}</span>
+              {remoteEventText ? <span className="agent-task-card__progress-extra">{remoteEventText}</span> : null}
+            </div>
+          ) : null}
+
+          {normalized.error ? (
+            <div className="agent-task-card__error">{normalized.error}</div>
+          ) : null}
+
+          {normalized.result ? (
+            <div className="agent-task-card__result">
+              <ChatMarkdown content={normalized.result} />
+            </div>
+          ) : null}
         </div>
-      )}
-    </div>
+      ) : null}
+    </section>
   );
 }

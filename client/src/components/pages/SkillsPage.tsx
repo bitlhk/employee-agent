@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 import {
   AlertTriangle,
   BarChart3,
+  Bot,
   BriefcaseBusiness,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -88,12 +90,13 @@ type SkillIntroductionResponse = {
   source: "runtime" | "source" | "registry" | "fallback";
 };
 
-const SKILL_TAB_KEYS = ["mine", "market", "mcp"] as const;
+const SKILL_TAB_KEYS = ["mine", "market", "mcp", "agent"] as const;
 type SkillTab = (typeof SKILL_TAB_KEYS)[number];
 type SourceFilter = "all" | SourceKind;
 type StateFilter = "all" | "ready" | "attention" | "disabled";
 const SKILL_TAB_CACHE_KEY = "employee-agent:skills:last-tab";
 const MCP_TOOLS_CACHE_PREFIX = "employee-agent:mcp-tools:v3:";
+const AGENT_TOOLS_CACHE_PREFIX = "employee-agent:agent-tools:v1:";
 
 type McpServerStatus = "available" | "disabled" | "missing";
 type McpLiveStatus = "live" | "fallback" | "unavailable" | "unsupported";
@@ -142,6 +145,44 @@ type McpToolsResponse = {
     checkedAt?: string;
     ttlMs?: number;
   };
+};
+
+type ExternalAgentSummary = {
+  id: string;
+  name: string;
+  description: string;
+  icon?: string;
+  tags?: string;
+  providerType?: string;
+  adapterProtocol?: string;
+  executionMode?: string;
+  routeReady: boolean;
+  reason?: string;
+  healthStatus?: string;
+  capabilities?: string[];
+  lastHealthCheck?: string | null;
+};
+
+type ExternalAgentTask = {
+  id: string;
+  adoptId: string;
+  agentId: string;
+  status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  input: string;
+  resultMarkdown?: string | null;
+  errorMessage?: string | null;
+  adapterProtocol?: string | null;
+  createdAt?: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+};
+
+type ExternalAgentsResponse = {
+  agents: ExternalAgentSummary[];
+};
+
+type ExternalAgentTasksResponse = {
+  tasks: ExternalAgentTask[];
 };
 
 const SOURCE_LABEL: Record<SourceKind, string> = {
@@ -262,13 +303,17 @@ function cachedSkillTab(): SkillTab {
   if (typeof window === "undefined") return "mine";
   try {
     const value = window.localStorage.getItem(SKILL_TAB_CACHE_KEY);
-    if (value === "mine" || value === "market" || value === "mcp") return value;
+    if (value === "mine" || value === "market" || value === "mcp" || value === "agent") return value;
   } catch {}
   return "mine";
 }
 
 function mcpToolsCacheKey(adoptId?: string) {
   return `${MCP_TOOLS_CACHE_PREFIX}${adoptId || "none"}`;
+}
+
+function agentToolsCacheKey(adoptId?: string) {
+  return `${AGENT_TOOLS_CACHE_PREFIX}${adoptId || "none"}`;
 }
 
 function mcpStatusTone(status: McpServerStatus): "ok" | "warn" | "neutral" {
@@ -507,6 +552,269 @@ function McpToolsPage({ adoptId }: { adoptId?: string }) {
                 </section>
               );
             })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function agentStatusTone(agent: ExternalAgentSummary): "ok" | "warn" | "neutral" {
+  if (agent.routeReady) return "ok";
+  if (agent.providerType || agent.adapterProtocol) return "warn";
+  return "neutral";
+}
+
+function agentStatusLabel(agent: ExternalAgentSummary) {
+  if (agent.routeReady) return "可调用";
+  if (agent.reason) return "待配置";
+  return "未接入";
+}
+
+const AGENT_TECH_CAPABILITIES = new Set(["agent", "async-agent", "a2a"]);
+
+const AGENT_CAPABILITY_DISPLAY: Record<string, { name: string; description: string }> = {
+  "risk-control": {
+    name: "企业风险评估",
+    description: "识别企业经营、信用、司法和履约风险，生成风控结论。",
+  },
+  "post-loan-risk": {
+    name: "贷后风险评估",
+    description: "面向贷后场景评估企业风险等级、关键因子和处置建议。",
+  },
+};
+
+function agentDisplayDescription(agent: ExternalAgentSummary) {
+  const description = String(agent.description || "").trim();
+  if (!description) return "风控智能体，适合企业风险评估、贷后风控、批量尽调等长任务。";
+  return description
+    .replace(/^远端\s*JiuwenSwarm\s*/i, "")
+    .replace(/专用\s*Agent/g, "智能体")
+    .replace(/外部\s*Agent/g, "智能体");
+}
+
+function agentModeLabel(agent: ExternalAgentSummary) {
+  if (String(agent.executionMode || "").toLowerCase() === "async") return "异步";
+  return "同步";
+}
+
+function agentCapabilityTools(agent: ExternalAgentSummary): McpToolSummary[] {
+  const capabilities = (agent.capabilities || [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .filter((item) => !AGENT_TECH_CAPABILITIES.has(item.toLowerCase()));
+
+  if (capabilities.length === 0) {
+    return [{
+      name: agent.name || "Agent 任务",
+      description: "可在主对话中发起任务，完成后结果回写到原对话。",
+    }];
+  }
+
+  return capabilities.map((capability) => {
+    const display = AGENT_CAPABILITY_DISPLAY[capability];
+    return {
+      name: display?.name || capability,
+      description: display?.description || "可在主对话中发起任务，完成后结果回写到原对话。",
+    };
+  });
+}
+
+function taskStatusTone(status: ExternalAgentTask["status"]): "ok" | "warn" | "danger" | "neutral" {
+  if (status === "succeeded") return "ok";
+  if (status === "failed" || status === "cancelled") return "danger";
+  if (status === "running" || status === "pending") return "warn";
+  return "neutral";
+}
+
+function taskStatusLabel(status: ExternalAgentTask["status"]) {
+  if (status === "succeeded") return "完成";
+  if (status === "failed") return "失败";
+  if (status === "cancelled") return "已取消";
+  if (status === "running") return "执行中";
+  return "排队中";
+}
+
+function AgentToolsPage({ adoptId }: { adoptId?: string }) {
+  const [agents, setAgents] = useState<ExternalAgentSummary[]>([]);
+  const [tasks, setTasks] = useState<ExternalAgentTask[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
+
+  const loadAgents = async (options?: { silent?: boolean }) => {
+    if (!adoptId) return;
+    const silent = Boolean(options?.silent);
+    if (!silent) setLoading(true);
+    try {
+      const [agentData, taskData] = await Promise.all([
+        fetchJson<ExternalAgentsResponse>(`/api/claw/agents/available?adoptId=${encodeURIComponent(adoptId)}`),
+        fetchJson<ExternalAgentTasksResponse>(`/api/claw/agent-tasks?adoptId=${encodeURIComponent(adoptId)}&limit=20`),
+      ]);
+      const nextAgents = Array.isArray(agentData.agents) ? agentData.agents : [];
+      const nextTasks = Array.isArray(taskData.tasks) ? taskData.tasks : [];
+      setAgents(nextAgents);
+      setTasks(nextTasks);
+      const checkedAt = new Date().toISOString();
+      setLastCheckedAt(checkedAt);
+      try {
+        window.localStorage.setItem(agentToolsCacheKey(adoptId), JSON.stringify({ agents: nextAgents, tasks: nextTasks, lastCheckedAt: checkedAt }));
+      } catch {}
+    } catch (e: any) {
+      if (!silent && agents.length === 0) {
+        toast.error(`Agent 加载失败${e?.message ? `: ${e.message}` : ""}`);
+      }
+      if (!silent && agents.length === 0) {
+        setAgents([]);
+        setTasks([]);
+      }
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!adoptId) {
+      setAgents([]);
+      setTasks([]);
+      return;
+    }
+    let hadCache = false;
+    try {
+      const cached = window.localStorage.getItem(agentToolsCacheKey(adoptId));
+      const parsed = cached ? JSON.parse(cached) : null;
+      if (Array.isArray(parsed?.agents)) {
+        hadCache = parsed.agents.length > 0;
+        setAgents(parsed.agents);
+        setTasks(Array.isArray(parsed?.tasks) ? parsed.tasks : []);
+        setLastCheckedAt(parsed?.lastCheckedAt || null);
+      }
+    } catch {}
+    void loadAgents({ silent: hadCache });
+  }, [adoptId]);
+
+  useEffect(() => {
+    setOpenIds((current) => {
+      const validIds = new Set(agents.map((agent) => agent.id));
+      return new Set([...current].filter((id) => validIds.has(id)));
+    });
+  }, [agents]);
+
+  const toggle = (agentId: string) => {
+    setOpenIds((current) => {
+      const next = new Set(current);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
+      return next;
+    });
+  };
+
+  const readyCount = agents.filter((agent) => agent.routeReady).length;
+  const recentTaskByAgent = useMemo(() => {
+    const map = new Map<string, ExternalAgentTask[]>();
+    for (const task of tasks) {
+      const bucket = map.get(task.agentId) || [];
+      bucket.push(task);
+      map.set(task.agentId, bucket);
+    }
+    return map;
+  }, [tasks]);
+
+  return (
+    <div className="skills-market skills-agent">
+      <div className="skills-header">
+        <div className="skills-summary skills-muted-text text-xs">
+          共 {agents.length} 个 Agent · {readyCount} 个可调用
+          {lastCheckedAt ? ` · ${new Date(lastCheckedAt).toLocaleTimeString("zh-CN", { hour12: false })} 刷新` : ""}
+        </div>
+        <button className="skills-btn" onClick={() => void loadAgents()} disabled={loading}>
+          <RefreshCw size={14} /> 刷新
+        </button>
+      </div>
+
+      {loading && <div className="settings-card skills-market-empty"><RefreshCw size={18} className="animate-spin" /><div>正在加载 Agent...</div></div>}
+      {!loading && agents.length === 0 && <div className="settings-card skills-market-empty"><Bot size={22} /><div>暂无可用 Agent</div></div>}
+
+      {!loading && agents.length > 0 && (
+        <div className="skills-mcp-groups">
+          {agents.map((agent) => {
+            const open = openIds.has(agent.id);
+            const agentTasks = recentTaskByAgent.get(agent.id) || [];
+            const agentTools = agentCapabilityTools(agent);
+            return (
+              <section key={agent.id} className="settings-card skills-mcp-group" data-open={open ? "true" : "false"}>
+                <button
+                  className="skills-mcp-group__head"
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => toggle(agent.id)}
+                >
+                  <span className="skills-mcp-group__chevron">
+                    {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </span>
+                  <span className="skills-mcp-group__title-wrap">
+                    <span className="skills-mcp-group__title">
+                      <Bot size={16} />
+                      <span>{agent.name}</span>
+                    </span>
+                    <span className="skills-mcp-group__desc">{agentDisplayDescription(agent)}</span>
+                  </span>
+                  <span className="skills-mcp-group__status">
+                    <span className="skills-chip skills-mcp-scope skills-mcp-scope--platform">Agent</span>
+                    <span className="skills-chip skills-mcp-scope skills-mcp-scope--internal">{agentModeLabel(agent)}</span>
+                    <span className={`skills-chip ${pillToneClass(agentStatusTone(agent))}`}>
+                      {agent.routeReady ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+                      {agentStatusLabel(agent)}
+                    </span>
+                  </span>
+                </button>
+
+                <div className="skills-mcp-group__body" aria-hidden={!open}>
+                  <div className="skills-mcp-flat">
+                    <div className="skills-mcp-flat__head">
+                      <span className="skills-mcp-child__main">
+                        <span className="skills-mcp-child__name">调用方式</span>
+                        <span className="skills-mcp-child__desc">
+                          在主对话中发起任务，完成后结果会回写到原对话的任务卡片。
+                        </span>
+                      </span>
+                      <span className="skills-mcp-flat__meta">
+                        <span className={`skills-chip ${pillToneClass(agentStatusTone(agent))}`}>{agent.routeReady ? "路由就绪" : agent.reason || "待配置"}</span>
+                      </span>
+                    </div>
+
+                    <div className="skills-mcp-tools">
+                      {agentTools.slice(0, 8).map((tool) => (
+                        <div key={`${agent.id}:${tool.name}`} className="skills-mcp-tool">
+                          <div className="skills-mcp-tool__label">能力</div>
+                          <div className="skills-mcp-tool__name">{tool.name}</div>
+                          <div className="skills-mcp-tool__desc">{tool.description}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="skills-mcp-related">
+                      最近任务：
+                      {agentTasks.length === 0 ? " 暂无" : ""}
+                    </div>
+                    {agentTasks.length > 0 && (
+                      <div className="skills-mcp-tools">
+                        {agentTasks.slice(0, 4).map((task) => (
+                          <div key={task.id} className="skills-mcp-tool">
+                            <div className="skills-mcp-tool__label">{task.createdAt ? new Date(task.createdAt).toLocaleString("zh-CN", { hour12: false }) : task.id}</div>
+                            <div className="skills-mcp-tool__name">{task.input.slice(0, 48)}{task.input.length > 48 ? "..." : ""}</div>
+                            <div className="skills-mcp-tool__desc">
+                              <span className={`skills-chip ${pillToneClass(taskStatusTone(task.status))}`}>{taskStatusLabel(task.status)}</span>
+                              {task.errorMessage ? ` ${task.errorMessage}` : ""}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            );
+          })}
         </div>
       )}
     </div>
@@ -989,6 +1297,10 @@ export function SkillsPage({ adoptId }: {
             <Wrench className="page-tab__icon" aria-hidden="true" />
             MCP工具
           </button>
+          <button id="skills-tab-agent" className="page-tab" data-active={skillTab === "agent" ? "true" : "false"} role="tab" aria-selected={skillTab === "agent"} aria-controls="skills-panel-agent" tabIndex={skillTab === "agent" ? 0 : -1} onClick={() => setSkillTab("agent")}>
+            <Bot className="page-tab__icon" aria-hidden="true" />
+            Agent
+          </button>
         </div>
 
         {skillTab === "market" && (
@@ -1000,6 +1312,12 @@ export function SkillsPage({ adoptId }: {
         {skillTab === "mcp" && (
           <div id="skills-panel-mcp" className="skills-panel skills-panel--market stealth-scrollbar" role="tabpanel" aria-labelledby="skills-tab-mcp" tabIndex={0}>
             <McpToolsPage adoptId={adoptId} />
+          </div>
+        )}
+
+        {skillTab === "agent" && (
+          <div id="skills-panel-agent" className="skills-panel skills-panel--market stealth-scrollbar" role="tabpanel" aria-labelledby="skills-tab-agent" tabIndex={0}>
+            <AgentToolsPage adoptId={adoptId} />
           </div>
         )}
 

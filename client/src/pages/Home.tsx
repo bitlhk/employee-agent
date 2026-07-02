@@ -16,7 +16,7 @@ import { useRoute, useLocation } from "wouter";
 import { SidebarFooter } from "@/components/SidebarFooter";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatMessage, type JiuwenPermissionRequestCard, type MessageEventEntry, type ToolCallEntry } from "@/components/ChatMessage";
-import { AgentTaskCard, type AgentTask } from "@/components/AgentTaskCard";
+import type { AgentTask } from "@/components/AgentTaskCard";
 import { BrandIcon } from "@/components/BrandIcon";
 import { Sidebar, type PageKey } from "@/components/console/Sidebar";
 import { SessionList } from "@/components/console/SessionList";
@@ -39,6 +39,7 @@ const ENABLE_OPENCLAW_WS_CHAT = true;
 const ROLE_DISPLAY_NAMES: Record<string, string> = {
   "investment-researcher": "投顾分析",
   "wealth-manager": "财富经理",
+  "post-loan-risk-control": "风控经理",
   "credential-compliance": "审核专员",
   "insurance-advisor": "保险顾问",
   "general-assistant": "通用助手",
@@ -397,6 +398,12 @@ function buildMessageWithUploadedAttachments(text: string, uploads: UploadedLing
     "需要读取附件内容时，请使用上面的 workspace path。",
   ].join("\n");
 }
+
+function extractAgentTaskIds(text: unknown): string[] {
+  const value = String(text || "");
+  return Array.from(value.matchAll(/\bagt_[A-Za-z0-9]{8,64}\b/g), (match) => match[0]);
+}
+
 type LxMsg = {
   id: string;
   role: "user" | "assistant";
@@ -1065,6 +1072,80 @@ export default function Home() {
   });
   const activeLingxiaMsgs = chatV2Enabled ? chatV2.messages : lingxiaMsgs;
   const activeLingxiaStreaming = chatV2Enabled ? chatV2.isStreaming : lingxiaStreaming;
+  const activeAgentTaskIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const msg of activeLingxiaMsgs as LxMsg[]) {
+      for (const id of extractAgentTaskIds(msg?.text)) {
+        ids.add(id);
+      }
+    }
+    return ids;
+  }, [activeLingxiaMsgs]);
+  const activeAgentTaskIdKey = useMemo(() => Array.from(activeAgentTaskIds).sort().join(","), [activeAgentTaskIds]);
+  const agentTasksById = useMemo(() => {
+    const byId = new Map<string, AgentTask>();
+    for (const task of agentTasks) {
+      const id = String(task.id || "");
+      if (id) byId.set(id, task);
+    }
+    return byId;
+  }, [agentTasks]);
+  const hasActiveAgentTask = useMemo(
+    () => agentTasks.some((task) => {
+      const status = String(task.status || "");
+      return status === "pending" || status === "running";
+    }),
+    [agentTasks],
+  );
+  const refreshAgentTasks = useCallback(async (options?: { silent?: boolean }) => {
+    if (!resolvedAdoptId || !clawByAdoptId) {
+      setAgentTasks([]);
+      return;
+    }
+    if (!activeAgentTaskIdKey) {
+      setAgentTasks([]);
+      return;
+    }
+    try {
+      const response = await fetch(`/api/claw/agent-tasks?adoptId=${encodeURIComponent(resolvedAdoptId)}&limit=8`, {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const rows = Array.isArray(data?.tasks) ? data.tasks : [];
+      const tasks = rows
+        .filter((task: AgentTask) => {
+          return activeAgentTaskIds.has(String(task.id || ""));
+        })
+        .slice(0, 4)
+        .reverse();
+      setAgentTasks(tasks);
+    } catch (error) {
+      if (!options?.silent) {
+        console.warn("[agent-tasks] refresh failed", error);
+      }
+    }
+  }, [activeAgentTaskIdKey, activeAgentTaskIds, clawByAdoptId, resolvedAdoptId]);
+
+  useEffect(() => {
+    setAgentTasks([]);
+  }, [resolvedAdoptId, webConversationId]);
+
+  useEffect(() => {
+    if (!activeAgentTaskIdKey) return;
+    void refreshAgentTasks({ silent: true });
+  }, [activeAgentTaskIdKey, refreshAgentTasks]);
+
+  useEffect(() => {
+    if (activePage !== "chat" || !resolvedAdoptId || !clawByAdoptId) return;
+    if (!activeAgentTaskIdKey) return;
+    if (!activeLingxiaStreaming && !hasActiveAgentTask) return;
+    const intervalMs = document.hidden ? 12_000 : 3_000;
+    const timer = window.setInterval(() => {
+      void refreshAgentTasks({ silent: true });
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [activeAgentTaskIdKey, activeLingxiaStreaming, activePage, clawByAdoptId, hasActiveAgentTask, refreshAgentTasks, resolvedAdoptId]);
   const activeLingxiaMsgsRef = useRef<LxMsg[]>([]);
   const webConversationIdRef = useRef("");
   useEffect(() => { activeLingxiaMsgsRef.current = activeLingxiaMsgs as LxMsg[]; }, [activeLingxiaMsgs]);
@@ -2363,8 +2444,8 @@ export default function Home() {
                   t.id === chunk.taskId ? {
                     ...t,
                     steps: chunk.toolStatus === "started"
-                      ? [...t.steps, { name: chunk.toolName || "tool", status: "running" }]
-                      : t.steps.map((s) => s.name === (chunk.toolName || "tool") && s.status === "running"
+                      ? [...(t.steps || []), { name: chunk.toolName || "tool", status: "running" }]
+                      : (t.steps || []).map((s) => s.name === (chunk.toolName || "tool") && s.status === "running"
                           ? { ...s, status: "done", durationMs: chunk.durationMs } : s),
                   } : t
                 ));
@@ -2374,7 +2455,7 @@ export default function Home() {
                 setAgentTasks((prev) => prev.map((t) =>
                   t.id === chunk.taskId ? {
                     ...t, status: "done", result: chunk.result || "", durationMs: chunk.durationMs,
-                    steps: t.steps.map((s) => s.status === "running" ? { ...s, status: "done" } : s),
+                    steps: (t.steps || []).map((s) => s.status === "running" ? { ...s, status: "done" } : s),
                   } : t
                 ));
                 return;
@@ -3638,14 +3719,14 @@ export default function Home() {
                 </div>
               )}
 
-              {agentTasks.length > 0 && (
-                <div style={{ margin: "8px 0" }}>
-                  {agentTasks.map((t) => <AgentTaskCard key={t.id} task={t} />)}
-                </div>
-              )}
               {activeLingxiaMsgs.map((m, idx) => {
                 const isLast = idx === activeLingxiaMsgs.length - 1;
                 const isPlaceholder = isLast && m.role === "assistant" && m.text === "" && activeLingxiaStreaming;
+                const messageAgentTasks = m.role === "assistant"
+                  ? extractAgentTaskIds(m.text)
+                      .map((id) => agentTasksById.get(id))
+                      .filter((task): task is AgentTask => Boolean(task))
+                  : [];
                 return (
                   <div key={m.id || `${m.role}-${idx}`}>
                   <ChatMessage
@@ -3659,6 +3740,7 @@ export default function Home() {
                     timeLabel={m.timeLabel}
                     toolCalls={m.role === "assistant" ? (m.toolCalls ?? (isLast && !chatV2Enabled && lingxiaStreaming ? lingxiaToolCalls : [])) : undefined}
                     messageEvents={m.role === "assistant" ? (m as LxMsg).messageEvents : undefined}
+                    agentTasks={messageAgentTasks}
                     showToolCalls={lingxiaShowToolCalls}
                     usage={m.usage}
                     contextPercent={m.contextPercent}

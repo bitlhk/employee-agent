@@ -4055,6 +4055,230 @@ input.session-searchbar__input:focus-visible,
   white-space: nowrap;
 }
 
+/* ── Remote Agent task cards ── */
+.agent-task-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 2px;
+}
+.agent-task-card-list--inline {
+  margin-top: 10px;
+  margin-bottom: 2px;
+}
+.agent-task-card {
+  border: 1px solid color-mix(in oklab, var(--oc-border-subtle) 88%, transparent);
+  background: transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: none;
+}
+.agent-task-card--running,
+.agent-task-card--pending {
+  border-color: color-mix(in oklab, var(--banking-brand-red) 18%, var(--oc-border-subtle));
+}
+.agent-task-card--success {
+  border-color: color-mix(in oklab, #16a34a 18%, var(--oc-border-subtle));
+}
+.agent-task-card--danger {
+  border-color: color-mix(in oklab, #dc2626 18%, var(--oc-border-subtle));
+}
+.agent-task-card__header {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto 18px;
+  align-items: start;
+  gap: 9px;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--oc-text-primary);
+  cursor: pointer;
+}
+.agent-task-card__header:hover {
+  background: color-mix(in oklab, var(--oc-bg-hover) 46%, transparent);
+}
+.agent-task-card__icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--banking-brand-red);
+  background: color-mix(in oklab, var(--banking-brand-red) 9%, transparent);
+}
+.agent-task-card__spin {
+  animation: agent-task-spin 1s linear infinite;
+}
+@keyframes agent-task-spin {
+  to { transform: rotate(360deg); }
+}
+.agent-task-card__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-task-card__title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-task-card__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--oc-text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-task-card__subtitle {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--oc-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-task-card__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+}
+.agent-task-card__badge--pending,
+.agent-task-card__badge--running {
+  color: var(--banking-brand-red);
+  background: color-mix(in oklab, var(--banking-brand-red) 9%, transparent);
+}
+.agent-task-card__badge--success {
+  color: #15803d;
+  background: color-mix(in oklab, #16a34a 10%, transparent);
+}
+.agent-task-card__badge--danger {
+  color: #b91c1c;
+  background: color-mix(in oklab, #dc2626 10%, transparent);
+}
+.agent-task-card__badge--muted {
+  color: var(--oc-text-secondary);
+  background: color-mix(in oklab, var(--oc-text-secondary) 10%, transparent);
+}
+.agent-task-card__elapsed {
+  color: var(--oc-text-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding-top: 2px;
+}
+.agent-task-card__chevron {
+  color: var(--oc-text-tertiary);
+  margin-top: 3px;
+  transition: transform 160ms ease;
+}
+.agent-task-card__chevron.is-open {
+  transform: rotate(180deg);
+}
+.agent-task-card__body {
+  border-top: 1px solid var(--oc-border-subtle);
+  padding: 12px 12px 14px;
+  background: color-mix(in oklab, var(--oc-bg-surface) 54%, transparent);
+}
+.agent-task-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--oc-text-tertiary);
+  font-size: 12px;
+}
+.agent-task-card__meta--compact {
+  margin-bottom: 0;
+  gap: 5px;
+}
+.agent-task-card__meta span {
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--oc-text-primary) 5%, transparent);
+  padding: 2px 7px;
+}
+.agent-task-card__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.agent-task-card__step {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--oc-text-secondary);
+}
+.agent-task-card__step strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.agent-task-card__step em {
+  color: var(--oc-text-tertiary);
+  font-style: normal;
+}
+.agent-task-card__progress {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--oc-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.agent-task-card__progress-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--banking-brand-red);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--banking-brand-red) 10%, transparent);
+}
+.agent-task-card__progress-extra {
+  color: var(--oc-text-tertiary);
+}
+.agent-task-card__error {
+  border-radius: 8px;
+  background: color-mix(in oklab, #dc2626 8%, transparent);
+  color: #b91c1c;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.agent-task-card__result {
+  max-height: 520px;
+  overflow: auto;
+  padding-top: 2px;
+}
+.agent-task-card__result .lingxia-markdown {
+  overflow: visible;
+  font-size: 15px;
+}
+.agent-task-card__result table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
 /* ── Markdown Typography Final ── */
 .lingxia-markdown {
   line-height: 1.74;

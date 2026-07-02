@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { auditEvents, businessAgents, skillMarketplace, agentCallLogs, BusinessAgent, InsertBusinessAgent } from "../../drizzle/schema";
+import { auditEvents, businessAgents, skillMarketplace, agentCallLogs, agentTasks, BusinessAgent, InsertBusinessAgent, InsertAgentTask } from "../../drizzle/schema";
 import { getDb } from "./connection";
 
 // ── Business Agents CRUD ────────────────────────────────────────────────
@@ -206,6 +206,36 @@ export async function updateAgentFields(id: string, fields: Record<string, any>)
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.update(businessAgents).set(fields).where(eq(businessAgents.id, id));
+}
+
+export async function createAgentTask(data: InsertAgentTask): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.insert(agentTasks).values(data as any);
+}
+
+export async function getAgentTask(id: string): Promise<any | undefined> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const rows = await db.select().from(agentTasks).where(eq(agentTasks.id, id)).limit(1);
+  return rows[0];
+}
+
+export async function listAgentTasks(adoptId: string, limit = 30): Promise<any[]> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  return db
+    .select()
+    .from(agentTasks)
+    .where(eq(agentTasks.adoptId, adoptId))
+    .orderBy(desc(agentTasks.createdAt))
+    .limit(Math.max(1, Math.min(100, Number(limit || 30))));
+}
+
+export async function updateAgentTask(id: string, fields: Record<string, any>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(agentTasks).set(fields).where(eq(agentTasks.id, id));
 }
 
 // ── TIL 审计查询（Day 4 审计面板）────────────────────────────────────

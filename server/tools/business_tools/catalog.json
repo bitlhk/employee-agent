@@ -1,0 +1,53 @@
+{
+  "businessTools": [
+    {
+      "serverId": "wealth_assistant_customer",
+      "domain": "finance",
+      "sourcePath": "server/tools/business_tools/finance/wealth-assistant-v2.1/mcp-servers-deploy/customer-mcp-server",
+      "runtime": "node",
+      "purpose": "Wealth customer list, profile, and context lookup"
+    },
+    {
+      "serverId": "wealth_assistant_product",
+      "domain": "finance",
+      "sourcePath": "server/tools/business_tools/finance/wealth-assistant-v2.1/mcp-servers-deploy/product-mcp-server",
+      "runtime": "node",
+      "purpose": "Wealth product search and product information lookup"
+    },
+    {
+      "serverId": "wind_financial_docs",
+      "domain": "finance",
+      "sourcePath": "server/tools/business_tools/finance/wind-stdio-bridge",
+      "runtime": "node",
+      "purpose": "Wind financial documents bridge"
+    },
+    {
+      "serverId": "post_loan_risk_data",
+      "domain": "risk",
+      "sourcePath": "server/tools/business_tools/risk/post-loan-risk-data",
+      "runtime": "python/node",
+      "purpose": "Post-loan enterprise risk data MCP"
+    },
+    {
+      "serverId": "credential_image_workspace",
+      "domain": "credential",
+      "sourcePath": "server/tools/business_tools/credential/credential-image-workspace",
+      "runtime": "node",
+      "purpose": "Credential image extraction from user workspace files"
+    },
+    {
+      "serverId": "group_insurance_audit",
+      "domain": "insurance",
+      "sourcePath": "server/tools/business_tools/insurance/group-insurance",
+      "runtime": "python",
+      "purpose": "Group insurance document extraction and audit workflow"
+    },
+    {
+      "serverId": "insurance_kb",
+      "domain": "insurance",
+      "sourcePath": "server/tools/business_tools/insurance/insurance-kb-http-mcp",
+      "runtime": "node",
+      "purpose": "Insurance knowledge-base MCP adapter"
+    }
+  ]
+}

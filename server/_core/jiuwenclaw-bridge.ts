@@ -293,20 +293,14 @@ export function stringifyJiuwenToolPayload(value: unknown): string {
 
 function isJiuwenHumanApprovalEvent(eventType: string, delta: unknown): boolean {
   const normalizedEventType = String(eventType || "").toLowerCase();
+  if (normalizedEventType === "chat.tool_call" || normalizedEventType === "chat.tool_result") return false;
   if (normalizedEventType === "chat.ask_user_question") return true;
+  if (!delta || typeof delta !== "object") return false;
 
-  const payload = stableJson(delta).toLowerCase();
-  return (
-    payload.includes('"source":"permission_interrupt"')
-    || payload.includes('"source":"confirm_interrupt"')
-    || payload.includes('"source":"ask_user_interrupt"')
-    || payload.includes("permissioninterrupt")
-    || payload.includes("permission interrupt")
-    || payload.includes("human approval")
-    || payload.includes("human_approval")
-    || payload.includes("ask_user")
-    || payload.includes("requires_confirmation")
-  );
+  const source = String((delta as Record<string, unknown>).source || "").trim().toLowerCase();
+  return source === "permission_interrupt"
+    || source === "confirm_interrupt"
+    || source === "ask_user_interrupt";
 }
 
 function summarizeJiuwenApprovalEvent(eventType: string, delta: unknown): string {

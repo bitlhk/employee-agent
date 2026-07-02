@@ -30,6 +30,8 @@ import { registerFeishuRoutes } from "./claw-feishu";
 import { registerSkillRoutes } from "./claw-skills";
 import { registerCollabRoutes } from "./claw-collab";
 import { registerBusinessRoutes } from "./claw-business";
+import { registerAgentTaskRoutes } from "./claw-agent-tasks";
+import { registerPlatformToolsMcpRoutes } from "./platform-tools-mcp";
 import { registerSkillConfigRoutes } from "./claw-skill-config";
 import { registerToolsPolicyRoutes } from "./claw-tools-policy";
 import { registerCoreFileRoutes } from "./claw-core-files";
@@ -243,6 +245,9 @@ async function startServer() {
       if (req.path === "/api/claw/chat-stream") {
         return false;
       }
+      if (req.path === "/api/internal/platform-tools/mcp") {
+        return false;
+      }
       // 如果请求头明确要求不压缩，则不压缩
       if (req.headers["x-no-compression"]) {
         return false;
@@ -325,6 +330,8 @@ async function startServer() {
   registerSkillRoutes(app);
   registerCollabRoutes(app);
   registerBusinessRoutes(app);
+  registerAgentTaskRoutes(app);
+  registerPlatformToolsMcpRoutes(app);
   registerSkillConfigRoutes(app);
   registerToolsPolicyRoutes(app);
   registerCoreFileRoutes(app);
