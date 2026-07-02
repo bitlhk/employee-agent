@@ -1,5 +1,6 @@
 import express from "express";
 import { randomUUID } from "crypto";
+import { sql } from "drizzle-orm";
 import { requireClawOwner } from "./helpers";
 import {
   createAgentTask,
@@ -499,7 +500,7 @@ async function runA2ATask(agent: any, input: string): Promise<{ text: string; re
 }
 
 async function runAgentTaskInBackground(taskId: string, agent: any, input: string) {
-  await updateAgentTask(taskId, { status: "running" as AgentTaskStatus, startedAt: new Date(), errorMessage: null });
+  await updateAgentTask(taskId, { status: "running" as AgentTaskStatus, startedAt: sql`CURRENT_TIMESTAMP`, errorMessage: null });
   try {
     const adapterProtocol = String(agent.adapterProtocol || "").trim();
     if (!agent.apiUrl) throw new Error("Agent endpoint is not configured");
@@ -513,14 +514,14 @@ async function runAgentTaskInBackground(taskId: string, agent: any, input: strin
       resultMarkdown: truncateUtf8(cleanedText, AGENT_TASK_TEXT_LIMIT_BYTES),
       remoteTaskId: result.remoteTaskId || null,
       rawEventsJson: summarizeA2AEvents(result.rawEvents || []),
-      completedAt: new Date(),
+      completedAt: sql`CURRENT_TIMESTAMP`,
       errorMessage: null,
     });
   } catch (error: any) {
     await updateAgentTask(taskId, {
       status: "failed" as AgentTaskStatus,
       errorMessage: truncateUtf8(error?.message || String(error), AGENT_TASK_ERROR_LIMIT_BYTES),
-      completedAt: new Date(),
+      completedAt: sql`CURRENT_TIMESTAMP`,
     });
   }
 }
