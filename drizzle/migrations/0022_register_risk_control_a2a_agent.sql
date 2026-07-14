@@ -1,0 +1,57 @@
+INSERT INTO `business_agents`
+  (
+    `id`,
+    `name`,
+    `description`,
+    `kind`,
+    `api_url`,
+    `remote_agent_id`,
+    `icon`,
+    `enabled`,
+    `sort_order`,
+    `health_status`,
+    `allowed_profiles`,
+    `tags`,
+    `ui_config`,
+    `provider_type`,
+    `adapter_protocol`,
+    `capabilities_json`,
+    `endpoint_config_json`
+  )
+VALUES
+  (
+    'demo-external-a2a-agent',
+    '示例外部 Agent',
+    '示例外部智能体，适合需要异步处理的长任务或专项任务。',
+    'remote',
+    '',
+    'main',
+    '🤖',
+    0,
+    10,
+    'unknown',
+    'plus,internal',
+    '示例,A2A,远端Agent',
+    '{"badge":"A2A","displayMode":"agent-task","resultFormat":"markdown"}',
+    'a2a',
+    'agent-a2a-v1',
+    '["agent","async-agent","a2a","business-review","long-running-task"]',
+    '{"path":"/a2a","stream":false,"method":"message/send","timeoutMs":600000,"executionMode":"async","roleTemplates":["business-review"]}'
+  )
+ON DUPLICATE KEY UPDATE
+  `name` = VALUES(`name`),
+  `description` = VALUES(`description`),
+  `kind` = VALUES(`kind`),
+  `api_url` = VALUES(`api_url`),
+  `remote_agent_id` = VALUES(`remote_agent_id`),
+  `icon` = VALUES(`icon`),
+  `enabled` = VALUES(`enabled`),
+  `sort_order` = VALUES(`sort_order`),
+  `health_status` = VALUES(`health_status`),
+  `allowed_profiles` = VALUES(`allowed_profiles`),
+  `tags` = VALUES(`tags`),
+  `ui_config` = VALUES(`ui_config`),
+  `provider_type` = VALUES(`provider_type`),
+  `adapter_protocol` = VALUES(`adapter_protocol`),
+  `capabilities_json` = VALUES(`capabilities_json`),
+  `endpoint_config_json` = VALUES(`endpoint_config_json`);

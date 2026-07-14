@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1767680323226,
+      "tag": "0000_massive_lorna_dane",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1767680372075,
+      "tag": "0001_jazzy_hellcat",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1767854927182,
+      "tag": "0002_hard_nighthawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1767863026625,
+      "tag": "0003_yummy_loki",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1778592000000,
+      "tag": "0016_enterprise_audit_ledger",
+      "breakpoints": true
+    }
+  ]
+}

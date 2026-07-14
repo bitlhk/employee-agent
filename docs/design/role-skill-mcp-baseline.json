@@ -1,0 +1,107 @@
+{
+  "version": "2026-07-09-oss-default",
+  "principles": [
+    "Open-source default grants only general assistant capability.",
+    "Role templates define baseline skills, MCP servers, model, runtime, and visible zones.",
+    "Production deployments should keep business roles and MCP grants in an external baseline file and point ROLE_SKILL_MCP_BASELINE_PATH to it.",
+    "MCP tools are discovered from runtime tools/list; this baseline stores server-level grants only."
+  ],
+  "schema": {
+    "defaultRole": "general-assistant",
+    "permissionProfiles": [
+      "plus",
+      "internal"
+    ],
+    "runtimes": [
+      "jiuwenswarm",
+      "openclaw"
+    ],
+    "origins": [
+      "opensource",
+      "finance",
+      "squad"
+    ],
+    "roleStatus": [
+      "mvp",
+      "disabled"
+    ],
+    "visibleZones": [
+      "opensource",
+      "finance",
+      "squad"
+    ],
+    "notes": [
+      "defaultSkills are installed/enabled by default for a role; optionalSkills are visible but not automatically installed.",
+      "mcpServers are server-level runtime grants. Tool-level grants are reserved for future use and should stay empty in the OSS default.",
+      "permissionProfile describes platform permissions, not a business job title.",
+      "dataScope is documentation only; real data isolation must be enforced by each MCP service using agent/user context."
+    ]
+  },
+  "runtimePolicy": {
+    "defaultRuntime": "jiuwenswarm",
+    "fallbackRuntime": "jiuwenswarm",
+    "selection": "JiuwenSwarm is the default role runtime. If it is unavailable, provisioning fails closed until an administrator configures a supported runtime; no OpenClaw fallback is applied."
+  },
+  "uiPolicy": {
+    "applyFlow": "New users start with the general assistant. Add industry roles in an external baseline for production deployments.",
+    "groupOrder": [
+      "general",
+      "banking",
+      "insurance",
+      "securities"
+    ],
+    "roleVisibility": {
+      "mvp": "visible on apply page",
+      "disabled": "hidden"
+    },
+    "labels": {
+      "general": "通用",
+      "banking": "行业示例",
+      "insurance": "行业示例",
+      "securities": "行业示例"
+    }
+  },
+  "industries": {
+    "general": {
+      "name": "通用",
+      "roles": {
+        "general-assistant": {
+          "name": "通用助手",
+          "description": "默认通用岗位智能体，只开放基础对话、文件、技能和平台能力；不默认授予业务 MCP。",
+          "status": "mvp",
+          "displayOrder": 0,
+          "permissionProfile": "plus",
+          "defaultVisibleZones": [
+            "opensource"
+          ],
+          "defaultSkills": [],
+          "optionalSkills": [],
+          "mcpServers": [],
+          "mcpTools": [],
+          "defaultModel": "openai/gpt-5.5",
+          "runtime": "jiuwenswarm",
+          "dataScope": "No business data access by default. Only the current agent workspace and explicitly configured tools are available."
+        }
+      }
+    },
+    "banking": {
+      "name": "行业示例",
+      "roles": {}
+    },
+    "insurance": {
+      "name": "行业示例",
+      "roles": {}
+    },
+    "securities": {
+      "name": "行业示例",
+      "roles": {}
+    }
+  },
+  "extensionModel": {
+    "newIndustry": "Use the supported industry buckets or extend the schema in code for new top-level industries.",
+    "newRole": "Add production roles in an external baseline file instead of committing customer-specific roles to the public repository.",
+    "newSkill": "Marketplace skills should carry roleTag/provider/origin metadata and be granted through admin workflows.",
+    "newMcp": "Register MCP servers in the runtime, then grant server ids to roles. Tool descriptions are read from MCP tools/list.",
+    "userOverride": "Per-user skill/MCP overrides should be auditable and should not bypass the MCP service data policy."
+  }
+}

@@ -1,0 +1,134 @@
+/* oc-theme.css
+   Workforce Agent Platform console theme tokens + base styles
+   Compatible with existing --oc-* vars
+*/
+
+:root {
+  /* ===== 底层 Surface（永不变，三套主题共享） ===== */
+  --bg:           #0e1015;
+  --bg-elevated:  #191c24;
+  --panel:        #111520;
+  --card:         #161920;
+  --popover:      #1a1d28;
+  --input:        #131620;
+
+  /* ===== 文字（永不变） ===== */
+  --text:         #d4d4d8;
+  --text-strong:  #f4f4f5;
+  --muted:        #838387;
+  --faint:        #55555a;
+
+  /* ===== 边框（永不变） ===== */
+  --border:       #1e2028;
+  --border-strong:#2e3040;
+  --border-hover: #3a3d50;
+
+  /* ===== Accent 家族（只有这里会随主题变） ===== */
+  --accent:       #ff5c5c;
+  --accent-hover: #ff7070;
+  --accent-subtle:rgba(255, 92, 92, 0.10);
+  --accent-glow:  rgba(255, 92, 92, 0.20);
+  --primary:      #ff5c5c;
+  --ring:         #ff5c5c;
+  --focus-ring:   rgba(255, 255, 255, 0.22);
+  --focus-glow:   rgba(255, 92, 92, 0.08);
+
+  /* ===== 语义状态（永不变） ===== */
+  --ok:      #22c55e;
+  --warn:    #f59e0b;
+  --danger:  #ef4444;
+  --info:    #3b82f6;
+  /* 保留旧别名以兼容现有代码 */
+  --success: var(--ok);
+  --warning: var(--warn);
+
+  /* ===== 阴影（永不变） ===== */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.25);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.30);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,.40);
+  --shadow-inset: inset 0 1px 0 rgba(255,255,255,0.02);
+
+  /* ===== 圆角（永不变） ===== */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* ===== 动画（永不变） ===== */
+  --duration-fast:   100ms;
+  --duration-normal: 180ms;
+  --duration-slow:   300ms;
+  --ease-out:        cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:     cubic-bezier(0.45, 0, 0.55, 1);
+  --ease-spring:     cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ===== 兼容别名（保持旧代码不报错） ===== */
+  --oc-bg:           var(--bg);
+  --oc-panel:        var(--panel);
+  --oc-card:         var(--card);
+  --oc-border:       var(--border);
+  --oc-text-primary: var(--text-strong);
+  --oc-text-secondary: var(--muted);
+  --oc-accent:       var(--accent);
+  --oc-accent-hover: var(--accent-hover);
+  --oc-success:      var(--ok);
+  --oc-warning:      var(--warn);
+  --oc-danger:       var(--danger);
+}
+
+/* ===== Global base ===== */
+html,
+body {
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.02), transparent 40%),
+    var(--bg);
+  color: var(--text);
+}
+
+/* Unified focus-visible */
+:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1px var(--focus-ring),
+    0 0 0 2px var(--focus-glow);
+  border-color: color-mix(in oklab, var(--accent) 38%, var(--border-hover));
+}
+
+.business-chat-composer {
+  transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out);
+}
+
+.business-chat-composer:focus-within {
+  border-color: color-mix(in oklab, var(--accent) 34%, var(--border-hover)) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 0 0 3px rgba(255, 92, 92, 0.07);
+}
+
+.business-chat-input:focus,
+.business-chat-input:focus-visible,
+.main-chat-input:focus,
+.main-chat-input:focus-visible {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* Thin scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.35) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.35);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

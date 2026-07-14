@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # ── MySQL 数据库 ──
+  db:
+    image: mysql:8.0
+    container_name: employee-agent-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-employee_agent}
+      MYSQL_USER: ${MYSQL_USER:-employee_agent}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置 MYSQL_PASSWORD}
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    # 不暴露 3306 到宿主机，容器间通过 employee-agent-net 内网通信
+    # 如需本地调试，取消注释下面两行：
+    # ports:
+    #   - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - employee-agent-net
+
+  # ── 岗位智能体平台 ──
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: employee-agent-app
+    restart: unless-stopped
+    ports:
+      - "${APP_BIND_IP:-127.0.0.1}:${PORT:-5180}:5180"
+    env_file:
+      - .env
+    environment:
+      - PORT=5180
+      - APP_BIND_IP=0.0.0.0
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL:?请在 .env 中设置 DATABASE_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - employee-agent-net
+
+volumes:
+  mysql_data:
+
+networks:
+  employee-agent-net:
+    driver: bridge

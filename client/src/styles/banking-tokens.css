@@ -1,0 +1,88 @@
+/* banking-tokens.css
+   Enterprise-facing visual tokens for banking-fy pages/components.
+
+   This is intentionally small for the first rollout. It keeps the platform red
+   as the brand anchor while moving enterprise surfaces toward light, compact,
+   neutral backgrounds.
+
+   Keep the --banking-* prefix. These tokens intentionally do not replace the
+   existing shadcn or --oc-* systems during the transition period.
+*/
+
+:root {
+  /* Brand anchor: keep platform red, but use it sparingly. */
+  --banking-brand-red: var(--primary, #ff5c5c);
+  --banking-brand-red-hover: var(--oc-accent-hover, #ff7070);
+  --banking-brand-red-subtle: color-mix(in oklab, var(--banking-brand-red) 10%, transparent);
+  --banking-theme-claw: var(--banking-brand-red);
+  --banking-theme-knot: #e5243b;
+  --banking-theme-dash: #b47840;
+  --banking-theme-ember: #c96442;
+
+  /* State colors: use these before adding page-local status hex values.
+     Recommended usage:
+     - --banking-{state}: solid fill for badges, pills, dots, and icons.
+     - --banking-{state}-subtle: card or banner background.
+     - --banking-{state}-border: 1px outline paired with subtle background.
+  */
+  --banking-ok: #16a34a;
+  --banking-ok-subtle: #dcfce7;
+  --banking-ok-border: #86efac;
+  --banking-warn: #d97706;
+  --banking-warn-subtle: #fef3c7;
+  --banking-warn-border: #fcd34d;
+  --banking-danger: #dc2626;
+  --banking-danger-subtle: #fee2e2;
+  --banking-danger-border: #fca5a5;
+  --banking-info: #2563eb;
+  --banking-info-subtle: #dbeafe;
+  --banking-info-border: #93c5fd;
+
+  /* Light enterprise surfaces. */
+  --banking-bg: #fafafa;
+  --banking-card: #ffffff;
+  --banking-panel: #f5f5f5;
+  --banking-border: #e5e7eb;
+  --banking-border-strong: #d1d5db;
+
+  /* Text. */
+  --banking-text: #111827;
+  --banking-text-muted: #6b7280;
+  --banking-text-subtle: #9ca3af;
+  --banking-on-brand: #ffffff;
+
+  /* Component primitives. */
+  --banking-dialog-bg: #f8f8f7;
+  --banking-overlay-border: rgba(0, 0, 0, 0.08);
+  --banking-shadow-sm: 0 4px 11px rgba(0, 0, 0, 0.08);
+  --banking-radius-md: 10px;
+  --banking-radius-lg: 20px;
+}
+
+.dark,
+:root[data-theme-mode="dark"] {
+  --banking-bg: var(--bg, #0e1015);
+  --banking-card: var(--card, #161920);
+  --banking-panel: var(--panel, #111520);
+  --banking-border: var(--border, #1e2028);
+  --banking-border-strong: var(--border-strong, #2e3040);
+  --banking-text: var(--text-strong, #f4f4f5);
+  --banking-text-muted: var(--text, #d4d4d8);
+  --banking-text-subtle: var(--muted, #838387);
+  --banking-dialog-bg: var(--popover, #1a1d28);
+  --banking-overlay-border: rgba(255, 255, 255, 0.1);
+  --banking-shadow-sm: 0 12px 32px rgba(0, 0, 0, 0.35);
+
+  --banking-ok: #22c55e;
+  --banking-ok-subtle: color-mix(in oklab, var(--banking-ok) 14%, transparent);
+  --banking-ok-border: color-mix(in oklab, var(--banking-ok) 36%, transparent);
+  --banking-warn: #f59e0b;
+  --banking-warn-subtle: color-mix(in oklab, var(--banking-warn) 14%, transparent);
+  --banking-warn-border: color-mix(in oklab, var(--banking-warn) 36%, transparent);
+  --banking-danger: #ef4444;
+  --banking-danger-subtle: color-mix(in oklab, var(--banking-danger) 14%, transparent);
+  --banking-danger-border: color-mix(in oklab, var(--banking-danger) 36%, transparent);
+  --banking-info: #60a5fa;
+  --banking-info-subtle: color-mix(in oklab, var(--banking-info) 14%, transparent);
+  --banking-info-border: color-mix(in oklab, var(--banking-info) 36%, transparent);
+}
