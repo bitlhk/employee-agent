@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { RuntimeWSClient } from "@/lib/runtime-ws";
 import { toast } from "sonner";
 import { useBrand } from "@/lib/useBrand";
@@ -25,6 +25,7 @@ import { PanelErrorBoundary } from "@/components/console/PanelErrorBoundary";
 import { TopBar } from "@/components/console/TopBar";
 import { MainPanel } from "@/components/console/MainPanel";
 import { ChatPage } from "@/components/pages/ChatPage";
+import { WorkspaceBrowser } from "@/components/pages/WorkspacePage";
 import { WorkforceAgentIcon } from "@/components/WorkforceAgentIcon";
 import { applySettings as applyUiSettings, getSettings, subscribeSettings } from "@/lib/settings";
 import { classifyDisplayError, displayErrorMessage } from "@/lib/errorDisplay";
@@ -37,11 +38,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, History, Home as HomeIcon, LogOut, Menu, Search, Settings, Wand2, X } from "lucide-react";
+import { ChevronDown, FolderOpen, History, Home as HomeIcon, LogOut, Menu, Search, Settings, Wand2, X } from "lucide-react";
 import { buildUploadedAttachmentRuntimeMessage, parseUploadedAttachmentRuntimeMessage } from "@shared/uploaded-attachment-context";
 
 
 const ENABLE_OPENCLAW_WS_CHAT = true;
+const WORKSPACE_PANEL_WIDTH_KEY = "employee_agent_workspace_panel_width";
+const WORKSPACE_PANEL_DEFAULT_WIDTH = 400;
+const WORKSPACE_PANEL_MIN_WIDTH = 320;
+const WORKSPACE_PANEL_MAX_WIDTH = 560;
+
+function initialWorkspacePanelWidth(): number {
+  try {
+    const saved = Number(window.localStorage.getItem(WORKSPACE_PANEL_WIDTH_KEY));
+    if (Number.isFinite(saved) && saved > 0) {
+      return Math.min(WORKSPACE_PANEL_MAX_WIDTH, Math.max(WORKSPACE_PANEL_MIN_WIDTH, saved));
+    }
+  } catch {}
+  return WORKSPACE_PANEL_DEFAULT_WIDTH;
+}
 
 const ROLE_DISPLAY_NAMES: Record<string, string> = {
   "investment-researcher": "投顾分析",
@@ -764,6 +779,10 @@ export default function Home() {
   const clientLoadReportedRef = useRef(false);
   const [clientLoadMetrics, setClientLoadMetrics] = useState<Record<string, ClientLoadMetric>>({});
   const [clientDiagnosticsOpen, setClientDiagnosticsOpen] = useState(false);
+  const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
+  const [workspacePanelWidth, setWorkspacePanelWidth] = useState(initialWorkspacePanelWidth);
+  const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
+  const workbenchContentRef = useRef<HTMLDivElement | null>(null);
   const markClientLoadMetric = useCallback((
     key: string,
     status: ClientLoadMetric["status"],
@@ -882,6 +901,21 @@ export default function Home() {
   }, [sidebarCollapsed, sidebarWidth]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(WORKSPACE_PANEL_WIDTH_KEY, String(Math.round(workspacePanelWidth)));
+    } catch {}
+  }, [workspacePanelWidth]);
+
+  useEffect(() => {
+    if (!workspacePanelOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) setWorkspacePanelOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [workspacePanelOpen]);
+
+  useEffect(() => {
     const media = window.matchMedia("(max-width: 768px)");
     const syncViewport = () => {
       setIsMobileViewport(media.matches);
@@ -914,9 +948,44 @@ export default function Home() {
   const { user, loading: authLoading, error: authError, logout } = useAuth({ redirectOnUnauthenticated: false });
   const effectiveSidebarCollapsed = !isMobileViewport && sidebarCollapsed;
   const showClientDiagnostics = import.meta.env.DEV || (user as any)?.role === "admin";
+  const constrainWorkspacePanelWidth = useCallback((value: number) => {
+    const availableWidth = workbenchContentRef.current?.clientWidth || window.innerWidth;
+    const responsiveMax = Math.max(
+      WORKSPACE_PANEL_MIN_WIDTH,
+      Math.min(WORKSPACE_PANEL_MAX_WIDTH, availableWidth - 480),
+    );
+    return Math.min(responsiveMax, Math.max(WORKSPACE_PANEL_MIN_WIDTH, value));
+  }, []);
+
+  const beginWorkspacePanelResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = workspacePanelWidth;
+    setWorkspacePanelResizing(true);
+
+    const onMove = (moveEvent: PointerEvent) => {
+      setWorkspacePanelWidth(constrainWorkspacePanelWidth(startWidth + startX - moveEvent.clientX));
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setWorkspacePanelResizing(false);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [constrainWorkspacePanelWidth, workspacePanelWidth]);
+
   const selectWorkbenchPage = (page: PageKey) => {
     setActivePage(page);
     setMobileSidebarOpen(false);
+    if (page !== "chat") setWorkspacePanelOpen(false);
   };
   const handleWorkbenchLogout = async () => {
     try {
@@ -3785,6 +3854,18 @@ export default function Home() {
             ) : undefined}
             right={isLingxiaSubdomain ? (
               <div className="workbench-topbar-actions">
+              {activePage === "chat" && resolvedAdoptId ? (
+                <button
+                  type="button"
+                  className={`workbench-workspace-trigger ${workspacePanelOpen ? "is-active" : ""}`}
+                  onClick={() => setWorkspacePanelOpen((open) => !open)}
+                  title={workspacePanelOpen ? "关闭工作空间" : "打开工作空间"}
+                  aria-label={workspacePanelOpen ? "关闭工作空间" : "打开工作空间"}
+                  aria-expanded={workspacePanelOpen}
+                >
+                  <FolderOpen size={16} />
+                </button>
+              ) : null}
               {showClientDiagnostics ? <div className="client-load-diagnostics">
                 <button
                   type="button"
@@ -3887,7 +3968,12 @@ export default function Home() {
             ) : undefined}
           />
 
-
+          <div
+            ref={workbenchContentRef}
+            className={`workbench-content-row ${workspacePanelResizing ? "is-resizing" : ""}`}
+            data-workspace-open={workspacePanelOpen && activePage === "chat" ? "true" : "false"}
+          >
+          <div className="workbench-primary-pane">
           {activePage === "chat" ? (
           <ChatPage>
           <PanelErrorBoundary
@@ -4242,6 +4328,44 @@ export default function Home() {
               }}
             />
           )}
+          </div>
+
+          <div
+            className={`workspace-split-handle ${workspacePanelOpen && activePage === "chat" ? "is-open" : ""}`}
+            role="separator"
+            aria-label="调整工作空间宽度"
+            aria-orientation="vertical"
+            aria-valuemin={WORKSPACE_PANEL_MIN_WIDTH}
+            aria-valuemax={WORKSPACE_PANEL_MAX_WIDTH}
+            aria-valuenow={workspacePanelWidth}
+            tabIndex={workspacePanelOpen && activePage === "chat" ? 0 : -1}
+            onPointerDown={beginWorkspacePanelResize}
+            onDoubleClick={() => setWorkspacePanelWidth(WORKSPACE_PANEL_DEFAULT_WIDTH)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              const delta = event.key === "ArrowLeft" ? 16 : -16;
+              setWorkspacePanelWidth((width) => constrainWorkspacePanelWidth(width + delta));
+            }}
+          />
+
+          <aside
+            className={`workbench-workspace-panel ${workspacePanelOpen && activePage === "chat" ? "is-open" : ""}`}
+            style={{
+              "--workspace-panel-width": `${workspacePanelWidth}px`,
+              width: workspacePanelOpen && activePage === "chat" ? workspacePanelWidth : 0,
+            } as CSSProperties}
+            aria-hidden={workspacePanelOpen && activePage === "chat" ? undefined : true}
+            inert={workspacePanelOpen && activePage === "chat" ? undefined : true}
+          >
+            <WorkspaceBrowser
+              adoptId={resolvedAdoptId || ""}
+              variant="panel"
+              active={workspacePanelOpen && activePage === "chat"}
+              onClose={() => setWorkspacePanelOpen(false)}
+            />
+          </aside>
+          </div>
           </div>
         </div>
       </div>
