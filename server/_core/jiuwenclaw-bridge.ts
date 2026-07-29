@@ -53,6 +53,7 @@ export type JiuwenForwardOptions = {
   selectedSkills?: JiuwenSelectedSkillMetadata[];
   knowledgeSources?: Array<Record<string, unknown>>;
   memoryUserMessage?: string;
+  onFirstToken?: () => void;
 };
 
 export type JiuwenSelectedSkillMetadata = {
@@ -594,7 +595,9 @@ export function collectRecentWorkspaceFiles(workspaceDir: string, sinceMs: numbe
         try {
           const st = statSync(full);
           if (st.isFile()) {
-            if (st.mtimeMs >= sinceMs) files.push({ name: entry, size: st.size, path: rel });
+            if (st.mtimeMs >= sinceMs && isUserVisibleJiuwenArtifactPath(rel)) {
+              files.push({ name: entry, size: st.size, path: rel });
+            }
           } else if (st.isDirectory()) {
             scanDir(full, rel, depth + 1);
           }
@@ -1074,6 +1077,7 @@ export async function forwardToJiuwenClaw(
     const writeTextDelta = (value: string) => {
       const publicText = sanitizePublicRuntimePaths(value, workspaceDir);
       if (!publicText) return;
+      opts.onFirstToken?.();
       memoryAssistantText += publicText;
       const formattedText = formatJiuwenTextSectionDelta(publicText, sawText && needsTextSectionBreak);
       currentStatus = "正在生成回复...";
