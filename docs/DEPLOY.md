@@ -121,6 +121,33 @@ pm2 restart employee-agent
 
 `verify-production-release.sh` is a read-only release gate. It verifies required PM2 processes, liveness, dependency readiness, and the expected metrics surface. Set `REQUIRE_PROMETHEUS=true` after the local monitoring service has been enabled.
 
+Database releases use `pnpm db:deploy`. Configure `DATABASE_MIGRATION_URL` with a dedicated DDL-capable account in production; do not run `drizzle-kit push` against a baselined production database.
+
+## Versioned production releases
+
+Production upgrades should deploy an immutable bundle and atomically switch the active release instead of modifying the live directory in place:
+
+```bash
+pnpm release:build
+sudo scripts/deploy-release.sh \
+  --bundle dist/releases/employee-agent-<release-id>.tar.gz \
+  --deploy-root /opt/employee-agent \
+  --shared-root /srv/employee-agent
+```
+
+The shared root owns `.env`, `data`, and `logs`; each release owns its source, dependencies, and build output. Deployment verifies the bundle checksum, installs and builds in a new directory, creates a database backup, applies managed migrations, switches `current`, reloads PM2, and runs the production health gate. A failed health gate automatically restores the previous release.
+
+Set `RELEASE_REQUIRE_BACKUP=true` and `RELEASE_REQUIRE_MIGRATION_URL=true` in production so missing backup or DDL credentials block the release. The first migration from an existing live directory treats `--shared-root` as the rollback target; no data directory move is required.
+
+Inspect or manually roll back:
+
+```bash
+scripts/release-status.sh --deploy-root /opt/employee-agent
+sudo scripts/rollback-release.sh --deploy-root /opt/employee-agent
+```
+
+Database migrations are forward-only. Every managed migration must therefore remain compatible with the previous application release for at least one deployment window; application rollback does not reverse schema changes.
+
 ## 常见问题
 
 **首页或登录页仍是旧文案**
