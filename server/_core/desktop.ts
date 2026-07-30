@@ -2,11 +2,9 @@ import express from "express";
 import { decodeBase64Strict, scanUploadForMalware, validateUploadContent } from "./upload-security";
 import QRCode from "qrcode";
 import http from "http";
-import type { IncomingMessage, Server } from "http";
 import bcrypt from "bcryptjs";
 import path from "path";
-import { createHash, generateKeyPairSync, randomUUID, sign } from "crypto";
-import { WebSocket, WebSocketServer } from "ws";
+import { randomUUID } from "crypto";
 import {
   createReadStream,
   existsSync,
@@ -20,12 +18,12 @@ import {
 } from "fs";
 import {
   getClawByAdoptId,
-  getCurrentClawByUserId,
   getSkillMarketItem,
   getUserByEmail,
   getUserById,
   incrementSkillDownload,
   listApprovedSkillMarketItems,
+  listClawsByUserId,
 } from "../db";
 import { sdk, sessionAuthVersion } from "./sdk";
 import { isAdminMfaEnabled } from "./admin-mfa";
@@ -38,10 +36,8 @@ import {
   resolveRuntimeAgentId,
   resolveRuntimeWorkspaceByIds,
 } from "./helpers";
-import { OpenClawCronProvider } from "./cron/openclaw-cron-provider";
+import { JiuwenClawCronProvider } from "./cron/jiuwenclaw-cron-provider";
 import type { CronProviderHandle } from "@shared/types/cron";
-import { normalizeWsEvent } from "./runtime";
-import { buildRuntimeUserMessage } from "./tool_schema";
 import { listMcpToolGroups } from "./claw-skills";
 import {
   getFeishuStatus,
@@ -49,12 +45,6 @@ import {
   startFeishuBindFlow,
   unbindFeishu,
 } from "./claw-feishu";
-import {
-  cleanupOpenClawWeixinBindingForAdopt,
-  desktopPollWeixinBind,
-  desktopStartWeixinBind,
-  getWeixinStatus,
-} from "./claw-weixin";
 import { skillRegistry } from "./skills/skill-registry";
 import { parseSkillSourceDirectory } from "./skills/skill-source";
 import { remapLegacySkillMarketPath } from "./skills/skill-store";
@@ -67,7 +57,7 @@ import {
 import {
   listClawChatHistorySessionRecords,
   readModernChatHistorySessionMessages,
-} from "./claw-misc";
+} from "./chat-history";
 import { authLimiter } from "./security";
 
 type DesktopUser = {
@@ -120,42 +110,6 @@ type DesktopChannelStatus = {
   detail?: string;
 };
 
-const ED25519_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
-const { publicKey: DESKTOP_WS_PUB, privateKey: DESKTOP_WS_PRIV } =
-  generateKeyPairSync("ed25519");
-const DESKTOP_WS_SPKI = DESKTOP_WS_PUB.export({ type: "spki", format: "der" });
-const DESKTOP_WS_RAW_PUB = DESKTOP_WS_SPKI.subarray(ED25519_PREFIX.length);
-const b64u = (buffer: Buffer) =>
-  buffer
-    .toString("base64")
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/g, "");
-const DESKTOP_WS_DEV_PUB = b64u(DESKTOP_WS_RAW_PUB);
-const DESKTOP_WS_DEV_ID = createHash("sha256")
-  .update(DESKTOP_WS_RAW_PUB)
-  .digest("hex");
-const DESKTOP_WS_SCOPES = ["operator.admin", "operator.read", "operator.write"];
-
-function signDesktopGatewayPayload(nonce: string, gatewayToken: string) {
-  const signedAt = Date.now();
-  const payload = [
-    "v2",
-    DESKTOP_WS_DEV_ID,
-    "openclaw-control-ui",
-    "ui",
-    "operator",
-    DESKTOP_WS_SCOPES.join(","),
-    String(signedAt),
-    gatewayToken,
-    nonce,
-  ].join("|");
-  return {
-    sig: b64u(sign(null, Buffer.from(payload, "utf8"), DESKTOP_WS_PRIV)),
-    signedAt,
-  };
-}
-
 function publicBaseUrl(req: express.Request): string {
   const proto =
     String(req.headers["x-forwarded-proto"] || "")
@@ -165,13 +119,6 @@ function publicBaseUrl(req: express.Request): string {
     "http";
   const host = req.get("host") || `127.0.0.1:${process.env.PORT || "5000"}`;
   return `${proto}://${host}`;
-}
-
-function publicWsBaseUrl(req: express.Request): string {
-  const base = publicBaseUrl(req);
-  if (base.startsWith("https://")) return `wss://${base.slice("https://".length)}`;
-  if (base.startsWith("http://")) return `ws://${base.slice("http://".length)}`;
-  return base;
 }
 
 function desktopToken(): string {
@@ -199,28 +146,32 @@ function defaultDesktopAdoptId(): string | null {
 // For numeric user IDs, queries the DB for the user's active adoption.
 // Falls back to the global default agent for the MVP token user.
 async function getDesktopUserClaw(user: DesktopUser) {
+  let claw = null;
   if (user.id === "desktop-mvp-user") {
     const adoptId = defaultDesktopAdoptId();
-    return adoptId ? getClawByAdoptId(adoptId) : null;
+    claw = adoptId ? await getClawByAdoptId(adoptId) : null;
+  } else {
+    const uid = Number(user.id);
+    if (!Number.isNaN(uid) && uid > 0) {
+      const adoptions = await listClawsByUserId(uid);
+      claw = adoptions.find((item) => resolveDesktopRuntimeType(item.adoptId) === "jiuwenswarm") || null;
+    }
   }
-  const uid = Number(user.id);
-  if (!Number.isNaN(uid) && uid > 0) {
-    return getCurrentClawByUserId(uid);
-  }
-  return null;
+  return claw && resolveDesktopRuntimeType(claw.adoptId) === "jiuwenswarm"
+    ? claw
+    : null;
 }
 
 async function listDesktopChannels(adoptId: string): Promise<{ channels: DesktopChannelStatus[] }> {
-  const weixin = getWeixinStatus(adoptId);
   const feishu = await getFeishuStatus(adoptId);
 
   return {
     channels: [
       {
         key: "weixin",
-        status: weixin.bound ? "connected" : "not_connected",
+        status: "unsupported",
         label: "微信",
-        detail: weixin.targetLabel || weixin.userId || weixin.accountId || "",
+        detail: "当前 JiuwenSwarm 桌面协议暂未接入",
       },
       {
         key: "feishu",
@@ -254,17 +205,6 @@ function bearerToken(req: express.Request): string {
   const auth = String(req.headers.authorization || "");
   const match = auth.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() || "";
-}
-
-function bearerTokenFromIncoming(req: IncomingMessage, url: URL): string {
-  const auth = String(req.headers.authorization || "");
-  const match = auth.match(/^Bearer\s+(.+)$/i);
-  return (
-    match?.[1]?.trim() ||
-    url.searchParams.get("access_token") ||
-    url.searchParams.get("token") ||
-    ""
-  ).trim();
 }
 
 async function verifyDesktopToken(token: string): Promise<DesktopUser | null> {
@@ -803,83 +743,6 @@ async function requireDesktopUser(
   return null;
 }
 
-async function forwardOpenClawChat(
-  req: express.Request,
-  res: express.Response
-) {
-  const user = await requireDesktopUser(req, res);
-  if (!user) return;
-
-  const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
-  if (!gatewayToken) {
-    res.status(500).json({ error: "CLAW_GATEWAY_TOKEN is not configured" });
-    return;
-  }
-
-  const claw = await getDesktopUserClaw(user);
-  if (!claw) {
-    res.status(404).json({ error: "no agent assigned" });
-    return;
-  }
-  const body = JSON.stringify(req.body || {});
-  const requestedAgentId = String(req.headers["x-openclaw-agent-id"] || "").trim();
-  if (requestedAgentId && requestedAgentId !== claw.agentId) {
-    res.status(403).json({ error: "agent_not_allowed" });
-    return;
-  }
-  const runtimeAgentId =
-    requestedAgentId || claw.agentId;
-  const sessionKey =
-    String(req.headers["x-openclaw-session-key"] || "").trim() ||
-    `agent:${runtimeAgentId}:main:desktop`;
-  const models = await listDesktopModelsForClaw(claw);
-  const allowedModelIds = new Set(models.models.map(model => model.id));
-  const requestedModel = String(req.headers["x-openclaw-model"] || "").trim();
-  const backendModel =
-    requestedModel && allowedModelIds.has(requestedModel)
-      ? requestedModel
-      : models.selected;
-
-  const upstream = http.request(
-    {
-      hostname: process.env.CLAW_REMOTE_HOST || "127.0.0.1",
-      port: parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10),
-      path: "/v1/chat/completions",
-      method: "POST",
-      timeout: 0,
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body),
-        Authorization: `Bearer ${gatewayToken}`,
-        "x-openclaw-agent-id": runtimeAgentId,
-        "x-openclaw-session-key": sessionKey,
-        ...(backendModel ? { "x-openclaw-model": backendModel } : {}),
-      },
-    },
-    upstreamRes => {
-      res.status(upstreamRes.statusCode || 502);
-      for (const [key, value] of Object.entries(upstreamRes.headers)) {
-        if (value !== undefined) res.setHeader(key, value as string | string[]);
-      }
-      upstreamRes.pipe(res);
-    }
-  );
-
-  upstream.on("error", err => {
-    if (!res.headersSent) {
-      res.status(502).json({ error: err.message || "OpenClaw proxy failed" });
-    } else {
-      res.end();
-    }
-  });
-
-  res.on("close", () => {
-    if (!res.writableEnded) upstream.destroy();
-  });
-  upstream.write(body);
-  upstream.end();
-}
-
 function desktopChatMessage(body: unknown): string {
   const chatBody = body && typeof body === "object"
     ? body as { messages?: unknown }
@@ -979,421 +842,6 @@ async function forwardJiuwenDesktopChat(
   upstream.end();
 }
 
-export function registerDesktopWSProxy(server: Server) {
-  const wss = new WebSocketServer({ noServer: true });
-
-  server.on("upgrade", async (req: IncomingMessage, socket, head) => {
-    const url = new URL(req.url || "/", `http://${req.headers.host}`);
-    if (url.pathname !== "/api/desktop/openclaw/ws") return;
-
-    try {
-      const user = await verifyDesktopToken(bearerTokenFromIncoming(req, url));
-      if (!user) {
-        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-        socket.destroy();
-        return;
-      }
-
-      const claw = await getDesktopUserClaw(user);
-      if (!claw) {
-        socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
-        socket.destroy();
-        return;
-      }
-      const requestedAgentId = String(url.searchParams.get("agentId") || "").trim();
-      if (requestedAgentId && requestedAgentId !== claw.agentId) {
-        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-        socket.destroy();
-        return;
-      }
-      const agentId = requestedAgentId || claw.agentId;
-
-      wss.handleUpgrade(req, socket, head, ws => {
-        wss.emit("connection", ws, req, {
-          user,
-          agentId,
-          adoptId: claw.adoptId,
-          sessionKey: String(url.searchParams.get("sessionKey") || "").trim(),
-        });
-      });
-    } catch (error) {
-      console.error("[DESKTOP-WS] upgrade error:", error);
-      socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n");
-      socket.destroy();
-    }
-  });
-
-  wss.on(
-    "connection",
-    (
-      client: WebSocket,
-      _req: IncomingMessage,
-      meta: { user: DesktopUser; agentId: string; adoptId: string; sessionKey?: string }
-    ) => {
-      const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
-      if (!gatewayToken) {
-        client.send(
-          JSON.stringify({
-            type: "error",
-            message: "CLAW_GATEWAY_TOKEN is not configured",
-          })
-        );
-        client.close();
-        return;
-      }
-
-      const gatewayUrl = `ws://${process.env.CLAW_REMOTE_HOST || "127.0.0.1"}:${process.env.CLAW_GATEWAY_PORT || "18789"}`;
-      const gw = new WebSocket(gatewayUrl, {
-        headers: { Origin: INTERNAL_BASE_URL },
-      });
-      const pendingClientMessages: string[] = [];
-      const commandOutputBuffers = new Map<string, string>();
-      let ready = false;
-      let sessionKey =
-        meta.sessionKey ||
-        `agent:${meta.agentId}:main:desktop_${Date.now().toString(36)}`;
-      let sawAssistantDelta = false;
-      let lastChatSnapshotText = "";
-      // After a tool result, block chat.delta echoes (which contain tool output)
-      // until the next agent.assistant stream event arrives.
-      let blockChatDeltaUntilAgentStream = false;
-
-      const sendToClient = (payload: object) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(payload));
-        }
-      };
-
-      const emitAssistantDelta = (content: string) => {
-        if (!content) return;
-        sendToClient({
-          choices: [
-            { index: 0, delta: { content }, finish_reason: null },
-          ],
-        });
-      };
-
-      sendToClient({
-        type: "connected",
-        agentId: meta.agentId,
-        sessionKey,
-        ready: false,
-      });
-
-      gw.on("message", (raw: Buffer) => {
-        try {
-          const msg = JSON.parse(raw.toString());
-
-          if (msg.event === "connect.challenge") {
-            const nonce = String(msg.payload?.nonce || "");
-            const { sig, signedAt } = signDesktopGatewayPayload(
-              nonce,
-              gatewayToken
-            );
-            gw.send(
-              JSON.stringify({
-                type: "req",
-                id: randomUUID(),
-                method: "connect",
-                params: {
-                  minProtocol: 3,
-                  maxProtocol: 4,
-                  client: {
-                    id: "openclaw-control-ui",
-                    version: "1.0.0",
-                    platform: "lingxia",
-                    mode: "ui",
-                  },
-                  role: "operator",
-                  scopes: DESKTOP_WS_SCOPES,
-                  auth: { token: gatewayToken },
-                  device: {
-                    id: DESKTOP_WS_DEV_ID,
-                    publicKey: DESKTOP_WS_DEV_PUB,
-                    signature: sig,
-                    signedAt,
-                    nonce,
-                  },
-                  caps: ["tool-events"],
-                },
-              })
-            );
-            return;
-          }
-
-          if (msg.type === "res" && msg.id === "desktop-init-session") {
-            if (!msg.ok) {
-              sendToClient({
-                type: "error",
-                message: msg.error?.message || "OpenClaw session failed",
-              });
-              client.close();
-              return;
-            }
-            sessionKey = msg.payload?.key || sessionKey;
-            ready = true;
-            sendToClient({
-              type: "connected",
-              agentId: meta.agentId,
-              sessionKey,
-              ready: true,
-            });
-            for (const pending of pendingClientMessages.splice(0)) {
-              client.emit("message", Buffer.from(pending));
-            }
-            return;
-          }
-
-          if (msg.type === "res" && msg.ok === true && !ready) {
-            const selectedModel = listDesktopModels(meta.adoptId).selected || undefined;
-            gw.send(
-              JSON.stringify({
-                type: "req",
-                id: "desktop-init-session",
-                method: "sessions.create",
-                params: {
-                  agentId: meta.agentId,
-                  key: sessionKey,
-                  ...(selectedModel ? { model: selectedModel } : {}),
-                },
-              })
-            );
-            return;
-          }
-
-          if (msg.type === "res" && msg.ok === false && !ready) {
-            sendToClient({
-              type: "error",
-              message: msg.error?.message || "OpenClaw gateway error",
-            });
-            client.close();
-            return;
-          }
-
-          if (
-            msg.event === "health" ||
-            msg.event === "tick" ||
-            msg.event === "heartbeat"
-          ) {
-            return;
-          }
-
-          const normalized = normalizeWsEvent(msg, sessionKey);
-          if (normalized.kind !== "events") {
-            if (msg.type === "res" && msg.ok === false) {
-              sendToClient({
-                type: "error",
-                message: msg.error?.message || "OpenClaw RPC error",
-              });
-            }
-            return;
-          }
-
-          const rawEvent = typeof msg.event === "string" ? msg.event : "";
-          const rawPayload =
-            msg.payload && typeof msg.payload === "object" ? msg.payload : {};
-          const rawStream =
-            typeof rawPayload.stream === "string" ? rawPayload.stream : "";
-          const rawState =
-            typeof rawPayload.state === "string" ? rawPayload.state : "";
-
-          for (const event of normalized.events) {
-            switch (event.type) {
-              case "delta":
-                if (rawEvent === "chat" && rawState === "delta") {
-                  if (sawAssistantDelta || blockChatDeltaUntilAgentStream) break;
-                }
-                if (rawEvent === "agent" && rawStream === "assistant") {
-                  sawAssistantDelta = true;
-                  blockChatDeltaUntilAgentStream = false;
-                }
-                emitAssistantDelta(event.content);
-                break;
-
-              case "chat_snapshot": {
-                if (sawAssistantDelta) break;
-                const snapshot = event.content;
-                const delta = snapshot.startsWith(lastChatSnapshotText)
-                  ? snapshot.slice(lastChatSnapshotText.length)
-                  : snapshot;
-                lastChatSnapshotText = snapshot;
-                emitAssistantDelta(delta);
-                break;
-              }
-
-              case "thinking":
-                sendToClient({
-                  choices: [
-                    {
-                      index: 0,
-                      delta: { reasoning_content: event.content },
-                      finish_reason: null,
-                    },
-                  ],
-                });
-                break;
-
-              case "tool_call":
-                if (event.phase === "start") {
-                  const toolCallId = event.toolCallId || `tc_${Date.now()}`;
-                  commandOutputBuffers.set(toolCallId, "");
-                  sendToClient({
-                    _event: "tool_call",
-                    id: toolCallId,
-                    name: event.name || "tool",
-                    arguments: JSON.stringify(event.args || {}),
-                  });
-                } else {
-                  const toolCallId = event.toolCallId || "";
-                  const buffered = commandOutputBuffers.get(toolCallId) || "";
-                  commandOutputBuffers.delete(toolCallId);
-                  sendToClient({
-                    _event: "tool_result",
-                    tool_call_id: toolCallId,
-                    result:
-                      buffered ||
-                      (typeof event.result === "string" ? event.result : ""),
-                    is_error: Boolean(event.isError),
-                  });
-                  // Reset so the agent's post-tool response text isn't suppressed.
-                  // Block chat.delta until agent.assistant stream resumes — the
-                  // gateway echoes tool output via chat.delta right after a tool
-                  // result, and we must not let that leak into the main text body.
-                  sawAssistantDelta = false;
-                  blockChatDeltaUntilAgentStream = true;
-                }
-                break;
-
-              case "command_output":
-                if (event.phase === "delta") {
-                  const toolCallId = event.toolCallId || "";
-                  if (toolCallId && commandOutputBuffers.has(toolCallId)) {
-                    commandOutputBuffers.set(
-                      toolCallId,
-                      (commandOutputBuffers.get(toolCallId) || "") +
-                        (event.output || "")
-                    );
-                  }
-                } else {
-                  const toolCallId = event.toolCallId || "";
-                  if (toolCallId && event.output) {
-                    commandOutputBuffers.set(toolCallId, event.output);
-                  }
-                }
-                break;
-
-              case "item_status":
-                sendToClient({
-                  __status: event.progressText,
-                  _event: "agent_status",
-                  kind: "progress",
-                  label: event.progressText,
-                });
-                break;
-
-              case "lifecycle_end":
-                sendToClient({ __stream_end: true });
-                sendToClient({
-                  choices: [
-                    { index: 0, delta: {}, finish_reason: "stop" },
-                  ],
-                });
-                break;
-
-              case "chat_final": {
-                if (event.content && !sawAssistantDelta) {
-                  const delta = event.content.startsWith(lastChatSnapshotText)
-                    ? event.content.slice(lastChatSnapshotText.length)
-                    : event.content;
-                  lastChatSnapshotText = event.content;
-                  emitAssistantDelta(delta);
-                }
-                sendToClient({
-                  choices: [
-                    { index: 0, delta: {}, finish_reason: "stop" },
-                  ],
-                });
-                break;
-              }
-
-              case "error":
-                sendToClient({ error: event.message });
-                break;
-
-              default:
-                break;
-            }
-          }
-        } catch (error) {
-          console.error("[DESKTOP-WS] parse error:", error);
-        }
-      });
-
-      gw.on("error", error => {
-        sendToClient({
-          type: "error",
-          message: error.message || "OpenClaw gateway websocket error",
-        });
-      });
-
-      gw.on("close", () => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.close(1012, "OpenClaw gateway closed");
-        }
-      });
-
-      client.on("message", (raw: Buffer) => {
-        try {
-          const msg = JSON.parse(raw.toString());
-          if (msg.type !== "chat") return;
-          if (!ready) {
-            pendingClientMessages.push(raw.toString());
-            sendToClient({
-              __status: "正在初始化 OpenClaw 会话",
-              _event: "agent_status",
-              kind: "progress",
-              label: "正在初始化 OpenClaw 会话",
-            });
-            return;
-          }
-
-          sawAssistantDelta = false;
-          lastChatSnapshotText = "";
-          blockChatDeltaUntilAgentStream = false;
-          commandOutputBuffers.clear();
-          sendToClient({
-            __status: "已连接 OpenClaw，正在处理请求",
-            _event: "agent_status",
-            kind: "progress",
-            label: "已连接 OpenClaw，正在处理请求",
-          });
-          gw.send(
-            JSON.stringify({
-              type: "req",
-              id: randomUUID(),
-              method: "chat.send",
-              params: {
-                sessionKey,
-                message: buildRuntimeUserMessage(String(msg.message || "")),
-                idempotencyKey: String(msg.clientRunId || randomUUID()),
-                thinking: msg.runtimeMode === "plan" ? "on" : "off",
-                deliver: false,
-              },
-            })
-          );
-        } catch {
-          // Ignore malformed client messages.
-        }
-      });
-
-      client.on("close", () => gw.close());
-      client.on("error", () => gw.close());
-    }
-  );
-
-  console.log("[DESKTOP-WS] registered at /api/desktop/openclaw/ws");
-}
-
 // ── Desktop Memory ───────────────────────────────────────────────────────────
 
 const DESKTOP_ENTRY_DELIMITER = "\n§\n";
@@ -1420,7 +868,7 @@ function desktopSerializeEntries(entries: { index: number; content: string }[]):
 
 // ── Desktop Cron ────────────────────────────────────────────────────────────
 
-const desktopCronProvider = new OpenClawCronProvider();
+const desktopCronProvider = new JiuwenClawCronProvider();
 
 function desktopCronHandle(claw: any): CronProviderHandle {
   const adoptId = String(claw.adoptId || "");
@@ -1428,7 +876,7 @@ function desktopCronHandle(claw: any): CronProviderHandle {
     adoptId,
     agentId: resolveRuntimeAgentId(adoptId, claw.agentId),
     userId: Number(claw.userId || 0),
-    runtime: "openclaw",
+    runtime: "jiuwenclaw",
   };
 }
 
@@ -1521,26 +969,14 @@ export function registerDesktopRoutes(app: express.Express) {
     const user = await requireDesktopUser(req, res);
     if (!user) return;
     const base = publicBaseUrl(req);
-    const wsBase = publicWsBaseUrl(req);
     const claw = await getDesktopUserClaw(user);
     const agentId = claw?.agentId || defaultDesktopAgentId();
-    const runtimeType = resolveDesktopRuntimeType(
-      claw?.adoptId || defaultDesktopAdoptId()
-    );
     res.json({
       ...desktopProtocolMetadata(claw?.adoptId || defaultDesktopAdoptId()),
       mode: "mvp",
       user,
-      gatewayUrl:
-        runtimeType === "jiuwenswarm"
-          ? `${base}/api/desktop/jiuwen`
-          : process.env.DESKTOP_OPENCLAW_GATEWAY_URL ||
-            `${base}/api/desktop/openclaw`,
-      gatewayWsUrl:
-        runtimeType === "jiuwenswarm"
-          ? ""
-          : process.env.DESKTOP_OPENCLAW_GATEWAY_WS_URL ||
-            `${wsBase}/api/desktop/openclaw/ws`,
+      gatewayUrl: `${base}/api/desktop/jiuwen`,
+      gatewayWsUrl: "",
       gatewayToken: bearerToken(req),
       defaultAgentId: agentId,
       agents: agentId
@@ -1553,10 +989,6 @@ export function registerDesktopRoutes(app: express.Express) {
           ]
         : [],
     });
-  });
-
-  app.get("/api/desktop/openclaw/health", (_req, res) => {
-    res.json({ status: "ok", mode: "desktop-openclaw-proxy" });
   });
 
   app.get("/api/desktop/jiuwen/health", (_req, res) => {
@@ -1696,36 +1128,6 @@ export function registerDesktopRoutes(app: express.Express) {
     }
   });
 
-  app.post("/api/desktop/channels/weixin/begin", async (req, res) => {
-    const user = await requireDesktopUser(req, res);
-    if (!user) return;
-    try {
-      const claw = await getDesktopUserClaw(user);
-      if (!claw) return res.status(404).json({ error: "no agent assigned" });
-      const result = await desktopStartWeixinBind(claw.adoptId);
-      if (!result.ok) return res.status(502).json({ error: result.error });
-      const qrDataUrl = await toQrDataUrl(result.qrCode);
-      res.json({ qrCode: result.qrCode, pollToken: result.pollToken, qrDataUrl });
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : "weixin begin failed" });
-    }
-  });
-
-  app.post("/api/desktop/channels/weixin/poll", async (req, res) => {
-    const user = await requireDesktopUser(req, res);
-    if (!user) return;
-    try {
-      const pollToken = String(req.body?.pollToken || "").trim();
-      if (!pollToken) return res.status(400).json({ error: "pollToken required" });
-      const claw = await getDesktopUserClaw(user);
-      if (!claw) return res.status(404).json({ error: "no agent assigned" });
-      const result = await desktopPollWeixinBind(claw.adoptId, claw, pollToken);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : "weixin poll failed" });
-    }
-  });
-
   app.post("/api/desktop/channels/feishu/begin", async (req, res) => {
     const user = await requireDesktopUser(req, res);
     if (!user) return;
@@ -1765,10 +1167,6 @@ export function registerDesktopRoutes(app: express.Express) {
     try {
       const claw = await getDesktopUserClaw(user);
       if (!claw) return res.status(404).json({ error: "no agent assigned" });
-      if (key === "weixin") {
-        cleanupOpenClawWeixinBindingForAdopt(claw.adoptId, claw);
-        return res.json({ ok: true });
-      }
       if (key === "feishu") {
         await unbindFeishu(claw.adoptId);
         return res.json({ ok: true });
@@ -1816,7 +1214,6 @@ export function registerDesktopRoutes(app: express.Express) {
     }
   );
 
-  app.post("/api/desktop/openclaw/v1/chat/completions", forwardOpenClawChat);
   app.post("/api/desktop/jiuwen/v1/chat/completions", forwardJiuwenDesktopChat);
 
   // ── Soul management for enterprise desktop mode ──────────────────────────
