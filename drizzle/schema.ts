@@ -39,6 +39,24 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
+/** Stable mapping from a trusted upstream account to the canonical EA user. */
+export const channelIdentityLinks = mysqlTable("channel_identity_links", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  providerSubject: varchar("providerSubject", { length: 128 }).notNull(),
+  userId: int("userId").notNull(),
+  verifiedEmail: varchar("verifiedEmail", { length: 320 }),
+  verifiedPhone: varchar("verifiedPhone", { length: 24 }),
+  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [
+  uniqueIndex("channel_identity_provider_subject_unique").on(table.provider, table.providerSubject),
+  index("channel_identity_user_idx").on(table.userId),
+]);
+
+export type ChannelIdentityLink = typeof channelIdentityLinks.$inferSelect;
+
 export const adminMfaCredentials = mysqlTable("admin_mfa_credentials", {
   userId: int("user_id").primaryKey(),
   secretEncrypted: varchar("secret_encrypted", { length: 1024 }).notNull(),
@@ -887,6 +905,10 @@ export const agentTasks = mysqlTable("agent_tasks", {
   interactionStatus: varchar("interaction_status", { length: 16 }),
   interactionResponseJson: text("interaction_response_json"),
   interactionAnsweredAt: timestamp("interaction_answered_at"),
+  leaseOwner: varchar("lease_owner", { length: 160 }),
+  leaseExpiresAt: timestamp("lease_expires_at"),
+  lastHeartbeatAt: timestamp("last_heartbeat_at"),
+  attemptCount: int("attempt_count").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
@@ -896,6 +918,7 @@ export const agentTasks = mysqlTable("agent_tasks", {
   sourceConversationIdx: index("idx_agent_tasks_source_conversation").on(table.sourceConversationId),
   agentStatusIdx: index("idx_agent_tasks_agent_status").on(table.agentId, table.status),
   parentTaskIdx: index("idx_agent_tasks_parent").on(table.parentTaskId),
+  leaseExpiryIdx: index("idx_agent_tasks_lease_expiry").on(table.status, table.leaseExpiresAt),
   sourceMessageUnique: uniqueIndex("uk_agent_tasks_source_message").on(
     table.adoptId,
     table.agentId,
@@ -905,6 +928,22 @@ export const agentTasks = mysqlTable("agent_tasks", {
 
 export type AgentTask = typeof agentTasks.$inferSelect;
 export type InsertAgentTask = typeof agentTasks.$inferInsert;
+
+export const chatSkillSessionState = mysqlTable("chat_skill_session_state", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  adoptId: varchar("adopt_id", { length: 64 }).notNull(),
+  sessionId: varchar("session_id", { length: 160 }).notNull(),
+  skillId: varchar("skill_id", { length: 128 }).notNull(),
+  selectionMode: mysqlEnum("selection_mode", ["manual", "automatic"]).notNull(),
+  useCount: int("use_count").notNull().default(1),
+  firstSelectedAt: timestamp("first_selected_at").defaultNow().notNull(),
+  lastSelectedAt: timestamp("last_selected_at").defaultNow().notNull(),
+}, (table) => ({
+  sessionSkillUnique: uniqueIndex("uk_chat_skill_session_state").on(table.adoptId, table.sessionId, table.skillId),
+  sessionRecentIdx: index("idx_chat_skill_session_recent").on(table.adoptId, table.sessionId, table.lastSelectedAt),
+}));
+
+export type ChatSkillSessionState = typeof chatSkillSessionState.$inferSelect;
 
 // ── External channel bindings ──
 export const channelBindings = mysqlTable("channel_bindings", {
