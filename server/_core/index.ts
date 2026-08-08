@@ -59,6 +59,8 @@ import { registerAgentTaskRoutes, startAgentTaskRuntime } from "./claw-agent-tas
 import { registerPersonalExpertRoutes } from "./personal-experts";
 import { registerPlatformToolsMcpRoutes } from "./platform-tools-mcp";
 import { registerCustomMcpRoutes } from "./custom-mcp";
+import { registerEnterpriseMcpGatewayRoutes } from "./enterprise-mcp-gateway";
+import { reconcileEnterpriseMcpRuntimeScopes } from "./enterprise-mcp-runtime-reconcile";
 import { registerSkillConfigRoutes } from "./claw-skill-config";
 import { registerToolsPolicyRoutes } from "./claw-tools-policy";
 import { registerCoreFileRoutes } from "./claw-core-files";
@@ -79,6 +81,9 @@ import { registerDesktopRoutes } from "./desktop";
 import { registerKnowledgeRoutes } from "./knowledge-routes";
 import { registerMonitoringRoutes } from "./monitoring-routes";
 import { registerToolEgressRoutes } from "./tool-egress-routes";
+import { registerRuntimeGovernanceAttestationRoutes } from "./runtime-governance-attestation";
+import { registerGovernanceApprovalRoutes } from "./governance-approval-routes";
+import { publishCapabilityPepCoverage } from "./governance/capability-registry";
 import { registerWebFaviconRoutes } from "./web-favicon";
 import { APP_ROOT, startApplicationLogRetention } from "./helpers";
 import { getRoleSkillMcpBaseline, listAgentRoleTemplates } from "./role-templates";
@@ -125,6 +130,7 @@ logInfo("role_template.baseline_loaded", {
   defaultRole: roleBaseline.schema.defaultRole,
   roles: listAgentRoleTemplates().length,
 });
+logInfo("governance.pep_coverage", publishCapabilityPepCoverage());
 
 function logIosLoadDebug(message: string, fields: Record<string, unknown> = {}): void {
   if (!iosLoadDebugEnabled) return;
@@ -451,6 +457,7 @@ async function startServer() {
   startManagedWorker("agent_health", startAgentHealthMonitor);
   registerPlatformToolsMcpRoutes(app);
   registerCustomMcpRoutes(app);
+  registerEnterpriseMcpGatewayRoutes(app);
   registerSkillConfigRoutes(app);
   registerToolsPolicyRoutes(app);
   registerCoreFileRoutes(app);
@@ -460,6 +467,8 @@ async function startServer() {
   registerSandboxRoutes(app);
   registerManagedBrowserRoutes(app);
   registerToolEgressRoutes(app);
+  registerRuntimeGovernanceAttestationRoutes(app);
+  registerGovernanceApprovalRoutes(app);
   registerMiniExperienceRoutes(app);
   registerChatStreamRoutes(app);
   registerCoopUploadRoutes(app);
@@ -865,6 +874,9 @@ async function startServer() {
           await startManagedWorkerAsync("agent_tasks", startAgentTaskRuntime);
           startManagedWorker("agent_memory", startAgentMemoryRuntime);
           startManagedWorker("knowledge_recovery", startKnowledgeIndexRecovery);
+          void reconcileEnterpriseMcpRuntimeScopes()
+            .then((summary) => logInfo("enterprise_mcp.runtime_scopes_reconciled", summary))
+            .catch((error) => logError("enterprise_mcp.runtime_scopes_failed", error));
         }
       })
       .catch((error) => {
