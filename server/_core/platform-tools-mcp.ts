@@ -4,7 +4,7 @@ import path from "path";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { isAuthorizedInternalRequest, resolveRuntimeAgentId, resolveRuntimeWorkspaceByIds } from "./helpers";
 import type { SkillSource } from "../../shared/types/skill";
-import { getClawByAdoptId, getClawByAgentId } from "../db";
+import { getClawByAdoptId, getClawByAgentId, getUserById } from "../db";
 import { resolveEffectiveRoleAssets } from "../db/role-assets";
 import { parseSkillSourceDirectory, sanitizeSkillId } from "./skills/skill-source";
 import { skillInstaller } from "./skills/skill-installer";
@@ -24,6 +24,13 @@ import { resolveRuntimePrincipal } from "./governance/principal";
 import { capabilitySetFingerprint } from "./governance/capability-registry";
 import { resolveToolGovernance, stableToolInputHash } from "./tool-governance";
 import { runtimeGovernanceIsAttested } from "./runtime-governance-attestation";
+import { callInternalMcpTool, parseInternalMcpJsonResult } from "./internal-mcp-client";
+import { prepareWealthAllocationContext } from "./wealth-allocation-context";
+import { prepareWealthMaturityContext } from "./wealth-maturity-context";
+import {
+  resolveWealthPolicyBasis,
+  resolveWealthSuitabilityPolicySource,
+} from "./wealth-policy-source";
 
 const SERVICE_NAME = "platform-tools";
 const SERVICE_VERSION = "1.0.0";
@@ -106,6 +113,53 @@ const TOOLS = [
     name: "list_learned_preferences",
     description: "List active work preferences learned by the current EA employee agent. Use when the user asks what is remembered about their work style.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_wealth_policy_basis",
+    description: [
+      "Get the currently effective wealth suitability policy basis for the current wealth-manager role.",
+      "Use this before answering which sales or suitability policy is current, whether a historical version may be used, or which policy basis governs a formal recommendation.",
+      "The result contains only eligible current-policy metadata and safe aggregate filtering evidence; it never returns restricted document names or contents.",
+    ].join(" "),
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "prepare_wealth_maturity_context",
+    description: [
+      "Prepare a bounded list of upcoming maturity events for customers authorized to the current wealth manager.",
+      "Use for 7/14/30/90-day maturity operations, prioritization, and follow-up planning.",
+      "It never recommends replacement products and never creates tasks; any product recommendation requires prepare_wealth_allocation_context, and any write requires a separate governed tool call.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        window_days: { type: "number", minimum: 1, maximum: 90, description: "Maturity window in days, default 30." },
+        max_customers: { type: "number", minimum: 1, maximum: 30, description: "Maximum authorized customers to scan, default 20." },
+        max_items: { type: "number", minimum: 1, maximum: 50, description: "Maximum maturity events returned, default 30." },
+      },
+    },
+  },
+  {
+    name: "prepare_wealth_allocation_context",
+    description: [
+      "Prepare governed wealth-allocation context for one authorized customer.",
+      "This is the only platform tool that may produce a formal candidate-product set for a wealth allocation task.",
+      "It loads current customer and product data, verifies the currently effective suitability policy, and returns only products allowed by deterministic policy.",
+      "Use eligibleProducts for recommendations; excludedProducts are reason-only and must never be recommended.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string", description: "Customer id from the authorized wealth customer MCP." },
+        amount: { type: "number", description: "Optional proposed allocation amount." },
+        horizon_months: { type: "number", description: "Optional customer investment horizon in months." },
+        channel: { type: "string", description: "Optional sales channel, for example branch or mobile." },
+        keyword: { type: "string", description: "Optional product search keyword." },
+        product_type: { type: "string", description: "Optional product type filter." },
+        max_products: { type: "number", description: "Maximum candidates to evaluate, default 10 and maximum 20." },
+      },
+      required: ["customer_id"],
+    },
   },
 ];
 const TOOL_NAMES = new Set(TOOLS.map(tool => tool.name));
@@ -419,6 +473,207 @@ async function callTool(
   if (name === "list_available_agents") {
     const data = await internalJson(`/api/claw/agents/available?adoptId=${encodeURIComponent(adoptId)}`);
     return textResult(summarizeAgents(data));
+  }
+
+  if (name === "get_wealth_policy_basis") {
+    const user = await getUserById(Number(claw.userId));
+    if (!user) return textResult("当前用户身份不可用，请重新登录后重试。", { isError: true });
+    const basis = await resolveWealthPolicyBasis({
+      userId: Number(user.id),
+      groupId: Number(user.groupId || 0),
+      actorRole: String(user.role || "user"),
+      roleTemplate: principal.principal.roleTemplate,
+    });
+    await recordAuditBestEffort({
+      action: basis.status === "ready"
+        ? "governance.wealth_policy_basis.selected"
+        : "governance.wealth_policy_basis.unavailable",
+      result: basis.status === "ready" ? "success" : "denied",
+      severity: basis.status === "ready" ? "info" : "medium",
+      actorType: "agent",
+      actorUserId: Number(user.id),
+      actorRole: principal.principal.roleTemplate,
+      targetType: "wealth_policy_basis",
+      targetId: basis.selected?.sourceAssetId || "unavailable",
+      workspaceId: principal.principal.workspaceId || null,
+      agentInstanceId: adoptId,
+      runtimeAgentId: principal.principal.agentId,
+      sessionId: principal.principal.sessionId,
+      toolName: name,
+      policyCode: "EA_KNOWLEDGE_ELIGIBILITY_V1",
+      source: "platform_tools_mcp",
+      ...auditRequest(req),
+      metadata: {
+        ruleVersion: "knowledge-eligibility-v1",
+        policySourceVersion: basis.selected?.versionLabel || null,
+        contextEligibilityFingerprint: basis.governance.eligibilityFingerprint,
+        historicalVersionFiltered: basis.governance.historicalVersionFiltered,
+        filteredForValidity: basis.governance.filteredForValidity,
+        accessRestricted: basis.governance.accessRestricted,
+      },
+    });
+    return textResult(`EA_WEALTH_POLICY_BASIS:${JSON.stringify(basis)}`);
+  }
+
+  if (name === "prepare_wealth_maturity_context") {
+    const boundedInteger = (value: unknown, fallback: number, maximum: number) => {
+      const number = Math.floor(Number(value || fallback));
+      return Number.isFinite(number) ? Math.min(maximum, Math.max(1, number)) : fallback;
+    };
+    const windowDays = boundedInteger(args.window_days || args.windowDays, 30, 90);
+    const maxCustomers = boundedInteger(args.max_customers || args.maxCustomers, 20, 30);
+    const maxItems = boundedInteger(args.max_items || args.maxItems, 30, 50);
+    const customerEndpoint = String(process.env.WEALTH_CUSTOMER_MCP_URL || "http://127.0.0.1:18008/mcp").trim();
+    try {
+      const result = await prepareWealthMaturityContext({
+        roleTemplate: principal.principal.roleTemplate,
+        request: { windowDays, maxCustomers, maxItems },
+        dependencies: {
+          listCustomers: async (query) => parseInternalMcpJsonResult(await callInternalMcpTool({
+            endpointUrl: customerEndpoint,
+            toolName: "wealth_assistant_customer_list",
+            args: query,
+            agentId: principal.principal.agentId,
+            adoptId,
+            sessionId: principal.principal.sessionId,
+          })),
+          loadCustomer: async (customerId) => parseInternalMcpJsonResult(await callInternalMcpTool({
+            endpointUrl: customerEndpoint,
+            toolName: "wealth_assistant_customer_detail",
+            args: { customerId },
+            agentId: principal.principal.agentId,
+            adoptId,
+            sessionId: principal.principal.sessionId,
+          })),
+        },
+      });
+      await recordAuditBestEffort({
+        action: "governance.wealth_maturity_context.prepared",
+        result: result.status === "unavailable" ? "failed" : "success",
+        severity: result.status === "unavailable" ? "medium" : "info",
+        actorType: "agent",
+        actorUserId: principal.principal.userId || null,
+        actorRole: principal.principal.roleTemplate,
+        targetType: "wealth_maturity_context",
+        targetId: stableToolInputHash({ windowDays, maxCustomers, maxItems }),
+        workspaceId: principal.principal.workspaceId || null,
+        agentInstanceId: adoptId,
+        runtimeAgentId: principal.principal.agentId,
+        sessionId: principal.principal.sessionId,
+        toolName: name,
+        policyCode: "EA_WEALTH_MATURITY_SCOPE_V1",
+        source: "platform_tools_mcp",
+        ...auditRequest(req),
+        metadata: {
+          windowDays,
+          customersScanned: result.summary.customersScanned,
+          customersFailed: result.summary.customersFailed,
+          returnedItems: result.summary.returnedItems,
+          truncated: result.summary.truncated,
+          scope: result.evidence.scope,
+        },
+      });
+      return textResult(`EA_WEALTH_MATURITY_CONTEXT:${JSON.stringify(result)}`, result.status === "unavailable" ? { isError: true } : {});
+    } catch {
+      return textResult(`EA_WEALTH_MATURITY_CONTEXT:${JSON.stringify({
+        schema: "ea.wealth-maturity-context.v1",
+        status: "unavailable",
+        message: "客户数据服务暂时不可用，不能形成具体客户到期经营结论。可以先整理通用跟进检查表。",
+      })}`, { isError: true });
+    }
+  }
+
+  if (name === "prepare_wealth_allocation_context") {
+    const customerId = String(args.customer_id || args.customerId || "").trim().slice(0, 128);
+    if (!customerId) return textResult("需要先选择本人授权范围内的客户，再准备资产配置建议。", { isError: true });
+    const optionalPositiveNumber = (value: unknown, maximum: number): number | null => {
+      if (value === undefined || value === null || value === "") return null;
+      const number = Number(value);
+      return Number.isFinite(number) && number > 0 && number <= maximum ? number : null;
+    };
+    const amount = optionalPositiveNumber(args.amount, 10_000_000_000);
+    const horizonMonths = optionalPositiveNumber(args.horizon_months || args.horizonMonths, 1_200);
+    const channel = String(args.channel || "").trim().slice(0, 64);
+    const keyword = String(args.keyword || "").trim().slice(0, 120);
+    const productType = String(args.product_type || args.productType || "").trim().slice(0, 64);
+    const maxProducts = Math.min(20, Math.max(1, Math.floor(Number(args.max_products || args.maxProducts || 10)) || 10));
+    const customerEndpoint = String(process.env.WEALTH_CUSTOMER_MCP_URL || "http://127.0.0.1:18008/mcp").trim();
+    const productEndpoint = String(process.env.WEALTH_PRODUCT_MCP_URL || "http://127.0.0.1:18007/mcp").trim();
+    try {
+      const user = await getUserById(Number(claw.userId));
+      if (!user) throw new Error("当前用户身份不可用");
+      const result = await prepareWealthAllocationContext({
+        principal: principal.principal,
+        request: { customerId, amount, horizonMonths, channel, keyword, productType, maxProducts },
+        dependencies: {
+          loadCustomer: async (requestedCustomerId) => parseInternalMcpJsonResult(await callInternalMcpTool({
+            endpointUrl: customerEndpoint,
+            toolName: "wealth_assistant_customer_detail",
+            args: { customerId: requestedCustomerId },
+            agentId: principal.principal.agentId,
+            adoptId,
+            sessionId: principal.principal.sessionId,
+          })),
+          searchProducts: async (search) => parseInternalMcpJsonResult(await callInternalMcpTool({
+            endpointUrl: productEndpoint,
+            toolName: "wealth_assistant_product_search",
+            args: {
+              keyword: search.keyword || undefined,
+              type: search.type || undefined,
+              page: 1,
+              pageSize: search.pageSize,
+            },
+            agentId: principal.principal.agentId,
+            adoptId,
+            sessionId: principal.principal.sessionId,
+          })),
+          resolvePolicySource: async () => resolveWealthSuitabilityPolicySource({
+            userId: Number(user.id),
+            groupId: Number(user.groupId || 0),
+            actorRole: String(user.role || "user"),
+            roleTemplate: principal.principal.roleTemplate,
+          }),
+        },
+      });
+      await recordAuditBestEffort({
+        action: "governance.wealth_suitability.evaluated",
+        result: result.status === "ready" ? "success" : "denied",
+        severity: result.status === "ready" ? "info" : "medium",
+        actorType: "agent",
+        actorUserId: Number(user.id),
+        actorRole: principal.principal.roleTemplate,
+        targetType: "wealth_allocation_context",
+        targetId: stableToolInputHash({ customerId }),
+        agentInstanceId: adoptId,
+        runtimeAgentId: principal.principal.agentId,
+        sessionId: principal.principal.sessionId,
+        toolName: name,
+        policyCode: "WEALTH_SUITABILITY_MATCH",
+        source: "platform_tools_mcp",
+        ...auditRequest(req),
+        metadata: {
+          ruleVersion: result.evidence.ruleVersion,
+          policySourceAssetId: result.policySource.sourceAssetId,
+          policySourceVersion: result.policySource.versionLabel,
+          contextEligibilityFingerprint: result.policySource.eligibilityFingerprint,
+          policyDecisionIds: result.evidence.policyDecisionIds,
+          eligibleProductCount: result.eligibleProducts.length,
+          excludedProductCount: result.excludedProducts.length,
+        },
+      });
+      return textResult(`EA_WEALTH_ALLOCATION_CONTEXT:${JSON.stringify(result)}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "");
+      const policyUnavailable = /policy|制度|knowledge/i.test(message);
+      return textResult(`EA_WEALTH_ALLOCATION_CONTEXT:${JSON.stringify({
+        schema: "ea.wealth-allocation-context.v1",
+        status: "degraded",
+        errorCode: policyUnavailable ? "POLICY_CONTEXT_UNAVAILABLE" : "BUSINESS_CONTEXT_UNAVAILABLE",
+        message: policyUnavailable
+          ? "当前有效适当性制度不可用，暂不能形成正式产品推荐。"
+          : "客户或产品数据服务暂时不可用，可以先完成不依赖当前产品的资产结构分析。",
+      })}`, { isError: true });
+    }
   }
 
   if (name === "submit_agent_task") {
