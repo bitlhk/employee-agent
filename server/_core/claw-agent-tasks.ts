@@ -15,6 +15,7 @@ import {
 } from "@shared/agent-task-lifecycle";
 import { isAuthorizedInternalRequest, requireClawOwner, resolveRuntimeWorkspaceByIds } from "./helpers";
 import { materializeA2AArtifacts } from "./agent-artifacts";
+import { capabilityIntentResultNotice } from "./a2a-capability-intent";
 import {
   cancelA2AExpertTask,
   runA2AExpertTask,
@@ -57,6 +58,7 @@ import {
 import { guardToolEgress } from "./tool-egress-policy";
 import { auditRequest, recordAuditBestEffort } from "./audit-events";
 import { resolveRuntimePrincipal } from "./governance/principal";
+import { authorizeA2AExecution } from "./governance/a2a-execution-authority";
 import {
   delegationEvidence,
   delegationScopeFromMetadata,
@@ -65,6 +67,12 @@ import {
 } from "./governance/delegation-policy";
 
 type AgentTaskStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+type AgentTaskRuntimeContext = {
+  contextId?: string;
+  dataPart?: Record<string, unknown>;
+  dataPartMetadata?: Record<string, unknown>;
+  taskAuthorizationSnapshotId?: string;
+};
 
 const AGENT_TASK_TEXT_LIMIT_BYTES = 60_000;
 const AGENT_TASK_ERROR_LIMIT_BYTES = 8_000;
@@ -124,10 +132,7 @@ function publicAgentTask(task: unknown): Record<string, unknown> {
 
 function storedAgentTaskRuntime(task: Record<string, unknown>): {
   input: string;
-  contextId?: string;
-  dataPart?: Record<string, unknown>;
-  dataPartMetadata?: Record<string, unknown>;
-} {
+} & AgentTaskRuntimeContext {
   const stored = parseJsonRecord(task.requestContextJson ?? task.request_context_json);
   return {
     input: String(stored.input || task.input || ""),
@@ -135,6 +140,9 @@ function storedAgentTaskRuntime(task: Record<string, unknown>): {
     ...(stored.dataPart && typeof stored.dataPart === "object" ? { dataPart: stored.dataPart } : {}),
     ...(stored.dataPartMetadata && typeof stored.dataPartMetadata === "object"
       ? { dataPartMetadata: stored.dataPartMetadata }
+      : {}),
+    ...(stored.taskAuthorizationSnapshotId
+      ? { taskAuthorizationSnapshotId: String(stored.taskAuthorizationSnapshotId) }
       : {}),
   };
 }
@@ -234,8 +242,9 @@ async function authorizeAgentDelegation(input: {
   agent: BusinessAgent;
   requestedScope?: unknown;
   sessionId?: unknown;
+  principal?: ReturnType<typeof resolveRuntimePrincipal>;
 }): Promise<DelegationPolicyResult> {
-  const principal = resolveRuntimePrincipal({
+  const principal = input.principal || resolveRuntimePrincipal({
     adoption: input.claw,
     sessionId: input.sessionId,
   });
@@ -385,11 +394,7 @@ async function runAgentTaskInBackground(
   taskId: string,
   agent: any,
   input: string,
-  runtime: {
-    contextId?: string;
-    dataPart?: Record<string, unknown>;
-    dataPartMetadata?: Record<string, unknown>;
-  } = {},
+  runtime: AgentTaskRuntimeContext = {},
 ) {
   const startedAt = Date.now();
   const finishMetric = beginOperationalActivity("expert_task");
@@ -430,6 +435,19 @@ async function runAgentTaskInBackground(
       metricOutcome = isCancelledAgentTaskStatus(startingTask?.status) ? "cancelled" : "error";
       return;
     }
+    const taskAdoptId = String((agent as { __taskAdoptId?: unknown }).__taskAdoptId || "");
+    const { getClawByAdoptId } = await import("../db");
+    const taskClaw = taskAdoptId ? await getClawByAdoptId(taskAdoptId) : null;
+    if (!taskClaw) throw new Error("任务岗位身份已失效，已停止外部 Agent 调用。");
+    const executionAuthority = await authorizeA2AExecution({
+      claw: taskClaw,
+      agentId: String(agent.id || ""),
+      taskInput: input,
+      sessionId: startingTask.sourceSessionId,
+      dataPart: runtime.dataPart,
+      taskAuthorizationSnapshotId: runtime.taskAuthorizationSnapshotId,
+    });
+    if (!executionAuthority.allowed) throw new Error(executionAuthority.reason);
     const adapterProtocol = String(agent.adapterProtocol || "").trim();
     if (!agent.apiUrl) throw new Error("Agent endpoint is not configured");
     if (!["a2a-v1", "agent-a2a-v1", "a2a-task-v1"].includes(adapterProtocol)) {
@@ -472,10 +490,13 @@ async function runAgentTaskInBackground(
     if (["failed", "canceled", "cancelled"].includes(String(result.state || "").toLowerCase())) {
       throw new Error(String(result.text || "").trim() || `${String(agent.name || "专家")}任务执行失败`);
     }
-    if (!String(result.text || "").trim() && !result.interaction) {
+    if (!String(result.text || "").trim() && !result.interaction && !result.capabilityIntents?.length) {
       throw new Error("A2A Agent did not return the configured result artifact");
     }
     const cleanedText = cleanA2AText(result.text, { hasStructuredArtifacts: Boolean(result.artifacts?.length) });
+    const capabilityIntents = result.capabilityIntents || [];
+    const intentNotice = capabilityIntentResultNotice(capabilityIntents);
+    const governedResultText = [cleanedText, intentNotice].filter(Boolean).join("\n\n");
     const runtimeAgentId = String((agent as any).__runtimeAgentId || "").trim();
     const artifacts = runtimeAgentId && result.artifacts?.length
       ? await materializeA2AArtifacts({
@@ -487,16 +508,41 @@ async function runAgentTaskInBackground(
       : [];
     const completed = await updateLeasedAgentTask(taskId, AGENT_TASK_LEASE_OWNER, {
       status: "succeeded" as AgentTaskStatus,
-      resultMarkdown: cleanedText ? truncateUtf8(cleanedText, AGENT_TASK_TEXT_LIMIT_BYTES) : null,
+      resultMarkdown: governedResultText ? truncateUtf8(governedResultText, AGENT_TASK_TEXT_LIMIT_BYTES) : null,
       remoteTaskId: result.remoteTaskId || null,
       rawEventsJson: summarizeA2AEvents(result.rawEvents || [], endpointConfig, AGENT_TASK_RAW_EVENTS_LIMIT_BYTES),
       artifactsJson: artifacts.length > 0 ? JSON.stringify(artifacts) : null,
+      capabilityIntentsJson: capabilityIntents.length > 0 ? JSON.stringify(capabilityIntents) : null,
       interactionJson: result.interaction ? JSON.stringify(result.interaction) : null,
       interactionStatus: result.interaction ? "pending" : null,
       completedAt: sql`CURRENT_TIMESTAMP`,
       errorMessage: null,
     });
     if (!completed) return;
+    for (const intent of capabilityIntents) {
+      await recordAuditBestEffort({
+        action: "governance.a2a.capability_intent.received",
+        result: "success",
+        severity: "info",
+        actorType: "agent",
+        actorUserId: Number((agent as { __taskUserId?: unknown }).__taskUserId || 0) || null,
+        targetType: "capability_intent",
+        targetId: intent.intentId,
+        agentInstanceId: String((agent as { __taskAdoptId?: unknown }).__taskAdoptId || "") || null,
+        runtimeAgentId: runtimeAgentId || null,
+        toolName: intent.operation,
+        policyCode: "EA_A2A_LOCAL_EXECUTION_REQUIRED",
+        source: "a2a_delegation",
+        metadata: {
+          capabilityId: intent.capabilityId,
+          sideEffect: intent.sideEffect,
+          resource: intent.resource || null,
+          intentFingerprint: intent.intentFingerprint,
+          executionStatus: intent.executionStatus,
+          remoteExecutorCalled: false,
+        },
+      });
+    }
     const completedTask = await getAgentTask(taskId);
     if (String(completedTask?.status || "") !== "succeeded") return;
     await markAgentTaskSucceeded(agent).catch(() => undefined);
@@ -857,32 +903,47 @@ export function registerAgentTaskRoutes(app: express.Express) {
       }
 
       const sourceMessageId = req.body?.sourceMessageId ? String(req.body.sourceMessageId).slice(0, 128) : "";
-      const endpointConfig = parseJsonRecord(agent.endpointConfigJson);
-      const maxConcurrent = Math.max(0, Math.min(100, Number(endpointConfig.maxConcurrent || 0)));
-      const maxDailyRequests = agentDailyRequestLimit(agent);
-      await ensureAgentAvailable(agent);
-      observeCapabilityPreflight({ kind: "expert", outcome: "ready" });
-
-      const taskId = `agt_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
-      const taskUserId = Number((claw as any).userId || 0);
       const sourceConversationId = req.body?.conversationId
         ? String(req.body.conversationId).slice(0, 128)
         : null;
       const sourceSessionId = req.body?.sessionId
         ? String(req.body.sessionId).slice(0, 160)
         : null;
+      const endpointConfig = parseJsonRecord(agent.endpointConfigJson);
+      const maxConcurrent = Math.max(0, Math.min(100, Number(endpointConfig.maxConcurrent || 0)));
+      const maxDailyRequests = agentDailyRequestLimit(agent);
+      await ensureAgentAvailable(agent);
+      observeCapabilityPreflight({ kind: "expert", outcome: "ready" });
+
+      const executionAuthority = await authorizeA2AExecution({
+        req,
+        claw,
+        agentId,
+        taskInput: input,
+        sessionId: sourceSessionId,
+        dataPart: scenarioId ? { schema: "ea.investment-team.request.v1", scenarioId } : undefined,
+        taskAuthorizationSnapshotId: String(req.headers["x-ea-authorization-snapshot-id"] || "").trim() || null,
+      });
+      if (!executionAuthority.allowed || !executionAuthority.effectivePrincipal) {
+        return res.status(403).json({ error: "EXECUTION_AUTHORITY_DENIED", reason: executionAuthority.reason });
+      }
+
+      const taskId = `agt_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+      const taskUserId = Number((claw as any).userId || 0);
       const delegation = await authorizeAgentDelegation({
         req,
         claw,
         agent,
         requestedScope: req.body?.delegationScope,
         sessionId: sourceSessionId,
+        principal: { principal: executionAuthority.effectivePrincipal, complete: true, issues: [] },
       });
       if (!delegation.allowed) {
         return res.status(403).json({ error: "DELEGATION_NOT_ALLOWED", reason: delegation.decision.reason });
       }
       const governanceMetadata = delegationEvidence(delegation);
       const runtime = {
+        taskAuthorizationSnapshotId: executionAuthority.taskSnapshotId,
         contextId: a2aRuntimeContextId(
           endpointConfig,
           adoptId,
@@ -1030,6 +1091,9 @@ export function registerAgentTaskRoutes(app: express.Express) {
       }
       const continuationId = `agt_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
       const continuationRuntime = {
+        ...(sourceRuntime.taskAuthorizationSnapshotId
+          ? { taskAuthorizationSnapshotId: sourceRuntime.taskAuthorizationSnapshotId }
+          : {}),
         contextId: a2aRuntimeContextId(
           endpointConfig,
           adoptId,
