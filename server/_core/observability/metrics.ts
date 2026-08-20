@@ -321,6 +321,7 @@ export type BackgroundWorkerName =
   | "agent_memory"
   | "agent_tasks"
   | "knowledge_recovery"
+  | "runtime_assets"
   | "audit_dlq"
   | "tool_audit"
   | "public_health"
@@ -331,6 +332,13 @@ const chatRequests = new Counter({
   name: "ea_chat_requests_total",
   help: "Completed chat requests by runtime and outcome.",
   labelNames: ["runtime", "outcome"] as const,
+  registers: [metricsRegistry],
+});
+
+const chatAdmission = new Counter({
+  name: "ea_chat_admission_total",
+  help: "Chat requests reaching each bounded admission stage.",
+  labelNames: ["stage"] as const,
   registers: [metricsRegistry],
 });
 
@@ -737,6 +745,12 @@ export function setCapacityLane(lane: string, active: number, limit: number): vo
 
 export function observeCapacityRejection(lane: string): void {
   capacityRejections.inc({ lane: lane.slice(0, 32) });
+}
+
+export function observeChatAdmission(
+  stage: "rate_limit_entered" | "rate_limit_passed" | "capacity_acquired",
+): void {
+  chatAdmission.inc({ stage });
 }
 
 export function setCapacityQueue(lane: string, queued: number, limit: number): void {

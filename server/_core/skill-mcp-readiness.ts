@@ -4,16 +4,32 @@ import { resolveEffectiveRoleAssets } from "../db/role-assets";
 import { resolvePersistedAgentMcpSelection } from "../db/agent-mcp-preferences";
 import { enterpriseMcpIdentityStatus } from "./enterprise-mcp-identity";
 import { getSkillMcpRequirement, type SkillMcpRequirement } from "./role-templates";
+import {
+  probeRoleMcpServerForReadiness,
+  type RoleMcpReadinessProbe,
+} from "./role-mcp-gateway";
+import { resolveEnterpriseRuntimeRoute } from "./enterprise-runtime-adapter";
 
 const DEFAULT_AGENTSERVER_WS_URL = "ws://127.0.0.1:18092";
 const SERVER_CACHE_TTL_MS = 30_000;
 const TOOL_CACHE_TTL_MS = 45_000;
 const ENTERPRISE_MCP_GATEWAY_ID = "enterprise_mcp_gateway";
+const ROLE_MCP_GATEWAY_ID = "role_mcp_gateway";
 
 type RuntimeMcpServer = {
   name: string;
   enabled: boolean;
 };
+
+export function includeEnterpriseRoleGateway(
+  servers: RuntimeMcpServer[],
+  enterpriseBound: boolean,
+): RuntimeMcpServer[] {
+  if (!enterpriseBound || servers.some((server) => server.name === ROLE_MCP_GATEWAY_ID && server.enabled)) {
+    return servers;
+  }
+  return [...servers, { name: ROLE_MCP_GATEWAY_ID, enabled: true }];
+}
 
 export type SkillMcpServerReadiness = {
   serverId: string;
@@ -207,6 +223,38 @@ async function resolveEnterpriseManagedReadiness(input: {
   return { servers, toolsByServer };
 }
 
+export async function resolveRoleManagedReadiness(
+  input: {
+    requiredServerIds: string[];
+    configuredServers: RuntimeMcpServer[];
+  },
+  probe: (serverId: string) => Promise<RoleMcpReadinessProbe> = probeRoleMcpServerForReadiness,
+): Promise<{
+  servers: RuntimeMcpServer[];
+  toolsByServer: Record<string, string[]>;
+  probeErrors: Record<string, string>;
+}> {
+  const gateway = input.configuredServers.find(
+    (server) => server.name === ROLE_MCP_GATEWAY_ID && server.enabled,
+  );
+  if (!gateway || input.requiredServerIds.length === 0) {
+    return { servers: [], toolsByServer: {}, probeErrors: {} };
+  }
+
+  const servers: RuntimeMcpServer[] = [];
+  const toolsByServer: Record<string, string[]> = {};
+  const probeErrors: Record<string, string> = {};
+  await Promise.all(input.requiredServerIds.map(async (serverId) => {
+    const result = await probe(serverId);
+    if (!result.configured) return;
+    servers.push({ name: serverId, enabled: true });
+    toolsByServer[serverId] = result.availableTools;
+    if (result.probeError) probeErrors[serverId] = result.probeError;
+  }));
+  servers.sort((left, right) => left.name.localeCompare(right.name));
+  return { servers, toolsByServer, probeErrors };
+}
+
 export function evaluateSkillMcpReadiness(input: EvaluateSkillMcpReadinessInput): SkillMcpReadiness {
   const checkedAt = input.checkedAt || new Date().toISOString();
   const requiredEntries = Object.entries(input.requirement.servers);
@@ -344,6 +392,12 @@ export async function probeJiuwenSkillMcpReadiness(args: {
       catalogError: sanitizeProbeError(error),
     });
   }
+  const enterpriseBound = args.adoptId
+    ? await resolveEnterpriseRuntimeRoute(args.adoptId)
+      .then((decision) => decision.target === "enterprise")
+      .catch(() => false)
+    : false;
+  configuredServers = includeEnterpriseRoleGateway(configuredServers, enterpriseBound);
 
   const enterpriseManaged = await resolveEnterpriseManagedReadiness({
     requiredServerIds: requiredServerIds.filter(
@@ -352,13 +406,30 @@ export async function probeJiuwenSkillMcpReadiness(args: {
     configuredServers,
     roleTemplate: args.roleTemplate,
   }).catch(() => ({ servers: [] as RuntimeMcpServer[], toolsByServer: {} as Record<string, string[]> }));
+  const roleManaged = await resolveRoleManagedReadiness({
+    requiredServerIds: requiredServerIds.filter(
+      (serverId) => !configuredServers.some(
+        (configured) => configured.name === serverId && configured.enabled,
+      ),
+    ),
+    configuredServers,
+  }).catch(() => ({
+    servers: [] as RuntimeMcpServer[],
+    toolsByServer: {} as Record<string, string[]>,
+    probeErrors: {} as Record<string, string>,
+  }));
+  const roleManagedNames = new Set(roleManaged.servers.map((server) => server.name));
   configuredServers = [
-    ...configuredServers,
+    ...configuredServers.filter((server) => !roleManagedNames.has(server.name)),
     ...enterpriseManaged.servers.filter((server) => !configuredServers.some((configured) => configured.name === server.name)),
+    ...roleManaged.servers,
   ];
   const configuredByName = new Map(configuredServers.map((server) => [server.name, server]));
-  const toolsByServer: Record<string, string[] | undefined> = { ...enterpriseManaged.toolsByServer };
-  const probeErrors: Record<string, string | undefined> = {};
+  const toolsByServer: Record<string, string[] | undefined> = {
+    ...enterpriseManaged.toolsByServer,
+    ...roleManaged.toolsByServer,
+  };
+  const probeErrors: Record<string, string | undefined> = { ...roleManaged.probeErrors };
   await Promise.all(requiredServerIds.map(async (serverId) => {
     const requiredTools = requirement.servers[serverId] || [];
     const server = configuredByName.get(serverId);

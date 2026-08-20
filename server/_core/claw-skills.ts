@@ -29,11 +29,16 @@ import {
   listCustomMcpConnections,
   listEnterpriseMcpConnections,
   listEnterpriseMcpToolPolicies,
+  listAccessibleKnowledgeBases,
+  getUserById,
   listMcpInvocationCounts,
   resolveEffectiveRoleAssets,
   resolvePersistedAgentMcpSelection,
   setAgentMcpPreference,
 } from "../db";
+import { roleExperience } from "../../shared/role-experience";
+import type { RoleHomeConnectorState } from "./role-home-runtime";
+import { buildRoleHomeRuntimeStatus } from "./role-home-runtime";
 import { skillRegistry } from "./skills/skill-registry";
 import { listSkillsWithRoleDefaults } from "./skills/role-default-skills";
 import { roleSkillPreferences } from "./skills/role-skill-preferences";
@@ -93,6 +98,11 @@ type McpToolGroupOverride = {
 };
 
 const DEFAULT_MCP_CATEGORY = "MCP 工具";
+type JsonObject = Record<string, unknown>;
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
 export type ManagedMcpServerStatus = {
   serverId: string;
@@ -105,6 +115,26 @@ export type ManagedMcpServerStatus = {
   checkedAt: string | null;
   error: string | null;
 };
+
+export function roleHomeConnectorStates(payload: Record<string, unknown>): RoleHomeConnectorState[] {
+  const groups = Array.isArray(payload.items) ? payload.items : [];
+  const states = new Map<string, RoleHomeConnectorState["status"]>();
+  for (const group of groups) {
+    if (!group || typeof group !== "object") continue;
+    const children = Array.isArray((group as Record<string, unknown>).children)
+      ? (group as Record<string, unknown>).children as Array<Record<string, unknown>>
+      : [];
+    for (const child of children) {
+      const serverId = String(child.serverId || child.id || "").trim();
+      if (!serverId) continue;
+      const enabled = child.enabledForAgent !== false;
+      const available = child.status === "available" && child.liveStatus !== "unavailable";
+      const configured = Boolean(child.configured);
+      states.set(serverId, enabled && available ? "READY" : enabled && configured ? "DEGRADED" : "BLOCKED");
+    }
+  }
+  return Array.from(states, ([serverId, status]) => ({ serverId, status }));
+}
 
 const MCP_TOOL_GROUP_OVERRIDES: McpToolGroupOverride[] = [
   { id: "wind_stock_data", name: "Wind A股数据", category: "公共金融数据", description: "查询 A 股行情、K 线、公司档案、财务、股东、事件、技术与风险指标。", serverIds: ["wind_stock_data"] },
@@ -127,6 +157,7 @@ const MCP_TOOL_GROUP_OVERRIDES: McpToolGroupOverride[] = [
   { id: "platform_tools", name: "平台协作工具", category: "平台能力", description: "管理投递通道、定时任务和跨智能体协作，让对话结果进入后续工作流程。", serverIds: ["platform_tools"] },
   { id: "custom_mcp_gateway", name: "自定义连接网关", category: "平台能力", description: "将用户添加的 MCP 安全接入当前智能体，并按用户和智能体实例隔离调用。", serverIds: ["custom_mcp_gateway"] },
   { id: "enterprise_mcp_gateway", name: "企业连接网关", category: "平台能力", description: "按岗位、用户和工具策略调用组织 MCP，并统一执行身份传递、数据护栏和审计。", serverIds: ["enterprise_mcp_gateway"] },
+  { id: "role_mcp_gateway", name: "岗位连接网关", category: "平台能力", description: "将平台已有的只读岗位 MCP 通过统一身份、岗位范围和审计接入企业运行时。", serverIds: ["role_mcp_gateway"] },
 ];
 
 function readableMcpName(serverId: string): string {
@@ -157,22 +188,24 @@ function mcpFallbackTool(serverId: string) {
   };
 }
 
-function readOpenClawConfig(): Record<string, any> {
+function readOpenClawConfig(): JsonObject {
   try {
     if (!existsSync(OPENCLAW_JSON_PATH)) return {};
     const cfg = JSON.parse(
       String(readFileSync(OPENCLAW_JSON_PATH, "utf-8") || "{}")
     );
-    return cfg && typeof cfg === "object" ? cfg : {};
+    return isJsonObject(cfg) ? cfg : {};
   } catch {
     return {};
   }
 }
 
-function readOpenClawMcpServers(config = readOpenClawConfig()): Record<string, any> {
-  return config?.mcp?.servers && typeof config.mcp.servers === "object"
-    ? config.mcp.servers
-    : {};
+function readOpenClawMcpServers(config = readOpenClawConfig()): Record<string, JsonObject> {
+  const mcp = isJsonObject(config.mcp) ? config.mcp : {};
+  if (!isJsonObject(mcp.servers)) return {};
+  return Object.fromEntries(Object.entries(mcp.servers).filter((entry): entry is [string, JsonObject] => (
+    isJsonObject(entry[1])
+  )));
 }
 
 export function listConfiguredMcpServers() {
@@ -181,16 +214,21 @@ export function listConfiguredMcpServers() {
     .map(([serverId, raw]) => ({
       serverId,
       configured: true,
-      enabled: !Boolean((raw as any)?.disabled),
-      status: Boolean((raw as any)?.disabled) ? "disabled" : "available",
+      enabled: !Boolean(raw.disabled),
+      status: Boolean(raw.disabled) ? "disabled" : "available",
       existsOnDisk: mcpServerExistsOnDisk(serverId, raw),
     }))
     .sort((a, b) => a.serverId.localeCompare(b.serverId));
 }
 
 const agentMcpMutationTails = new Map<string, Promise<void>>();
+const configuredMcpStatusCacheTtl = Number(
+  process.env.EA_MCP_STATUS_RESPONSE_CACHE_TTL_MS || 5_000,
+);
 const mcpStatusResponseCache = createBoundedAsyncCache<Record<string, unknown>>({
-  ttlMs: 5_000,
+  ttlMs: Number.isFinite(configuredMcpStatusCacheTtl)
+    ? Math.min(300_000, Math.max(1_000, configuredMcpStatusCacheTtl))
+    : 5_000,
   maxEntries: 1_000,
   onEvent: recordMcpStatusCacheRequest,
 });
@@ -247,10 +285,10 @@ function extractSkillIntroduction(skillMd: string, fallback: string): string {
     : intro;
 }
 
-function mcpServerExistsOnDisk(serverId: string, raw: any): boolean {
-  const command = typeof raw?.command === "string" ? raw.command : "";
-  const args = Array.isArray(raw?.args)
-    ? raw.args.map((x: any) => String(x || ""))
+function mcpServerExistsOnDisk(serverId: string, raw: JsonObject): boolean {
+  const command = typeof raw.command === "string" ? raw.command : "";
+  const args = Array.isArray(raw.args)
+    ? raw.args.map((item) => String(item || ""))
     : [];
   const candidates = [command, ...args].filter(Boolean);
   for (const item of candidates) {
@@ -435,15 +473,27 @@ export function listMcpToolGroups(options: {
   };
 }
 
-async function discoverGeneratedRuntimeSkills(
-  adoptId: string,
-  runtimeAgentId: string,
-  onlySkillId?: string
-): Promise<{
+type GeneratedSkillDiscoveryResult = {
   discovered: number;
   installed: Array<{ skillId: string; displayName: string }>;
   skipped: Array<{ skillId: string; reason: string }>;
-}> {
+};
+
+const configuredSkillDiscoveryTtl = Number(
+  process.env.EA_SKILL_DISCOVERY_CACHE_TTL_MS || 30_000,
+);
+const generatedSkillDiscoveryCache = createBoundedAsyncCache<GeneratedSkillDiscoveryResult>({
+  ttlMs: Number.isFinite(configuredSkillDiscoveryTtl)
+    ? Math.min(300_000, Math.max(1_000, configuredSkillDiscoveryTtl))
+    : 30_000,
+  maxEntries: 2_000,
+});
+
+async function discoverGeneratedRuntimeSkillsUncached(
+  adoptId: string,
+  runtimeAgentId: string,
+  onlySkillId?: string
+): Promise<GeneratedSkillDiscoveryResult> {
   const runtimeSkillsRoot = path.join(
     resolveRuntimeWorkspaceByIds(adoptId, runtimeAgentId),
     "skills"
@@ -524,6 +574,23 @@ async function discoverGeneratedRuntimeSkills(
   return { discovered: installed.length, installed, skipped };
 }
 
+async function discoverGeneratedRuntimeSkills(
+  adoptId: string,
+  runtimeAgentId: string,
+  onlySkillId?: string,
+): Promise<GeneratedSkillDiscoveryResult> {
+  const prefix = `${adoptId}\u0000${runtimeAgentId}\u0000`;
+  if (onlySkillId) {
+    generatedSkillDiscoveryCache.invalidatePrefix(prefix);
+    return discoverGeneratedRuntimeSkillsUncached(adoptId, runtimeAgentId, onlySkillId);
+  }
+  const key = `${prefix}${readSessionEpoch(adoptId)}`;
+  return generatedSkillDiscoveryCache.getOrLoad(
+    key,
+    () => discoverGeneratedRuntimeSkillsUncached(adoptId, runtimeAgentId),
+  );
+}
+
 
 export function registerSkillRoutes(app: express.Express) {
   registerSkillMarketRoutes(app);
@@ -590,7 +657,7 @@ export function registerSkillRoutes(app: express.Express) {
             };
           }));
         const rawPayload = listMcpToolGroups({ allowedServerIds, invocationCounts, liveStatuses, managedServers });
-        return buildMcpStatusResponse({
+        const statusPayload = buildMcpStatusResponse({
           rawPayload,
           selection,
           customRows,
@@ -598,6 +665,35 @@ export function registerSkillRoutes(app: express.Express) {
           roleTemplate,
           liveTtlMs: MCP_TOOLS_LIVE_TTL_MS,
         });
+        const owner = await getUserById(Number(claw.userId || 0));
+        const [skillsResult, knowledgeBases] = await Promise.all([
+          listSkillsWithRoleDefaults({
+            adoptId,
+            agentId: resolveRuntimeAgentId(adoptId, claw.agentId),
+            roleTemplate,
+          }).catch(() => null),
+          listAccessibleKnowledgeBases({
+            userId: Number(owner?.id || claw.userId || 0),
+            groupId: Number(owner?.groupId || 0),
+            roleTemplate,
+          }).catch(() => []),
+        ]);
+        const experience = roleExperience(roleTemplate);
+        const knowledgeReady = knowledgeBases.some((base) => (
+          base.status === "ready"
+          && (experience.maturity === "reference"
+            ? base.scope === "role" && base.roleTemplate === experience.roleTemplate
+            : true)
+        ));
+        return {
+          ...statusPayload,
+          roleHome: buildRoleHomeRuntimeStatus({
+            roleTemplate,
+            connectors: roleHomeConnectorStates(statusPayload),
+            knowledgeReady,
+            skills: skillsResult?.ok ? skillsResult.value : [],
+          }),
+        };
       };
       const responsePayload = force
         ? await loadStatus()

@@ -33,11 +33,16 @@ import { createResponseEvidenceCollector } from "./governance/response-evidence"
 import {
   buildEnterpriseChatParams,
   buildEnterpriseManagedMcpProvisioning,
+  buildEnterpriseRuntimeAttachmentRefs,
   buildEnterprisePermissionAnswerParams,
   type EnterpriseRuntimeRoute,
 } from "./enterprise-runtime-adapter";
+import { EnterpriseMcpProvisioningCoordinator } from "./enterprise-mcp-provisioning-coordinator";
 
 const DEFAULT_GATEWAY_WS_URL = "ws://127.0.0.1:19000/ws";
+const enterpriseMcpProvisioningCoordinator = new EnterpriseMcpProvisioningCoordinator(
+  Math.max(30_000, Number(process.env.EA_ENTERPRISE_MCP_PROVISION_CACHE_TTL_MS || 600_000) || 600_000),
+);
 
 function gatewayWsUrl(route?: EnterpriseRuntimeRoute): string {
   return route?.wsUrl || String(process.env.JIUWENCLAW_GATEWAY_WS_URL || DEFAULT_GATEWAY_WS_URL);
@@ -59,6 +64,55 @@ function parseJsonFrame(raw: RawData): any | null {
   } catch {
     return null;
   }
+}
+
+export function enterpriseMcpProvisioningFrameResult(
+  frame: any,
+  requestId: string,
+): { status: "success" | "error"; error?: string } | null {
+  if (!frame || String(requestId || "") === "") return null;
+  if (frame.type === "res" && frame.id === requestId) {
+    return frame.ok === false
+      ? { status: "error", error: String(frame.error || frame.payload?.error || "enterprise MCP provisioning failed") }
+      : { status: "success" };
+  }
+  if (
+    frame.type === "event"
+    && frame.request_id === requestId
+    && frame.event === "chat.error"
+  ) {
+    const payload = eventPayload(frame);
+    return {
+      status: "error",
+      error: String(payload.error || payload.message || "enterprise MCP provisioning failed"),
+    };
+  }
+  return null;
+}
+
+export function canDegradeAfterEnterpriseMcpProvisioningFailure(error: unknown): boolean {
+  return String(error instanceof Error ? error.message : error).trim()
+    === "enterprise MCP provisioning timed out";
+}
+
+export function gatewayPermissionAnswerMethod(
+  enterprise: boolean,
+  source: unknown,
+): "chat.send" | "chat.user_answer" {
+  if (!enterprise) return "chat.send";
+  return String(source || "permission_interrupt").trim() === "permission_interrupt"
+    ? "chat.send"
+    : "chat.user_answer";
+}
+
+export function gatewayPermissionEventMatchesRequest(
+  frame: any,
+  requestId: string,
+  answerMethod: "chat.send" | "chat.user_answer",
+  enterprise: boolean,
+): boolean {
+  if (!enterprise || answerMethod !== "chat.send" || frame?.type !== "event") return true;
+  return String(frame.request_id || "") === requestId;
 }
 
 function initSse(res: Response): void {
@@ -367,6 +421,9 @@ export async function forwardToJiuwenGateway(
   const sessionId = buildJiuwenSessionId(claw, agentId, opts);
   const channelId = claw.adoptId;
   const workspaceDir = resolveRuntimeWorkspace(claw, claw.adoptId);
+  const runtimeAttachments = enterpriseRoute
+    ? buildEnterpriseRuntimeAttachmentRefs(opts.uploadedAttachments || [], workspaceDir)
+    : [];
   const requestId = `linggan-gateway-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const params = enterpriseRoute
     ? buildEnterpriseChatParams({
@@ -376,7 +433,9 @@ export async function forwardToJiuwenGateway(
         adoptId: claw.adoptId,
         agentId: claw.agentId,
         runtimeMode: opts.runtimeMode,
+        modelName: opts.modelName,
         selectedSkills: opts.selectedSkills,
+        runtimeAttachments,
       })
     : buildGatewayChatParams({
         serviceId,
@@ -418,6 +477,7 @@ export async function forwardToJiuwenGateway(
     serviceId,
     sessionId,
     channelId,
+    requestId,
     userId: claw.userId,
     clientRunId: opts.clientRunId || "",
     model: opts.model || "",
@@ -427,6 +487,7 @@ export async function forwardToJiuwenGateway(
     ...privateMessageLogFields(message),
   });
 
+  let enterpriseBootstrapFallback = false;
   await new Promise<void>((resolve) => {
     const startedAt = Date.now();
     const generatedFiles = new Map<string, JiuwenSessionArtifactFile>();
@@ -439,6 +500,9 @@ export async function forwardToJiuwenGateway(
     let clientClosed = false;
     let requestSent = false;
     let managedMcpRequestSent = false;
+    let managedMcpProvisionResolve: (() => void) | null = null;
+    let managedMcpProvisionReject: ((error: Error) => void) | null = null;
+    let managedMcpProvisionTimer: NodeJS.Timeout | null = null;
     let connectionAckTimer: NodeJS.Timeout | null = null;
     const timeoutMs = Math.max(30_000, Number(process.env.JIUWENCLAW_GATEWAY_CHAT_TIMEOUT_MS || process.env.JIUWENCLAW_CHAT_TIMEOUT_MS || 180_000) || 180_000);
     const ws = new WebSocket(wsUrl, enterpriseRoute ? { headers: { Origin: wsOrigin(wsUrl) } } : undefined);
@@ -452,24 +516,82 @@ export async function forwardToJiuwenGateway(
         sendChatRequest();
         return;
       }
-      if (managedMcpRequestSent || ws.readyState !== WebSocket.OPEN) return;
-      managedMcpRequestSent = true;
-      sendGatewayRequest(ws, "tools.add", managedMcpRequestId, managedMcpProvisioning.params);
+      void enterpriseMcpProvisioningCoordinator.ensure(
+        managedMcpProvisioning.fingerprint,
+        () => new Promise<void>((resolveProvision, rejectProvision) => {
+          if (managedMcpRequestSent || ws.readyState !== WebSocket.OPEN) {
+            rejectProvision(new Error("enterprise MCP provisioning socket unavailable"));
+            return;
+          }
+          managedMcpRequestSent = true;
+          managedMcpProvisionResolve = resolveProvision;
+          managedMcpProvisionReject = rejectProvision;
+          const provisioningTimeoutMs = Math.max(
+            5_000,
+            Number(process.env.EA_ENTERPRISE_MCP_PROVISION_TIMEOUT_MS || 20_000) || 20_000,
+          );
+          managedMcpProvisionTimer = setTimeout(() => {
+            managedMcpProvisionTimer = null;
+            managedMcpProvisionReject = null;
+            managedMcpProvisionResolve = null;
+            rejectProvision(new Error("enterprise MCP provisioning timed out"));
+          }, provisioningTimeoutMs);
+          sendGatewayRequest(ws, "tools.add", managedMcpRequestId, managedMcpProvisioning.params);
+        }),
+      ).then(() => {
+        sendChatRequest();
+      }).catch((error) => {
+        if (settled) return;
+        const errorMessage = String(error instanceof Error ? error.message : error);
+        if (canDegradeAfterEnterpriseMcpProvisioningFailure(error)) {
+          appendLogAsync("jiuwenclaw-exec.log", {
+            ts: new Date().toISOString(),
+            event: "enterprise_mcp_provision_degraded",
+            adoptId: claw.adoptId,
+            bindingId: enterpriseRoute?.binding.bindingId || "",
+            error: errorMessage,
+          });
+          sendChatRequest();
+          return;
+        }
+        appendLogAsync("jiuwenclaw-exec.log", {
+          ts: new Date().toISOString(),
+          event: "enterprise_mcp_provision_failed",
+          adoptId: claw.adoptId,
+          bindingId: enterpriseRoute?.binding.bindingId || "",
+          error: errorMessage,
+        });
+        writeSseData(res, {
+          __stream_error: true,
+          error: "企业能力初始化失败，请稍后重试。",
+          reasonCode: "enterprise_mcp_provision_failed",
+        });
+        settle("managed-mcp-error");
+      });
     };
     const settle = (reason: string) => {
       if (settled) return;
       settled = true;
-      opts.onRuntimeOutcome?.(
-        reason === "done" || reason === "permission-required"
-          ? "success"
-          : reason === "timeout"
-            ? "timeout"
-          : reason === "client-closed"
-            ? "cancelled"
-            : "error",
-      );
+      const rejectPendingProvision = managedMcpProvisionReject;
+      managedMcpProvisionResolve = null;
+      managedMcpProvisionReject = null;
+      if (rejectPendingProvision) {
+        rejectPendingProvision(new Error(`enterprise MCP provisioning interrupted: ${reason}`));
+      }
+      if (reason !== "enterprise-bootstrap-fallback") {
+        opts.onRuntimeOutcome?.(
+          reason === "done" || reason === "permission-required"
+            ? "success"
+            : reason === "timeout"
+              ? "timeout"
+            : reason === "client-closed"
+              ? "cancelled"
+              : "error",
+        );
+      }
       clearTimeout(timeout);
       if (connectionAckTimer) clearTimeout(connectionAckTimer);
+      if (managedMcpProvisionTimer) clearTimeout(managedMcpProvisionTimer);
       for (const file of collectRecentWorkspaceFiles(workspaceDir, startedAt).slice(0, 20)) {
         generatedFiles.set(file.path, file);
         if (!emittedFilePaths.has(file.path) && !clientClosed) {
@@ -500,8 +622,15 @@ export async function forwardToJiuwenGateway(
         sessionId,
         channelId,
         requestId,
+        userId: claw.userId,
+        clientRunId: opts.clientRunId || "",
         reason,
       });
+      if (reason === "enterprise-bootstrap-fallback") {
+        try { ws.close(1012, reason); } catch {}
+        resolve();
+        return;
+      }
       const rawAssistantMessage = finalAssistantText.trim() || memoryAssistantText.trim();
       const citationValidation = validateKnowledgeCitations(rawAssistantMessage, knowledgeCitationIndexes);
       const validatedAssistantMessage = citationValidation.text;
@@ -575,21 +704,31 @@ export async function forwardToJiuwenGateway(
         provisionManagedMcpOrSendChat();
         return;
       }
-      if (frame.type === "res" && frame.id === managedMcpRequestId) {
-        if (frame.ok === false) {
-          writeSseData(res, {
-            __stream_error: true,
-            error: "企业能力初始化失败，请稍后重试。",
-            reasonCode: "enterprise_mcp_provision_failed",
-          });
-          settle("managed-mcp-error");
+      const managedMcpResult = enterpriseMcpProvisioningFrameResult(frame, managedMcpRequestId);
+      if (managedMcpResult) {
+        if (managedMcpProvisionTimer) clearTimeout(managedMcpProvisionTimer);
+        managedMcpProvisionTimer = null;
+        if (managedMcpResult.status === "error") {
+          const rejectProvision = managedMcpProvisionReject;
+          managedMcpProvisionResolve = null;
+          managedMcpProvisionReject = null;
+          rejectProvision?.(new Error(managedMcpResult.error || "enterprise MCP provisioning failed"));
           return;
         }
-        sendChatRequest();
+        const resolveProvision = managedMcpProvisionResolve;
+        managedMcpProvisionResolve = null;
+        managedMcpProvisionReject = null;
+        resolveProvision?.();
         return;
       }
       if (frame.type === "res" && frame.id === requestId && frame.ok === false) {
-        writeSseData(res, { __stream_error: true, error: String(frame.error || "JiuwenSwarm gateway 请求失败") });
+        const message = String(frame.error || "JiuwenSwarm gateway 请求失败");
+        if (enterpriseRoute && message.includes("EA_RUNTIME_ASSET_BOOTSTRAP_FAILED")) {
+          enterpriseBootstrapFallback = true;
+          settle("enterprise-bootstrap-fallback");
+          return;
+        }
+        writeSseData(res, { __stream_error: true, error: message });
         settle("request-error");
         return;
       }
@@ -599,7 +738,13 @@ export async function forwardToJiuwenGateway(
       const sid = payloadSessionId(payload);
       if (sid && sid !== sessionId) return;
       if (eventType === "chat.error") {
-        writeSseData(res, { __stream_error: true, error: String(payload.error || payload.message || "JiuwenSwarm gateway 返回错误") });
+        const message = String(payload.error || payload.message || "JiuwenSwarm gateway 返回错误");
+        if (enterpriseRoute && message.includes("EA_RUNTIME_ASSET_BOOTSTRAP_FAILED")) {
+          enterpriseBootstrapFallback = true;
+          settle("enterprise-bootstrap-fallback");
+          return;
+        }
+        writeSseData(res, { __stream_error: true, error: message });
       }
       if (eventType === "chat.final" && String(payload.content || "").trim()) {
         finalAssistantText = validateKnowledgeCitations(
@@ -652,6 +797,16 @@ export async function forwardToJiuwenGateway(
       if (!settled) settle(clientClosed ? "client-closed" : "ws-close");
     });
   });
+  if (enterpriseBootstrapFallback && enterpriseRoute) {
+    appendLogAsync("jiuwenclaw-exec.log", {
+      ts: new Date().toISOString(),
+      event: "enterprise_runtime_asset_bootstrap_fallback",
+      adoptId: claw.adoptId,
+      bindingId: enterpriseRoute.binding.bindingId,
+      assetSetFingerprint: enterpriseRoute.binding.assetSetFingerprint,
+    });
+    return forwardToJiuwenGateway(claw, message, res, opts);
+  }
 }
 
 export async function answerJiuwenGatewayPermission(
@@ -727,7 +882,16 @@ export async function answerJiuwenGatewayPermission(
     let connectionAckTimer: NodeJS.Timeout | null = null;
     let text = "";
     let sawDone = false;
-    const timeoutMs = Math.max(15_000, Number(process.env.JIUWENCLAW_GATEWAY_PERMISSION_TIMEOUT_MS || process.env.JIUWENCLAW_PERMISSION_TIMEOUT_MS || 180_000) || 180_000);
+    const defaultTimeoutMs = enterpriseRoute ? 300_000 : 180_000;
+    const timeoutMs = Math.max(
+      15_000,
+      Number(
+        process.env.JIUWENCLAW_GATEWAY_PERMISSION_TIMEOUT_MS
+        || process.env.JIUWENCLAW_PERMISSION_TIMEOUT_MS
+        || defaultTimeoutMs,
+      ) || defaultTimeoutMs,
+    );
+    const answerMethod = gatewayPermissionAnswerMethod(Boolean(enterpriseRoute), args.source);
     const ws = new WebSocket(wsUrl, enterpriseRoute ? { headers: { Origin: wsOrigin(wsUrl) } } : undefined);
     const settle = (result: { ok: true; text: string } | { ok: false; error: string; text?: string }) => {
       if (settled) return;
@@ -758,12 +922,12 @@ export async function answerJiuwenGatewayPermission(
         connectionAckTimer = setTimeout(() => {
           if (requestSent || ws.readyState !== WebSocket.OPEN) return;
           requestSent = true;
-          sendGatewayRequest(ws, "chat.send", requestId, params);
+          sendGatewayRequest(ws, answerMethod, requestId, params);
         }, 2_000);
         return;
       }
       requestSent = true;
-      sendGatewayRequest(ws, "chat.send", requestId, params);
+      sendGatewayRequest(ws, answerMethod, requestId, params);
     });
     ws.on("message", async (raw) => {
       const frame = parseJsonFrame(raw);
@@ -772,7 +936,7 @@ export async function answerJiuwenGatewayPermission(
         if (connectionAckTimer) clearTimeout(connectionAckTimer);
         if (!requestSent && ws.readyState === WebSocket.OPEN) {
           requestSent = true;
-          sendGatewayRequest(ws, "chat.send", requestId, params);
+          sendGatewayRequest(ws, answerMethod, requestId, params);
         }
         return;
       }
@@ -781,6 +945,12 @@ export async function answerJiuwenGatewayPermission(
         return;
       }
       if (frame.type !== "event") return;
+      if (!gatewayPermissionEventMatchesRequest(
+        frame,
+        requestId,
+        answerMethod,
+        Boolean(enterpriseRoute),
+      )) return;
       const eventType = String(frame.event || "");
       const payload = eventPayload(frame);
       const sid = payloadSessionId(payload);

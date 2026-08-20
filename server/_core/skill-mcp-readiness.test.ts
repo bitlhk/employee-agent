@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { evaluateSkillMcpReadiness } from "./skill-mcp-readiness";
+import {
+  evaluateSkillMcpReadiness,
+  includeEnterpriseRoleGateway,
+  resolveRoleManagedReadiness,
+} from "./skill-mcp-readiness";
 
 const requirement = {
   servers: {
@@ -85,5 +89,54 @@ describe("skill MCP readiness", () => {
     });
     expect(result).toMatchObject({ status: "ready", canProceed: true });
     expect(result.servers[0].missingTools).toEqual([]);
+  });
+
+  it("resolves legacy role MCP dependencies through the shared role gateway", async () => {
+    const resolved = await resolveRoleManagedReadiness({
+      requiredServerIds: ["credential_skills", "missing_server"],
+      configuredServers: [
+        { name: "role_mcp_gateway", enabled: true },
+        { name: "credential_skills", enabled: false },
+      ],
+    }, async (serverId) => serverId === "credential_skills"
+      ? { configured: true, availableTools: ["credential-prompt-generator"] }
+      : { configured: false, availableTools: [] });
+
+    expect(resolved).toEqual({
+      servers: [{ name: "credential_skills", enabled: true }],
+      toolsByServer: { credential_skills: ["credential-prompt-generator"] },
+      probeErrors: {},
+    });
+  });
+
+  it("adds the role gateway for an enterprise-bound adoption even when the local runtime omits it", () => {
+    expect(includeEnterpriseRoleGateway([
+      { name: "credential_skills", enabled: false },
+    ], true)).toEqual([
+      { name: "credential_skills", enabled: false },
+      { name: "role_mcp_gateway", enabled: true },
+    ]);
+    expect(includeEnterpriseRoleGateway([], false)).toEqual([]);
+  });
+
+  it("keeps a configured role MCP usable when live discovery is temporarily unchecked", async () => {
+    const resolved = await resolveRoleManagedReadiness({
+      requiredServerIds: ["credential_skills"],
+      configuredServers: [{ name: "role_mcp_gateway", enabled: true }],
+    }, async () => ({
+      configured: true,
+      availableTools: [],
+      probeError: "upstream unavailable",
+    }));
+    const result = evaluateSkillMcpReadiness({
+      skillId: "credential-prompt-generator",
+      requirement: { servers: { credential_skills: ["credential-prompt-generator"] } },
+      authorizedServerIds: new Set(["credential_skills"]),
+      configuredServers: resolved.servers,
+      toolsByServer: resolved.toolsByServer,
+      probeErrors: resolved.probeErrors,
+    });
+
+    expect(result).toMatchObject({ status: "unchecked", canProceed: true });
   });
 });

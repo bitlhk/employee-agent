@@ -17,6 +17,8 @@ import { refreshJiuwenRuntimeCapabilities } from "../_core/jiuwenswarm-runtime-r
 import { resolvePersistedAgentMcpSelection } from "../db/agent-mcp-preferences";
 import type { AgentRuntime } from "../_core/role-templates";
 import { retiredRuntimeMessage } from "../_core/runtime-policy";
+import { refreshEnterpriseRuntimeAssetsIfBound } from "../_core/enterprise-runtime-assets";
+import { activeJiuwenSwarmRegistrySkillIds, skillRegistry } from "../_core/skills/skill-registry";
 
 export function missingDefaultRoleSkills(defaultSkillIds: string[], sourceDirs: string[]): string[] {
   return Array.from(new Set(defaultSkillIds.map((id) => String(id || "").trim()).filter(Boolean)))
@@ -61,16 +63,38 @@ class JiuwenSwarmRoleRuntimeAdapter implements RoleRuntimeAdapter {
     };
   }
 
-  reconcileSkills(input: RoleRuntimeReconcileInput): RoleRuntimeReconcileResult {
+  async reconcileSkills(input: RoleRuntimeReconcileInput): Promise<RoleRuntimeReconcileResult> {
+    return this.reconcileAssets(input);
+  }
+
+  async reconcileMcp(input: RoleRuntimeReconcileInput): Promise<RoleRuntimeReconcileResult> {
+    return this.reconcileAssets(input);
+  }
+
+  async reconcileAssets(input: RoleRuntimeReconcileInput): Promise<RoleRuntimeReconcileResult> {
     assertDefaultRoleSkillsAvailable(input);
     const workspaceDir = resolveRuntimeWorkspaceByIds(input.adoptId, input.agentId);
     const workspacePermission = ensureJiuwenSwarmWorkspacePermission(workspaceDir);
+    let activeSkillIds = input.activeSkillIds;
+    if (activeSkillIds === undefined) {
+      const listed = await skillRegistry.listSkills(input.adoptId);
+      activeSkillIds = listed.ok
+        ? activeJiuwenSwarmRegistrySkillIds(
+          listed.value,
+          input.adoptId,
+          [...input.effectiveAssets.skills.default, ...input.effectiveAssets.skills.optional],
+        )
+        : [];
+    }
+    const selection = await resolvePersistedAgentMcpSelection(input.adoptId, input.effectiveAssets);
     const result = writeJiuwenSwarmRoleScopeManifest({
       workspaceDir,
       role: input.role,
       effectiveAssets: input.effectiveAssets,
-      activeSkillIds: input.activeSkillIds,
+      activeSkillIds,
       disabledDefaultSkillIds: input.disabledDefaultSkillIds,
+      activeMcpServerIds: selection.enabledServerIds,
+      includePlatformMcp: input.includePlatformMcp,
       skillSourceDirs: skillSourceDirsForRuntime(),
     });
     const changed =
@@ -80,29 +104,13 @@ class JiuwenSwarmRoleRuntimeAdapter implements RoleRuntimeAdapter {
       result.linkedSharedSkills.length +
       result.removedSharedSkills.length;
     const totalChanged = changed + Number(workspacePermission.changed);
+    if (totalChanged > 0) {
+      await refreshEnterpriseRuntimeAssetsIfBound(input.adoptId).catch(() => null);
+    }
     return {
       ok: true,
       applied: totalChanged > 0,
       changed: totalChanged,
-      reason: `${result.manifestPath}; workspacePermission=${workspacePermission.changed ? "updated" : "ok"}`,
-    };
-  }
-
-  async reconcileMcp(input: RoleRuntimeReconcileInput): Promise<RoleRuntimeReconcileResult> {
-    const selection = await resolvePersistedAgentMcpSelection(input.adoptId, input.effectiveAssets);
-    const workspaceDir = resolveRuntimeWorkspaceByIds(input.adoptId, input.agentId);
-    const workspacePermission = ensureJiuwenSwarmWorkspacePermission(workspaceDir);
-    const result = writeJiuwenSwarmRoleScopeManifest({
-      workspaceDir,
-      role: input.role,
-      effectiveAssets: input.effectiveAssets,
-      activeMcpServerIds: selection.enabledServerIds,
-    });
-    const changed = Number(result.changed) + Number(workspacePermission.changed);
-    return {
-      ok: true,
-      applied: changed > 0,
-      changed,
       reason: `${result.manifestPath}; enabledMcp=${selection.enabledServerIds.length}; workspacePermission=${workspacePermission.changed ? "updated" : "ok"}`,
     };
   }

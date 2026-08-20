@@ -53,7 +53,7 @@ describe("jiuwenswarm role scope manifest", () => {
       ...effectiveAssets,
       mcpServers: {
         ...effectiveAssets.mcpServers,
-        default: ["custom_mcp_gateway", "customer_context_tool", "enterprise_mcp_gateway", "platform_tools"],
+        default: ["custom_mcp_gateway", "customer_context_tool", "enterprise_mcp_gateway", "platform_tools", "role_mcp_gateway"],
       },
     };
     expect(buildJiuwenSwarmRoleScopeManifest(role, effectiveAssets)).toEqual({
@@ -87,6 +87,7 @@ describe("jiuwenswarm role scope manifest", () => {
         "customer_context_tool",
         "enterprise_mcp_gateway",
         "platform_tools",
+        "role_mcp_gateway",
       ]);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -135,9 +136,38 @@ describe("jiuwenswarm role scope manifest", () => {
 
       const manifest = JSON.parse(readFileSync(path.join(root, JIUWENSWARM_ROLE_SCOPE_MANIFEST), "utf8"));
       expect(manifest.effectiveAssets.mcpServers).toEqual({
-        default: ["custom_mcp_gateway", "enterprise_mcp_gateway", "platform_tools"],
+        default: ["custom_mcp_gateway", "enterprise_mcp_gateway", "platform_tools", "role_mcp_gateway"],
         optional: ["market_data"],
       });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not reconcile Skill files during an MCP-only scope update", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "jiuwenswarm-role-scope-mcp-only-"));
+    try {
+      const managedSkill = path.join(root, "skills", "user-installed");
+      mkdirSync(managedSkill, { recursive: true });
+      writeFileSync(path.join(managedSkill, "SKILL.md"), "# Installed\n", "utf8");
+      writeFileSync(
+        path.join(root, JIUWENSWARM_MANAGED_SKILLS_MANIFEST),
+        `${JSON.stringify({ version: 1, skills: { "user-installed": { digest: "a".repeat(64) } } }, null, 2)}\n`,
+        "utf8",
+      );
+
+      writeJiuwenSwarmRoleScopeManifest({
+        workspaceDir: root,
+        role,
+        effectiveAssets,
+        activeMcpServerIds: ["customer_context_tool"],
+      });
+
+      expect(existsSync(path.join(managedSkill, "SKILL.md"))).toBe(true);
+      const manifest = JSON.parse(
+        readFileSync(path.join(root, JIUWENSWARM_MANAGED_SKILLS_MANIFEST), "utf8"),
+      );
+      expect(Object.keys(manifest.skills)).toEqual(["user-installed"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -266,6 +296,36 @@ describe("jiuwenswarm role scope manifest", () => {
     }
   });
 
+  it("uses the same deterministic Skill digest ordering as the Python runtime", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "jiuwenswarm-role-scope-digest-order-"));
+    try {
+      const workspace = path.join(root, "workspace");
+      const shared = path.join(root, "skills-shared");
+      const skillDir = path.join(shared, "wealth-manager-assistant");
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(path.join(skillDir, "SKILL.md"), "# Skill\n", "utf8");
+      writeFileSync(path.join(skillDir, "_meta.json"), "{}\n", "utf8");
+      writeFileSync(path.join(skillDir, "README.md"), "# Readme\n", "utf8");
+      writeFileSync(path.join(skillDir, "\u53c2\u8003.md"), "\u4f9d\u636e\n", "utf8");
+
+      writeJiuwenSwarmRoleScopeManifest({
+        workspaceDir: workspace,
+        role,
+        effectiveAssets,
+        sharedSkillsDir: shared,
+      });
+
+      const manifest = JSON.parse(
+        readFileSync(path.join(workspace, JIUWENSWARM_MANAGED_SKILLS_MANIFEST), "utf8"),
+      );
+      expect(manifest.skills["wealth-manager-assistant"].digest).toBe(
+        "176157b66f47a16ae8eefdbf621b5e5972db1f0f158558216efe340085318c83",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("links installed active skills without linking every optional role grant", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "jiuwenswarm-role-scope-active-links-"));
     try {
@@ -287,6 +347,39 @@ describe("jiuwenswarm role scope manifest", () => {
       expect(result.linkedSharedSkills).toEqual(["installed-optional", "wealth-manager-assistant"]);
       expect(existsSync(path.join(workspace, "skills", "installed-optional"))).toBe(true);
       expect(existsSync(path.join(workspace, "skills", "portfolio-doctor"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("authorizes an enabled local Skill without trusting unrelated workspace directories", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "jiuwenswarm-role-scope-local-active-"));
+    try {
+      const workspace = path.join(root, "workspace");
+      const activeSkill = path.join(workspace, "skills", "installed-local");
+      const unrelatedSkill = path.join(workspace, "skills", "stale-unregistered");
+      mkdirSync(activeSkill, { recursive: true });
+      mkdirSync(unrelatedSkill, { recursive: true });
+      writeFileSync(path.join(activeSkill, "SKILL.md"), "# Installed\n", "utf8");
+      writeFileSync(path.join(unrelatedSkill, "SKILL.md"), "# Stale\n", "utf8");
+
+      writeJiuwenSwarmRoleScopeManifest({
+        workspaceDir: workspace,
+        role,
+        effectiveAssets: {
+          ...effectiveAssets,
+          skills: { default: [], optional: [] },
+        },
+        activeSkillIds: ["installed-local"],
+        skillSourceDirs: [],
+      });
+
+      const manifest = JSON.parse(
+        readFileSync(path.join(workspace, JIUWENSWARM_MANAGED_SKILLS_MANIFEST), "utf8"),
+      );
+      expect(Object.keys(manifest.skills)).toEqual(["installed-local"]);
+      expect(manifest.skills["installed-local"].digest).toMatch(/^[a-f0-9]{64}$/u);
+      expect(existsSync(path.join(workspace, "skills", "stale-unregistered"))).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

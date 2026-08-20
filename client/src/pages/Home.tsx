@@ -1,9 +1,3 @@
-/**
- * Home.tsx — Workforce Agent Platform console
- * Renders the agent console when accessed via /claw/:adoptId or a legacy agent subdomain.
- * The linggan homepage code has been removed (dead code on this server).
- */
-
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { RuntimeWSClient } from "@/lib/runtime-ws";
@@ -20,6 +14,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { useRoute, useLocation } from "wouter";
 import { SidebarFooter } from "@/components/SidebarFooter";
 import { ChatInput } from "@/components/ChatInput";
+import { RoleTaskLaunchpad } from "@/components/RoleTaskLaunchpad";
 import { CustomMcpDialog, type CustomMcpTemplate } from "@/components/CustomMcpDialog";
 import { PersonalExpertDialog } from "@/components/PersonalExpertDialog";
 import { KnowledgeCaptureDialog, type KnowledgeCaptureSource } from "@/components/KnowledgeCaptureDialog";
@@ -67,10 +62,13 @@ import {
   type AgentInteractionResponse,
 } from "@shared/agent-interaction";
 import { inspectSkillPackage, uploadSkillPackage } from "@/lib/skill-package-upload";
+import { roleDisplayName, skillTrialPrompt } from "@/lib/role-experience";
 import {
   flattenComposerConnectors,
+  roleHomeEnterpriseConnectors,
   type ComposerConnector,
   type ComposerConnectorResponse,
+  type RoleHomeRuntimeStatus,
 } from "@/lib/composer-connectors";
 import {
   expertTaskMessage,
@@ -96,6 +94,7 @@ import {
   clawModelStorageKey,
   clawStatusStorageKey,
   compactSessionSearchText,
+  conversationHasMeaningfulContent,
   inferSessionPreview,
   inferSessionTitle,
   initialWorkspacePanelWidth,
@@ -141,21 +140,6 @@ import {
 
 const ENABLE_OPENCLAW_WS_CHAT = true;
 const MAX_COMPOSER_SKILLS = 3;
-
-const ROLE_DISPLAY_NAMES: Record<string, string> = {
-  "investment-researcher": "投顾分析",
-  "wealth-manager": "财富经理",
-  "credential-compliance": "审核专员",
-  "insurance-advisor": "保险顾问",
-  "general-assistant": "通用助手",
-};
-
-function roleDisplayName(roleTemplate: unknown, roleName?: unknown) {
-  const name = String(roleName || "").trim();
-  if (name) return name;
-  const role = String(roleTemplate || "").trim();
-  return ROLE_DISPLAY_NAMES[role] || "通用助手";
-}
 
 function inferKnowledgeCaptureTitle(text: string): string {
   const normalized = stripEaInternalRuntimeContext(String(text || ""))
@@ -1778,20 +1762,34 @@ export default function Home() {
     };
   }, [activeLingxiaStreaming, isJiuwenRuntime, resolvedAdoptId, userStorageId, webConversationId, webSessions]);
 
-  const startNewLingxiaConversation = () => {
+  const openEmptyLingxiaConversation = (selection: "navigation" | "session") => {
     if (activeLingxiaStreaming) {
       toast.error("请先停止当前回复");
       return;
     }
     setSessionSwitchingId(null);
-    setSidebarSelection("session");
+    setSidebarSelection(selection);
     setActivePage("chat");
     setMobileSidebarOpen(false);
     setSessionMenuOpen(false);
+
+    const currentSession = webSessionsRef.current.find(
+      session => session.conversationId === webConversationIdRef.current,
+    );
+    if (
+      webConversationIdRef.current &&
+      !conversationHasMeaningfulContent(activeLingxiaMsgs as any[], currentSession)
+    ) {
+      return;
+    }
+
     const conversationId = makeConversationId();
     ensureEmptyWebSession(conversationId);
     activateWebConversation(conversationId);
   };
+
+  const startNewLingxiaConversation = () => openEmptyLingxiaConversation("session");
+  const openRoleHome = () => openEmptyLingxiaConversation("navigation");
 
   const switchLingxiaConversation = async (conversationId: string) => {
     if (activeLingxiaStreaming) {
@@ -1970,6 +1968,7 @@ export default function Home() {
   const lingxiaMessageNodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const lingxiaMessageRefCallbacks = useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
   const lingxiaManualNavigationRef = useRef(false);
+  const lingxiaAutoFollowPauseUntilRef = useRef(0);
   const lingxiaAutoScrollFrameRef = useRef<number | null>(null);
   const [lingxiaNearBottom, setLingxiaNearBottom] = useState(true);
   const [activeConversationPromptId, setActiveConversationPromptId] = useState("");
@@ -2121,6 +2120,7 @@ export default function Home() {
     try { localStorage.setItem(knowledgeSelectionKey, JSON.stringify(selectedComposerKnowledgeIds.slice(0, 8))); } catch {}
   }, [knowledgeSelectionKey, selectedComposerKnowledgeIds]);
   const [composerConnectors, setComposerConnectors] = useState<ComposerConnector[]>([]);
+  const [roleHomeRuntime, setRoleHomeRuntime] = useState<RoleHomeRuntimeStatus | null>(null);
   const [composerConnectorSearch, setComposerConnectorSearch] = useState("");
   const [composerConnectorsLoading, setComposerConnectorsLoading] = useState(false);
   const [pendingConnectorId, setPendingConnectorId] = useState("");
@@ -2189,6 +2189,7 @@ export default function Home() {
       const payload = await response.json().catch(() => ({})) as ComposerConnectorResponse & { error?: string };
       if (!response.ok) throw new Error(payload.error || `连接列表加载失败 (${response.status})`);
       setComposerConnectors(flattenComposerConnectors(payload));
+      setRoleHomeRuntime(payload.roleHome || null);
     } catch (error) {
       if (!options.silent) toast.error(error instanceof Error ? error.message : "连接列表加载失败");
     } finally {
@@ -2287,16 +2288,18 @@ export default function Home() {
       const uploaded = await uploadSkillPackage({ file, adoptId: resolvedAdoptId, displayName, description });
       await refetchSkills();
       const warnings = uploaded.warnings?.length || inspect.skill.warnings?.length || 0;
+      const skillId = String(uploaded.item?.id || inspect.skill.skillId || "").trim();
+      if (skillId) {
+        setSelectedComposerSkillIds((current) => current.includes(skillId) ? current : [...current, skillId].slice(0, MAX_COMPOSER_SKILLS));
+      }
+      const tryUploadedSkill = () => setLingxiaInput(skillTrialPrompt(displayName));
+      const uploadDescription = warnings > 0
+        ? `技能包检查、安装和运行环境同步已完成；有 ${warnings} 项兼容提示。`
+        : "技能包检查、兼容检查、安装和运行环境同步已完成。";
       if (warnings > 0) {
-        toast.warning(`技能已上传，静态扫描提示 ${warnings} 项，请在技能管理中确认。`);
+        toast.warning("技能已上传并选中", { description: uploadDescription, action: { label: "立即试用", onClick: tryUploadedSkill } });
       } else {
-        const skillId = String(uploaded.item?.id || inspect.skill.skillId || "").trim();
-        if (skillId) {
-          setSelectedComposerSkillIds((current) => current.includes(skillId)
-            ? current
-            : [...current, skillId].slice(0, MAX_COMPOSER_SKILLS));
-        }
-        toast.success("技能已上传并同步到运行环境");
+        toast.success("技能已就绪", { description: uploadDescription, action: { label: "立即试用", onClick: tryUploadedSkill } });
       }
       setComposerAddMenuOpen(false);
       setComposerAddMenuView("root");
@@ -2309,6 +2312,7 @@ export default function Home() {
   }, [refetchSkills, resolvedAdoptId]);
   useEffect(() => {
     setComposerConnectors([]);
+    setRoleHomeRuntime(null);
     setComposerExperts([]);
     setComposerConnectorSearch("");
     setComposerExpertSearch("");
@@ -2370,10 +2374,8 @@ export default function Home() {
         .includes(query)
     ));
   }, [composerConnectorSearch, composerConnectors]);
-  const activeComposerConnectorCount = useMemo(
-    () => composerConnectors.filter((connector) => connector.enabledForAgent).length,
-    [composerConnectors],
-  );
+  const activeComposerConnectorCount = useMemo(() => composerConnectors.filter((connector) => connector.enabledForAgent).length, [composerConnectors]);
+  const roleHomeEnterpriseTools = useMemo(() => roleHomeEnterpriseConnectors(composerConnectors), [composerConnectors]);
   const filteredComposerExperts = useMemo(() => {
     const query = composerExpertSearch.trim().toLocaleLowerCase();
     if (!query) return composerExperts;
@@ -3109,6 +3111,7 @@ export default function Home() {
     const nowLabel = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
     const assistantTimeLabel = nowLabel;
     lingxiaManualNavigationRef.current = false;
+    lingxiaAutoFollowPauseUntilRef.current = 0;
     updateLingxiaNearBottom(true);
 
     if (text.toLowerCase() === "/help" || text.toLowerCase() === "/commands") {
@@ -4030,6 +4033,9 @@ export default function Home() {
         });
         return;
       }
+      if (opts?.selectedSkillIds?.length) {
+        setSelectedComposerSkillIds((current) => Array.from(new Set([...current, ...opts.selectedSkillIds!])).slice(0, MAX_COMPOSER_SKILLS));
+      }
       // 网络错误 / fetch 失败 → 进入"重连中"状态，不直接判任务失败
       if (conversationIdAtSend && runtimeSessionKey) {
         void reconcileStreamedConversation({
@@ -4160,6 +4166,7 @@ export default function Home() {
     if (!viewport || !target) return;
 
     lingxiaManualNavigationRef.current = true;
+    lingxiaAutoFollowPauseUntilRef.current = Date.now() + 500;
     updateLingxiaNearBottom(false);
     setActiveConversationPromptId(messageId);
 
@@ -4172,6 +4179,7 @@ export default function Home() {
 
   useEffect(() => {
     lingxiaManualNavigationRef.current = false;
+    lingxiaAutoFollowPauseUntilRef.current = 0;
     setActiveConversationPromptId("");
   }, [webConversationId]);
 
@@ -4224,6 +4232,10 @@ export default function Home() {
       }
       // Stop an in-flight smooth scroll before the browser applies the user's wheel delta.
       el.scrollTo({ top: el.scrollTop, behavior: "auto" });
+      lingxiaAutoFollowPauseUntilRef.current = Math.max(
+        lingxiaAutoFollowPauseUntilRef.current,
+        Date.now() + 250,
+      );
       lingxiaManualNavigationRef.current = true;
       updateLingxiaNearBottom(false);
     };
@@ -4240,6 +4252,11 @@ export default function Home() {
       }
 
       const distanceFromBottom = Math.max(0, el.scrollHeight - scrollTop - el.clientHeight);
+      if (Date.now() < lingxiaAutoFollowPauseUntilRef.current) {
+        lingxiaManualNavigationRef.current = true;
+        updateLingxiaNearBottom(false);
+        return;
+      }
       if (distanceFromBottom <= 12) {
         lingxiaManualNavigationRef.current = false;
         updateLingxiaNearBottom(true);
@@ -4260,8 +4277,12 @@ export default function Home() {
         ".agent-task-card__details-toggle",
         ".lingxia-tool-summary",
         ".lingxia-tool-step-summary",
+        ".lingxia-toolcard__mini-btn",
+        ".context-receipt__summary",
+        ".context-receipt__technical > summary",
       ].join(", "))) return;
       const scrollTop = el.scrollTop;
+      lingxiaAutoFollowPauseUntilRef.current = Date.now() + 350;
       lingxiaManualNavigationRef.current = true;
       updateLingxiaNearBottom(false);
       window.requestAnimationFrame(() => {
@@ -4277,11 +4298,11 @@ export default function Home() {
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("pointerdown", onPointerDown);
     };
-  }, [updateLingxiaNearBottom]);
+  }, [activePage, updateLingxiaNearBottom, webConversationId]);
 
   useEffect(() => {
     const content = lingxiaMsgContentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
+    if (!content || typeof ResizeObserver === "undefined" || activeLingxiaMsgs.length === 0) return;
 
     const observer = new ResizeObserver(() => {
       if (!shouldAutoFollowChat(lingxiaManualNavigationRef.current, lingxiaNearBottomRef.current)) return;
@@ -4302,13 +4323,14 @@ export default function Home() {
       }
       observer.disconnect();
     };
-  }, [activePage, scrollLingxiaToBottom, webConversationId]);
+  }, [activeLingxiaMsgs.length, activePage, scrollLingxiaToBottom, webConversationId]);
 
   useEffect(() => {
     const lastMessage = activeLingxiaMsgs[activeLingxiaMsgs.length - 1];
     const userJustSent = lastMessage?.role === "user";
     if (userJustSent) {
       lingxiaManualNavigationRef.current = false;
+      lingxiaAutoFollowPauseUntilRef.current = 0;
       updateLingxiaNearBottom(true);
     }
     if (userJustSent || (!lingxiaManualNavigationRef.current && lingxiaNearBottomRef.current)) {
@@ -4538,6 +4560,7 @@ export default function Home() {
               onRenameConversation={renameLingxiaConversation}
               onTogglePinConversation={togglePinLingxiaConversation}
               onNewConversation={startNewLingxiaConversation}
+              onOpenHome={openRoleHome}
               sessionsLoading={webSessionsLoading && webSessions.length === 0}
               footer={(
                 <SidebarFooter
@@ -4704,9 +4727,7 @@ export default function Home() {
               <div ref={lingxiaMsgContentRef} className="mx-auto w-full max-w-[880px] px-6 space-y-5">
 
               {sessionSwitchingId && activeLingxiaMsgs.length === 0 ? <ChatStartupSkeleton /> : null}
-
               {!sessionSwitchingId && clawByAdoptLoading && activeLingxiaMsgs.length === 0 ? <ChatStartupSkeleton /> : null}
-
               {!clawByAdoptLoading && !clawByAdoptId && (
                 <div className="max-w-4xl rounded-xl p-4 text-sm" style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)", color: "#d4a030" }}>
                   未找到该岗位智能体实例，可能已过期或尚未完成创建。
@@ -4714,9 +4735,16 @@ export default function Home() {
               )}
 
               {!sessionSwitchingId && !clawByAdoptLoading && clawByAdoptId && activeLingxiaMsgs.length === 0 && (
-                <div className="max-w-4xl py-2 lingxia-msg-fade lingxia-welcome-message">
-                  你好，我是 <span>{lingxiaDisplayName || brand.name}</span>，有什么想聊的？
-                </div>
+                <RoleTaskLaunchpad
+                  roleTemplate={String((clawByAdoptId as any)?.roleTemplate || "general-assistant")}
+                  roleName={lingxiaDisplayName || brand.name}
+                  skills={composerSkills}
+                  enterpriseTools={roleHomeEnterpriseTools}
+                  selectedSkillIds={selectedComposerSkillIds}
+                  runtimeStatus={roleHomeRuntime}
+                  onSelectPrompt={(task) => { setLingxiaInput(task.prompt); window.setTimeout(() => document.querySelector<HTMLTextAreaElement>("textarea.main-chat-input")?.focus(), 0); }}
+                  onSelectSkill={(skill) => { void selectComposerSkill(skill); window.setTimeout(() => document.querySelector<HTMLTextAreaElement>("textarea.main-chat-input")?.focus(), 0); }}
+                />
               )}
 
               {activeLingxiaMsgs.map((m, idx) => {
@@ -4801,6 +4829,7 @@ export default function Home() {
                   style={{ background: "var(--oc-bg-surface)", border: "1px solid var(--oc-border-strong)", color: "var(--oc-text-primary)" }}
                   onClick={() => {
                     lingxiaManualNavigationRef.current = false;
+                    lingxiaAutoFollowPauseUntilRef.current = 0;
                     updateLingxiaNearBottom(true);
                     scrollLingxiaToBottom("smooth");
                   }}
@@ -4855,7 +4884,6 @@ export default function Home() {
                   }
                 }
                 const selectedSkillIds = selectedComposerSkills.map((skill) => skill.id);
-                setSelectedComposerSkillIds([]);
                 if (selectedExpert) {
                   return submitExpertTask({
                     expert: selectedExpert,
@@ -4875,6 +4903,7 @@ export default function Home() {
                     ? buildExpertHandoffRuntimeMessage(finalText, detachedExpertHandoff!)
                     : finalText;
                   if (includeExpertHandoff) setDetachedExpertId("");
+                  setSelectedComposerSkillIds([]);
                   void sendLingxiaMessage(runtimeText, {
                     selectedSkillIds,
                     displayText: text || (messageAttachments.length > 0 ? "请查看我上传的附件。" : ""),
@@ -4928,7 +4957,7 @@ export default function Home() {
                   : pendingExpertInteraction.interaction.allowNote
                     ? "可补充说明…"
                     : "请选择一个选项"
-                : `Message ${lingxiaDisplayName || brand.name}…`}
+                : activeLingxiaMsgs.length === 0 ? "输入你要完成的工作任务…" : `继续与${lingxiaDisplayName || brand.name}沟通…`}
               maxLength={4000}
               historyStorageKey={INPUT_HISTORY_KEY}
               voiceOnRight
@@ -5439,6 +5468,13 @@ export default function Home() {
                 window.setTimeout(() => {
                   document.querySelector<HTMLTextAreaElement>("textarea.main-chat-input")?.focus();
                 }, 0);
+              }}
+              onTrySkill={(skillId, _displayName, prompt) => {
+                setSelectedComposerExpertId("");
+                setSelectedComposerSkillIds(skillId ? [skillId] : []);
+                setLingxiaInput(prompt);
+                setSidebarSelection("navigation"); setActivePage("chat"); setMobileSidebarOpen(false);
+                window.setTimeout(() => document.querySelector<HTMLTextAreaElement>("textarea.main-chat-input")?.focus(), 0);
               }}
               onTryExpert={(expertId, initialPrompt, scenarioId) => {
                 setSelectedComposerExpertId(expertId);

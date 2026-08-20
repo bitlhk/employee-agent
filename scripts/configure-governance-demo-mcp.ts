@@ -26,9 +26,9 @@ async function main() {
   const existing = await getEnterpriseMcpConnection(GOVERNANCE_DEMO_MCP_SERVER_ID);
   const common = {
     displayName: "岗位业务演示 MCP（Demo）",
-    description: "Governed Runtime 演示连接：创建方案草稿、客户跟进任务和更新演示客户标签；所有写入仅进入隔离 Demo 表。",
+    description: "Governed Runtime 演示连接：创建方案草稿、跟进任务和审核人工复核任务；所有写入仅进入隔离 Demo 表。",
     icon: null,
-    businessDomain: "wealth-demo",
+    businessDomain: "role-demo",
     endpointUrl,
     resourceUri: endpointUrl,
     protocolVersion: "2025-11-25" as const,
@@ -94,7 +94,31 @@ async function main() {
         enabled: true,
         sideEffect: "write",
         requiredScopes: ["demo.followup.write"],
-        allowedRoles: ["wealth-manager", "insurance-advisor"],
+        allowedRoles: ["wealth-manager", "insurance-advisor", "post-loan-risk-control"],
+        identityModeOverride: "user",
+        approvalMode: "always",
+        auditLevel: "highest",
+        idempotencyRequired: true,
+        argumentPolicyJson: null,
+      },
+      {
+        toolName: "demo_create_audit_review_task",
+        enabled: true,
+        sideEffect: "write",
+        requiredScopes: ["demo.audit_review.write"],
+        allowedRoles: ["credential-compliance"],
+        identityModeOverride: "user",
+        approvalMode: "always",
+        auditLevel: "highest",
+        idempotencyRequired: true,
+        argumentPolicyJson: null,
+      },
+      {
+        toolName: "demo_create_research_watch_task",
+        enabled: true,
+        sideEffect: "write",
+        requiredScopes: ["demo.research_watch.write"],
+        allowedRoles: ["investment-researcher"],
         identityModeOverride: "user",
         approvalMode: "always",
         auditLevel: "highest",
@@ -121,12 +145,15 @@ async function main() {
     grants: [
       { roleKey: "wealth-manager", grantMode: "default" },
       { roleKey: "insurance-advisor", grantMode: "default" },
+      { roleKey: "post-loan-risk-control", grantMode: "default" },
+      { roleKey: "credential-compliance", grantMode: "default" },
+      { roleKey: "investment-researcher", grantMode: "default" },
     ],
     actor: "governance-demo-bootstrap",
   });
   const refresh = await reconcileEnterpriseMcpRuntimeScopes({
     serverId: GOVERNANCE_DEMO_MCP_SERVER_ID,
-    roleKeys: ["wealth-manager", "insurance-advisor"],
+    roleKeys: ["wealth-manager", "insurance-advisor", "post-loan-risk-control", "credential-compliance", "investment-researcher"],
     forceRefresh: true,
   });
   console.log(JSON.stringify({

@@ -105,6 +105,11 @@ describe("governance invariants", () => {
       policyRequired: false,
       registered: true,
     });
+    expect(resolveToolGovernance("mcp_platform_tools_evaluate_post_loan_risk_escalation")).toMatchObject({
+      sideEffect: "compute",
+      policyRequired: false,
+      registered: true,
+    });
     expect(resolveToolGovernance("mcp_platform_tools_create_scheduled_task")).toMatchObject({ sideEffect: "write", idempotencyRequired: true });
     expect(resolveToolGovernance("mcp_platform_tools_submit_agent_task")).toMatchObject({ sideEffect: "external_send", idempotencyRequired: true });
     expect(resolveToolGovernance("audio_question_answering")).toMatchObject({ sideEffect: "compute", registered: true });
@@ -116,6 +121,11 @@ describe("governance invariants", () => {
     });
     expect(resolveToolGovernance("mcp_enterprise_mcp_gateway_enterprise_ab12_update_customer")).toMatchObject({
       sideEffect: "write", registered: true, policyRequired: true,
+    });
+    expect(resolveToolGovernance("mcp_role_mcp_gateway_role_ab12_bond_parse_schema")).toMatchObject({
+      sideEffect: "read",
+      policyRequired: false,
+      auditLevel: "strong",
     });
   });
 

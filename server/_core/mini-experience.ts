@@ -15,17 +15,18 @@ import {
   upsertClawProfileSettings,
 } from "../db";
 import { getRoleRuntimeAdapter, isJiuwenSwarmProvisionEnabled } from "../routers/role-runtime-adapters";
+import { reconcileRoleRuntimeAssets } from "./role-runtime-adapter";
 import type { EffectiveRoleAssets } from "./role-asset-grants";
 import { isAuthorizedInternalRequest, resolveRuntimeWorkspaceByIds } from "./helpers";
 import {
   listClawChatHistorySessionRecords,
   readModernChatHistorySessionMessages,
 } from "./chat-history";
-import { writeJiuwenSwarmRoleScopeManifest } from "./jiuwenswarm-role-scope";
 import { logError, logInfo, logWarn } from "./observability/logger";
 import { resolvePublicBaseUrl } from "./public-base-url";
 import { resolveAgentRoleTemplate } from "./role-templates";
 import { onboardBuiltinSkillsForAdopt } from "./skills/skill-onboarding";
+import { ensureEnterpriseRuntimeBindingForAdoption } from "./enterprise-runtime-assets";
 import { listSkillsWithRoleDefaults } from "./skills/role-default-skills";
 
 const MINI_EXPERIENCE_TTL_DAYS = 30;
@@ -229,13 +230,13 @@ async function provisionMiniExperienceAdoption(subject: string): Promise<MiniExp
   const existing = await getClawByAdoptId(identity.adoptId);
   if (existing?.status === "active") {
     const role = resolveAgentRoleTemplate("general-assistant");
-    writeJiuwenSwarmRoleScopeManifest({
-      workspaceDir: resolveRuntimeWorkspaceByIds(identity.adoptId, identity.agentId),
+    await reconcileRoleRuntimeAssets(getRoleRuntimeAdapter("jiuwenswarm"), {
+      adoptId: identity.adoptId,
+      agentId: identity.agentId,
       role,
       effectiveAssets: EMPTY_ROLE_ASSETS,
       activeSkillIds: [],
       disabledDefaultSkillIds: [],
-      activeMcpServerIds: [],
       includePlatformMcp: false,
     });
     await updateClawAdoptionStatus(Number(existing.id), "active", {
@@ -304,27 +305,13 @@ async function provisionMiniExperienceAdoption(subject: string): Promise<MiniExp
       role,
       effectiveAssets: EMPTY_ROLE_ASSETS,
     });
-    await runtimeAdapter.reconcileSkills({
+    await reconcileRoleRuntimeAssets(runtimeAdapter, {
       adoptId: identity.adoptId,
       agentId: identity.agentId,
       role,
       effectiveAssets: EMPTY_ROLE_ASSETS,
       activeSkillIds: [],
       disabledDefaultSkillIds: [],
-    });
-    await runtimeAdapter.reconcileMcp({
-      adoptId: identity.adoptId,
-      agentId: identity.agentId,
-      role,
-      effectiveAssets: EMPTY_ROLE_ASSETS,
-    });
-    writeJiuwenSwarmRoleScopeManifest({
-      workspaceDir: resolveRuntimeWorkspaceByIds(identity.adoptId, identity.agentId),
-      role,
-      effectiveAssets: EMPTY_ROLE_ASSETS,
-      activeSkillIds: [],
-      disabledDefaultSkillIds: [],
-      activeMcpServerIds: [],
       includePlatformMcp: false,
     });
     await upsertClawProfileSettings(adoptionId, {
@@ -465,9 +452,15 @@ async function provisionRegisteredAdoption(userId: number, subject: string): Pro
         role,
         effectiveAssets,
       });
-      await adapter.reconcileSkills({ adoptId, agentId, role, effectiveAssets });
-      await adapter.reconcileMcp({ adoptId, agentId, role, effectiveAssets });
+      await reconcileRoleRuntimeAssets(adapter, { adoptId, agentId, role, effectiveAssets });
       await updateClawAdoptionStatus(adoptionId, "active", { lastError: null });
+      await ensureEnterpriseRuntimeBindingForAdoption(adoptId).catch(error => {
+        logWarn("miniprogram_account.enterprise_binding_failed", {
+          adoptId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      });
       await appendClawAdoptionEvent({
         adoptionId,
         eventType: "create_succeeded",

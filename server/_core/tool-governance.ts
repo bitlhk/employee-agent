@@ -89,9 +89,18 @@ const RULES: readonly GovernanceRule[] = [
     idempotencyRequired: true,
   },
   {
+    prefixes: ["mcp_role_mcp_gateway_"],
+    sideEffect: "read",
+    policyRequired: false,
+    approvalMode: "never",
+    auditLevel: "strong",
+    idempotencyRequired: false,
+  },
+  {
     exact: [
       "ask_user", "audio_question_answering", "generate_image", "load_tools", "skill_tool",
       "task_tool", "video_understanding", "visual_question_answering",
+      "mcp_platform_tools_evaluate_post_loan_risk_escalation",
     ],
     sideEffect: "compute",
     policyRequired: false,

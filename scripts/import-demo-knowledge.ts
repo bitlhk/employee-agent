@@ -11,8 +11,11 @@ import {
   deleteKnowledgeDocumentsByBase,
   getClawByAdoptId,
   getUserById,
+  listGlobalRoleKnowledgeBases,
   listKnowledgeBasesOwnedByUser,
+  prepareManagedKnowledgeBaseReplacement,
 } from "../server/db";
+import type { KnowledgeBaseRecord } from "../server/db";
 import { queueKnowledgeIndex } from "../server/_core/knowledge-service";
 import {
   KNOWLEDGE_EXTENSIONS,
@@ -21,6 +24,10 @@ import {
   knowledgeMimeType,
   removeKnowledgeBaseFiles,
 } from "../server/_core/knowledge-storage";
+import {
+  REFERENCE_ROLE_PACKS,
+  referenceRoleTaskIdPattern,
+} from "../server/_core/reference-role-pack-registry";
 
 type KnowledgeClassification = "public" | "internal" | "sensitive" | "restricted";
 type KnowledgeAuthority = "official" | "approved" | "reference" | "personal";
@@ -84,7 +91,7 @@ type ImportPlanItem = {
 };
 
 type ReferencePackDefinition = {
-  key: "wealth-manager" | "insurance-advisor";
+  key: string;
   roleTemplate: string;
   manifestPath: string;
   sourceDir: string;
@@ -100,34 +107,15 @@ const validateOnly = process.argv.includes("--validate");
 const requestedPack = String(process.argv.find((arg) => arg.startsWith("--pack="))?.split("=", 2)[1] || "").trim();
 
 const REFERENCE_PACKS: ReferencePackDefinition[] = [
-  {
-    key: "wealth-manager",
-    roleTemplate: "wealth-manager",
-    manifestPath: path.resolve(APP_ROOT, "examples", "wealth-manager-reference-role-pack", "knowledge", "manifest.json"),
-    sourceDir: legacySourceDir,
-    taskIdPattern: /^WM-GT-0[1-6]$/,
-    legacyNames: ["财富经理岗位知识（演示）"],
-    fallbackKnowledgeBase: {
-      name: "财富经理岗位操作规范（演示）",
-      description: "财富经理岗位内部操作口径、访前准备、销售规范与官方监管法规。",
-      classification: "internal",
-      externalProcessingAllowed: true,
-    },
-  },
-  {
-    key: "insurance-advisor",
-    roleTemplate: "insurance-advisor",
-    manifestPath: path.resolve(APP_ROOT, "examples", "insurance-advisor-reference-role-pack", "knowledge", "manifest.json"),
-    sourceDir: path.resolve(APP_ROOT, "examples", "insurance-advisor-reference-role-pack", "knowledge", "documents"),
-    taskIdPattern: /^IA-GT-0[1-6]$/,
-    legacyNames: ["保险顾问岗位知识（演示）"],
-    fallbackKnowledgeBase: {
-      name: "保险顾问岗位操作规范（演示）",
-      description: "保险顾问岗位内部操作口径、车险客户经营、产品讲解、销售陪练与合规升级规范。",
-      classification: "internal",
-      externalProcessingAllowed: true,
-    },
-  },
+  ...REFERENCE_ROLE_PACKS.map((definition) => ({
+    key: definition.key,
+    roleTemplate: definition.roleTemplate,
+    manifestPath: path.resolve(APP_ROOT, "examples", definition.packDirectory, "knowledge", "manifest.json"),
+    sourceDir: path.resolve(APP_ROOT, definition.knowledgeSourceDirectory),
+    taskIdPattern: referenceRoleTaskIdPattern(definition),
+    legacyNames: [...definition.legacyKnowledgeBaseNames],
+    fallbackKnowledgeBase: definition.fallbackKnowledgeBase,
+  })),
 ];
 
 const selectedPack = requestedPack
@@ -141,6 +129,7 @@ const LEGACY_NAMES = new Set([
   "金融机构运营制度演示库",
   "企业差旅与合规制度（演示）",
   "财富经理岗位知识（演示）",
+  "保险顾问岗位知识（演示）",
 ]);
 const OFFICIAL_SUITABILITY_NAME = "11-金融机构产品适当性管理办法（2025）.pdf";
 const OFFICIAL_SUITABILITY_SHA256 = "5f16e63b49fa264dfd43c986edfe27e1cb066e4c9236f7d75a1fd03f7fb2ad0c";
@@ -351,7 +340,6 @@ function buildLegacyImportPlan(): ImportPlanItem[] {
   validateReferenceKnowledgeManifest(wealthManifest, wealthDefinition);
   const wealthByFile = new Map(wealthManifest.assets.map((asset) => [asset.file, asset]));
   const wealthSeries = resolveReferenceKnowledgeSeries(wealthManifest.assets);
-  const wealthPrefixes = wealthManifest.assets.map((asset) => asset.file.split("-", 1)[0]);
   const collections = [
     {
       scope: "enterprise" as const,
@@ -362,31 +350,10 @@ function buildLegacyImportPlan(): ImportPlanItem[] {
     },
     {
       scope: "role" as const,
-      roleTemplate: "wealth-manager",
-      name: "财富经理岗位操作规范（演示）",
-      description: "财富经理岗位内部操作口径、访前准备、销售规范与官方监管法规。",
-      files: ["11", ...wealthPrefixes],
-    },
-    {
-      scope: "role" as const,
-      roleTemplate: "post-loan-risk-control",
-      name: "风控经理岗位知识（演示）",
-      description: "风控经理适用的客户尽调、数据保护、贷后预警与升级处置示例知识。",
-      files: ["05", "06", "07", "09", "10"],
-    },
-    {
-      scope: "role" as const,
       roleTemplate: "credential-compliance",
       name: "审核专员岗位知识（演示）",
       description: "审核专员适用的票据附件、客户尽调、信息保护与审批职责示例知识。",
       files: ["03", "05", "06", "09", "10"],
-    },
-    {
-      scope: "role" as const,
-      roleTemplate: "insurance-advisor",
-      name: "保险顾问岗位知识（演示）",
-      description: "保险顾问旧版通用金融演示知识；建议改用 --pack=insurance-advisor。",
-      files: ["04", "05", "06", "09"],
     },
     {
       scope: "role" as const,
@@ -427,35 +394,44 @@ function buildImportPlan(): { items: ImportPlanItem[]; manifests: ReferencePackM
     const selected = buildReferencePackPlan(selectedPack);
     return { items: [selected.item], manifests: [selected.manifest] };
   }
-  const manifests = REFERENCE_PACKS.map((definition) => buildReferencePackPlan(definition).manifest);
-  return { items: buildLegacyImportPlan(), manifests };
+  const referencePlans = REFERENCE_PACKS.map((definition) => buildReferencePackPlan(definition));
+  return {
+    items: [...referencePlans.map((plan) => plan.item), ...buildLegacyImportPlan()],
+    manifests: referencePlans.map((plan) => plan.manifest),
+  };
 }
 
 function managedKnowledgeBaseNames(items: ImportPlanItem[]): Set<string> {
-  if (!selectedPack) return new Set([...LEGACY_NAMES, ...items.map((item) => item.collection.name)]);
+  if (!selectedPack) return new Set([
+    ...LEGACY_NAMES,
+    ...REFERENCE_PACKS.flatMap((definition) => definition.legacyNames),
+    ...items.map((item) => item.collection.name),
+  ]);
   return new Set([
     ...selectedPack.legacyNames,
     ...items.map((item) => item.collection.name),
   ]);
 }
 
-async function importKnowledgeBase(
-  item: ImportPlanItem,
-  ownerUserId: number,
-  ownerGroupId: number,
-): Promise<{ knowledgeBaseId: string; name: string; scope: string; roleTemplate: string | null; documents: number }> {
-  const base = await createKnowledgeBaseRecord({
-    publicId: `kb_${nanoid(18)}`,
-    ownerUserId,
-    ownerGroupId,
-    scope: item.collection.scope,
-    isGlobal: true,
-    roleTemplate: item.collection.roleTemplate,
-    name: item.collection.name,
-    description: item.collection.description,
-    classification: item.collection.classification,
-    externalProcessingAllowed: item.collection.externalProcessingAllowed,
+export function selectCanonicalReferenceKnowledgeBase<T extends Pick<KnowledgeBaseRecord, "id" | "name" | "status">>(
+  bases: T[],
+  targetName: string,
+): { canonical: T | null; duplicates: T[] } {
+  const ordered = bases.slice().sort((left, right) => {
+    const leftNameRank = left.name === targetName ? 0 : 1;
+    const rightNameRank = right.name === targetName ? 0 : 1;
+    if (leftNameRank !== rightNameRank) return leftNameRank - rightNameRank;
+    const leftStatusRank = left.status === "ready" ? 0 : 1;
+    const rightStatusRank = right.status === "ready" ? 0 : 1;
+    return leftStatusRank - rightStatusRank || left.id - right.id;
   });
+  return { canonical: ordered[0] || null, duplicates: ordered.slice(1) };
+}
+
+async function populateKnowledgeBase(
+  item: ImportPlanItem,
+  base: KnowledgeBaseRecord,
+): Promise<{ knowledgeBaseId: string; name: string; scope: string; roleTemplate: string | null; documents: number }> {
   const documentIdByFile = new Map(item.files.map((sourcePath) => [path.basename(sourcePath), `doc_${nanoid(18)}`]));
   const documentIdByAsset = new Map<string, string>();
   for (const [filename, governance] of item.governanceByFile) {
@@ -499,14 +475,64 @@ async function importKnowledgeBase(
       expiresAt: governance.expiresAt,
     });
   }
-  await queueKnowledgeIndex({ ...base, documentCount: item.files.length, status: "indexing" }, selectedPack ? "reference_pack_import" : "demo_import");
+  await queueKnowledgeIndex(
+    {
+      ...base,
+      name: item.collection.name,
+      description: item.collection.description,
+      classification: item.collection.classification,
+      externalProcessingAllowed: item.collection.externalProcessingAllowed,
+      status: "indexing",
+      documentCount: item.files.length,
+      chunkCount: 0,
+      lastError: null,
+    },
+    selectedPack ? "reference_pack_import" : "demo_import",
+  );
   return {
     knowledgeBaseId: base.publicId,
-    name: base.name,
+    name: item.collection.name,
     scope: base.scope,
     roleTemplate: base.roleTemplate,
     documents: item.files.length,
   };
+}
+
+async function importKnowledgeBase(
+  item: ImportPlanItem,
+  ownerUserId: number,
+  ownerGroupId: number,
+): Promise<{ knowledgeBaseId: string; name: string; scope: string; roleTemplate: string | null; documents: number }> {
+  const base = await createKnowledgeBaseRecord({
+    publicId: `kb_${nanoid(18)}`,
+    ownerUserId,
+    ownerGroupId,
+    scope: item.collection.scope,
+    isGlobal: true,
+    roleTemplate: item.collection.roleTemplate,
+    name: item.collection.name,
+    description: item.collection.description,
+    classification: item.collection.classification,
+    externalProcessingAllowed: item.collection.externalProcessingAllowed,
+  });
+  return populateKnowledgeBase(item, base);
+}
+
+async function replaceKnowledgeBase(
+  item: ImportPlanItem,
+  base: KnowledgeBaseRecord,
+): ReturnType<typeof populateKnowledgeBase> {
+  await deleteKnowledgeDocumentsByBase(base.id);
+  removeKnowledgeBaseFiles(base.publicId);
+  await prepareManagedKnowledgeBaseReplacement({
+    id: base.id,
+    ownerUserId: base.ownerUserId,
+    name: item.collection.name,
+    description: item.collection.description,
+    classification: item.collection.classification,
+    externalProcessingAllowed: item.collection.externalProcessingAllowed,
+  });
+  return populateKnowledgeBase(item, base);
 }
 
 async function main() {
@@ -530,7 +556,7 @@ async function main() {
     return;
   }
   if (!adoptId) {
-    throw new Error("Usage: tsx scripts/import-demo-knowledge.ts --validate [--pack=wealth-manager|insurance-advisor] | --adopt-id=lgj-xxx [--pack=...]");
+    throw new Error(`Usage: tsx scripts/import-demo-knowledge.ts --validate [--pack=${REFERENCE_PACKS.map((pack) => pack.key).join("|")}] | --adopt-id=lgj-xxx [--pack=...]`);
   }
   const claw = await getClawByAdoptId(adoptId);
   if (!claw) throw new Error(`Agent adoption not found: ${adoptId}`);
@@ -542,20 +568,42 @@ async function main() {
   const ownerUserId = Number(user.id);
   const ownerGroupId = Number(user.groupId || 0);
   const managedNames = managedKnowledgeBaseNames(items);
-  const existing = (await listKnowledgeBasesOwnedByUser(ownerUserId)).filter((item) => managedNames.has(item.name));
-  for (const base of existing) {
-    await deleteKnowledgeDocumentsByBase(base.id);
-    await deleteKnowledgeBaseRecord(base.id, ownerUserId);
-    removeKnowledgeBaseFiles(base.publicId);
-  }
-
+  const removed: KnowledgeBaseRecord[] = [];
+  const reused: KnowledgeBaseRecord[] = [];
   const imported = [];
-  for (const item of items) imported.push(await importKnowledgeBase(item, ownerUserId, ownerGroupId));
+  if (selectedPack) {
+    const item = items[0];
+    const existing = (await listGlobalRoleKnowledgeBases(selectedPack.roleTemplate))
+      .filter((base) => managedNames.has(base.name));
+    const { canonical, duplicates } = selectCanonicalReferenceKnowledgeBase(existing, item.collection.name);
+    for (const base of duplicates) {
+      await deleteKnowledgeDocumentsByBase(base.id);
+      await deleteKnowledgeBaseRecord(base.id, base.ownerUserId);
+      removeKnowledgeBaseFiles(base.publicId);
+      removed.push(base);
+    }
+    if (canonical) {
+      imported.push(await replaceKnowledgeBase(item, canonical));
+      reused.push(canonical);
+    } else {
+      imported.push(await importKnowledgeBase(item, ownerUserId, ownerGroupId));
+    }
+  } else {
+    const existing = (await listKnowledgeBasesOwnedByUser(ownerUserId)).filter((item) => managedNames.has(item.name));
+    for (const base of existing) {
+      await deleteKnowledgeDocumentsByBase(base.id);
+      await deleteKnowledgeBaseRecord(base.id, ownerUserId);
+      removeKnowledgeBaseFiles(base.publicId);
+      removed.push(base);
+    }
+    for (const item of items) imported.push(await importKnowledgeBase(item, ownerUserId, ownerGroupId));
+  }
   console.log(JSON.stringify({
     ok: true,
     adoptId,
     selectedPack: selectedPack?.key || null,
-    removed: existing.map((base) => ({ id: base.publicId, name: base.name })),
+    reused: reused.map((base) => ({ id: base.publicId, name: base.name, ownerUserId: base.ownerUserId })),
+    removed: removed.map((base) => ({ id: base.publicId, name: base.name, ownerUserId: base.ownerUserId })),
     imported,
   }, null, 2));
   process.exit(0);

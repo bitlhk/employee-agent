@@ -55,6 +55,7 @@ import { getAdminSystemHealth } from "../_core/admin-system-health";
 import { logDebug, logWarn } from "../_core/observability/logger";
 import { auditActor, auditErrorMetadata, auditRequest, recordAuditBestEffort, recordAuditRequired } from "../_core/audit-events";
 import { onboardBuiltinSkillsForAdopt } from "../_core/skills/skill-onboarding";
+import { ensureEnterpriseRuntimeBindingForAdoption } from "../_core/enterprise-runtime-assets";
 import { pruneSkillRegistryForAdopt, skillRegistry } from "../_core/skills/skill-registry";
 import { listSkillsWithRoleDefaults } from "../_core/skills/role-default-skills";
 import { roleSkillPreferences } from "../_core/skills/role-skill-preferences";
@@ -75,7 +76,7 @@ import {
   listAgentRoleTemplates,
   resolveAgentRoleTemplate,
 } from "../_core/role-templates";
-import { resolveRoleRuntimeProvisionPlan } from "../_core/role-runtime-adapter";
+import { reconcileRoleRuntimeAssets, resolveRoleRuntimeProvisionPlan } from "../_core/role-runtime-adapter";
 import { getRoleRuntimeAdapter, isJiuwenSwarmProvisionEnabled } from "./role-runtime-adapters";
 import { listConfiguredMcpServers, listMcpToolGroups } from "../_core/claw-skills";
 import { MESSAGE_FEEDBACK_REASON_CODES } from "../../shared/message-feedback";
@@ -1885,10 +1886,22 @@ export const clawRouter = router({
             role,
             effectiveAssets,
           });
-          const skillReconcile = await runtimeAdapter.reconcileSkills({ adoptId, agentId, role, effectiveAssets });
-          const mcpReconcile = await runtimeAdapter.reconcileMcp({ adoptId, agentId, role, effectiveAssets });
+          const assetReconcile = await reconcileRoleRuntimeAssets(runtimeAdapter, {
+            adoptId,
+            agentId,
+            role,
+            effectiveAssets,
+          });
 
           await updateClawAdoptionStatus(adoptionId, "active");
+
+          const enterpriseBinding = await ensureEnterpriseRuntimeBindingForAdoption(adoptId).catch((error) => {
+            logWarn("runtime.enterprise.auto_binding_failed", {
+              adoptId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+          });
 
           await appendClawAdoptionEvent({
             adoptionId,
@@ -1918,9 +1931,11 @@ export const clawRouter = router({
               runtimeFallbackApplied: provisionPlan.fallbackApplied,
               runtimeFallbackReason: provisionPlan.fallbackReason || null,
               effectiveAssets,
-              skillReconcile,
-              mcpReconcile,
-              reconcileApplied: Boolean(skillReconcile.applied || mcpReconcile.applied),
+              skillReconcile: assetReconcile,
+              mcpReconcile: assetReconcile,
+              enterpriseBindingId: enterpriseBinding?.bindingId || null,
+              enterpriseRuntimeReady: enterpriseBinding?.status === "ready",
+              reconcileApplied: assetReconcile.applied,
               ttlDays,
               entryUrl,
             },
@@ -2037,6 +2052,7 @@ export const clawRouter = router({
           desc: skill.source.description || "智能体技能",
           emoji: "⚡",
           source: "private" as const,
+          sourceKind: skill.source.kind,
           scope: "private" as const,
           sourcePath: skill.sync.runtimePath || skill.source.sourcePath || "",
           ownerAgentId: input.adoptId,

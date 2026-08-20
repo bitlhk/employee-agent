@@ -23,7 +23,12 @@ import { normalizeJiuwenSwarmWorkspaceRuntimePermissions } from "./jiuwenswarm-p
 
 export const JIUWENSWARM_ROLE_SCOPE_MANIFEST = ".linggan-role-scope.json";
 export const JIUWENSWARM_MANAGED_SKILLS_MANIFEST = ".linggan-managed-skills.json";
-export const JIUWENSWARM_PLATFORM_MCP_SERVER_IDS = ["platform_tools", "custom_mcp_gateway", "enterprise_mcp_gateway"];
+export const JIUWENSWARM_PLATFORM_MCP_SERVER_IDS = [
+  "platform_tools",
+  "custom_mcp_gateway",
+  "enterprise_mcp_gateway",
+  "role_mcp_gateway",
+];
 const CONTENT_COMPLIANCE_BLOCK_START = "<!-- EA_CONTENT_COMPLIANCE_START -->";
 const CONTENT_COMPLIANCE_BLOCK_END = "<!-- EA_CONTENT_COMPLIANCE_END -->";
 const DEFAULT_IDENTITY_MARKERS = [
@@ -92,7 +97,12 @@ function skillDirectoryDigest(rootDir: string): string {
   }
   const hash = createHash("sha256");
   const walk = (dir: string, relativeDir: string) => {
-    const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    // Keep this byte-independent ordering aligned with Python's default string
+    // ordering in the enterprise AgentServer asset verifier. localeCompare is
+    // locale-sensitive and can produce a different digest for the same files.
+    const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+    ));
     for (const entry of entries) {
       const absolutePath = path.join(dir, entry.name);
       const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
@@ -231,7 +241,12 @@ export function writeJiuwenSwarmRoleScopeManifest(args: {
     ...(args.sharedSkillsDir ? [args.sharedSkillsDir] : []),
   ]);
 
-  const linkResult = skillSourceDirs.length > 0
+  const shouldReconcileSkills =
+    args.skillSourceDirs !== undefined
+    || args.sharedSkillsDir !== undefined
+    || args.activeSkillIds !== undefined
+    || args.disabledDefaultSkillIds !== undefined;
+  const linkResult = shouldReconcileSkills
     ? reconcileJiuwenSwarmSharedSkillLinks({
       workspaceDir,
       sharedSkillsDirs: skillSourceDirs,
@@ -325,7 +340,7 @@ function roleGuidance(role: AgentRoleTemplate): string {
     case "insurance-advisor":
       return "重点支持保险需求分析、产品解释、销售陪练、话术推荐和异议处理。严格遵守合规边界，不承诺收益，不替代人工核保或理赔结论。";
     case "investment-researcher":
-      return "重点支持投研分析、行情解读、基金/股票/债券资料整理、组合对比和投资备忘。输出应标注数据口径和不确定性。";
+      return "重点支持公司研究、财报复盘、同业比较、估值风险、公告事件和研究备忘。动态事实只使用当前授权 Wind 数据并标注证券身份、期间、口径和不确定性；禁止自动交易、收益承诺和绕过客户适当性的个性化推荐。";
     default:
       return "重点支持通用办公、资料整理、信息检索、文本生成和任务协作。遇到专业金融、合规或投资判断时应提示限制并建议人工复核。";
   }
@@ -438,7 +453,6 @@ export function reconcileJiuwenSwarmSharedSkillLinks(params: {
     ...(params.sharedSkillsDirs || []),
     ...(params.sharedSkillsDir ? [params.sharedSkillsDir] : []),
   ]).filter((dir) => existsSync(dir));
-  if (sharedSkillsDirs.length === 0) return { linkedSharedSkills, removedSharedSkills };
   mkdirSync(workspaceSkillsDir, { recursive: true });
   const sharedRoots = sharedSkillsDirs.map((dir) => path.resolve(dir));
 
@@ -472,12 +486,15 @@ export function reconcileJiuwenSwarmSharedSkillLinks(params: {
 
   for (const skillId of allowed) {
     const sharedRoot = sharedSkillsDirs.find((dir) => existsSync(path.join(dir, skillId)));
-    if (!sharedRoot) continue;
-    const sharedPath = path.join(sharedRoot, skillId);
+    const sharedPath = sharedRoot
+      ? path.join(sharedRoot, skillId)
+      : path.join(workspaceSkillsDir, skillId);
     const linkPath = path.join(workspaceSkillsDir, skillId);
-    if (!existsSync(sharedPath)) continue;
+    if (sharedRoot ? !existsSync(sharedPath) : !existsSync(path.join(sharedPath, "SKILL.md"))) continue;
     const digest = skillDirectoryDigest(sharedPath);
-    const materialized = materializeManagedSkill(sharedPath, linkPath, digest);
+    const materialized = sharedRoot
+      ? materializeManagedSkill(sharedPath, linkPath, digest)
+      : false;
     nextManaged.skills[skillId] = { digest };
     if (materialized || previousManaged.skills[skillId]?.digest !== digest) linkedSharedSkills.push(skillId);
   }

@@ -20,6 +20,11 @@ describe("operational capacity", () => {
       path: "/internal/platform-tools/mcp",
     })).toBe(true);
     expect(isLongLivedInternalMcpStreamRequest({
+      method: "GET",
+      originalUrl: "/api/internal/role-mcp/mcp",
+      path: "/internal/role-mcp/mcp",
+    })).toBe(true);
+    expect(isLongLivedInternalMcpStreamRequest({
       method: "POST",
       originalUrl: "/api/internal/platform-tools/mcp",
       path: "/internal/platform-tools/mcp",
@@ -81,6 +86,32 @@ describe("operational capacity", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(calls).toEqual(["first", "second"]);
     secondRes.emit("finish");
+  });
+
+  it("dispatches a queued request after its request body stream is consumed", async () => {
+    resetCapacityForTests({ chat_http: 1 });
+    const guard = capacityQueueGuard("chat_http", { maxQueued: 1, maxWaitMs: 5_000 });
+    const calls: string[] = [];
+    const response = () => Object.assign(new EventEmitter(), {
+      destroyed: false,
+      headersSent: false,
+      setHeader() {},
+      status() { return this; },
+      json() { this.headersSent = true; return this; },
+    });
+    const firstReq = Object.assign(new EventEmitter(), { aborted: false, destroyed: false });
+    const queuedReq = Object.assign(new EventEmitter(), { aborted: false, destroyed: false });
+    const firstRes = response();
+    const queuedRes = response();
+
+    guard(firstReq as any, firstRes as any, () => calls.push("first"));
+    guard(queuedReq as any, queuedRes as any, () => calls.push("queued"));
+    queuedReq.destroyed = true;
+    firstRes.emit("finish");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(calls).toEqual(["first", "queued"]);
+    queuedRes.emit("finish");
   });
 
   it("fails fast when a lane reaches its configured limit", () => {

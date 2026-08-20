@@ -22,10 +22,12 @@ import {
   beginChatRequest,
   beginRuntimeCall,
   observeCapabilityPreflight,
+  observeChatAdmission,
   type ChatOutcome,
 } from "./observability/metrics";
 import { observePublicModelTraffic } from "./observability/public-health";
 import {
+  buildEnterpriseSelectedSkillsManifest,
   buildSelectedSkillsManifest,
   normalizeSelectedSkillIds,
   selectAutomaticSkillMatch,
@@ -48,6 +50,7 @@ import {
   recordChatSkillSelection,
 } from "../db/chat-skill-session-state";
 import type { ModelRequestLease } from "./automatic-model-router";
+import type { EnterpriseRuntimeRoute } from "./enterprise-runtime-adapter";
 
 type ChatRuntimeMode = "fast" | "plan";
 
@@ -55,6 +58,7 @@ type SelectedSkillsContext =
   | {
       ok: true;
       message: string;
+      enterpriseMessage: string;
       skillIds: string[];
       labels: string[];
       skillFiles: string[];
@@ -166,6 +170,7 @@ async function buildSelectedSkillsContext(
   return {
     ok: true,
     message: buildSelectedSkillsManifest(metadata, userMessage, selectionMode),
+    enterpriseMessage: buildEnterpriseSelectedSkillsManifest(metadata, userMessage, selectionMode),
     skillIds: metadata.map((skill) => skill.id),
     labels: metadata.map((skill) => skill.name),
     skillFiles: metadata.map((skill) => skill.skillFile),
@@ -315,11 +320,23 @@ export function registerChatStreamRoutes(app: express.Express) {
 
   app.post(
     "/api/claw/chat-stream",
+    (_req, _res, next) => {
+      observeChatAdmission("rate_limit_entered");
+      next();
+    },
     clawChatLimiter,
+    (_req, _res, next) => {
+      observeChatAdmission("rate_limit_passed");
+      next();
+    },
     capacityQueueGuard("chat_http", {
-      maxQueued: Number.parseInt(process.env.EA_CHAT_HTTP_MAX_QUEUE || "50", 10) || 50,
-      maxWaitMs: Number.parseInt(process.env.EA_CHAT_HTTP_QUEUE_WAIT_MS || "60000", 10) || 60_000,
+      maxQueued: Number.parseInt(process.env.EA_CHAT_HTTP_MAX_QUEUE || "100", 10) || 100,
+      maxWaitMs: Number.parseInt(process.env.EA_CHAT_HTTP_QUEUE_WAIT_MS || "120000", 10) || 120_000,
     }),
+    (_req, _res, next) => {
+      observeChatAdmission("capacity_acquired");
+      next();
+    },
     async (req, res) => {
       const {
         adoptId,
@@ -538,13 +555,6 @@ export function registerChatStreamRoutes(app: express.Express) {
       }
       observeCapabilityPreflight({ kind: "model", outcome: "ready" });
 
-      const selectedSkillMessageLimit = Math.max(
-        4000,
-        Number(process.env.SELECTED_SKILL_MESSAGE_MAX_CHARS || 8000) || 8000,
-      );
-      const runtimeMessageBody = selectedSkills?.ok
-        ? selectedSkills.message.slice(0, selectedSkillMessageLimit)
-        : userMessage;
       let knowledgeContext = "";
       let memoryContext = "";
       let knowledgeSources: Array<Record<string, unknown>> = [];
@@ -707,6 +717,48 @@ export function registerChatStreamRoutes(app: express.Express) {
         routeReason: activeModelLease.routeReason,
       });
 
+      const {
+        enterpriseRuntimeSupportsModel,
+        resolveEnterpriseRuntimeRoute,
+      } = await import("./enterprise-runtime-adapter");
+      let enterpriseRoute: EnterpriseRuntimeRoute | null = null;
+      try {
+        const runtimeRouteDecision = await resolveEnterpriseRuntimeRoute(String(adoption.adoptId));
+        if (runtimeRouteDecision.target === "enterprise") {
+          const enterpriseModelName = selectedModel.modelName || selectedModel.runtimeModelId;
+          if (!enterpriseRuntimeSupportsModel(enterpriseModelName)) {
+            observeCapabilityPreflight({ kind: "model", outcome: "blocked" });
+            appendLogAsync("jiuwenclaw-exec.log", {
+              ts: new Date().toISOString(),
+              event: "enterprise_runtime_model_blocked",
+              adoptId: String(adoption.adoptId),
+              userId: Number(adoption.userId),
+              clientRunId,
+              model: enterpriseModelName,
+              reason: "model_not_in_enterprise_allowlist",
+            });
+            res.status(503).json({ error: "所选模型尚未接入企业运行集群，请选择“自动”或其他可用模型" });
+            return;
+          }
+          enterpriseRoute = runtimeRouteDecision.route;
+        }
+      } catch (error) {
+        appendLogAsync("jiuwenclaw-exec.log", {
+          ts: new Date().toISOString(),
+          event: "enterprise_runtime_route_failed",
+          adoptId: String(adoption.adoptId),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      const selectedSkillMessageLimit = Math.max(
+        4000,
+        Number(process.env.SELECTED_SKILL_MESSAGE_MAX_CHARS || 8000) || 8000,
+      );
+      const runtimeMessageBody = selectedSkills?.ok
+        ? (enterpriseRoute ? selectedSkills.enterpriseMessage : selectedSkills.message)
+          .slice(0, selectedSkillMessageLimit)
+        : userMessage;
+
       if (selectedSkills?.ok) {
         appendLogAsync("jiuwenclaw-exec.log", {
           ts: new Date().toISOString(),
@@ -719,7 +771,9 @@ export function registerChatStreamRoutes(app: express.Express) {
           selectedSkillNames: selectedSkills.labels,
           selectedSkillFiles: selectedSkills.skillFiles,
           model: selectedModel.runtimeModelId,
-          injectionMode: skillSelectionMode === "automatic" ? "automatic_manifest" : "manifest",
+          injectionMode: enterpriseRoute
+            ? (skillSelectionMode === "automatic" ? "enterprise_native_automatic" : "enterprise_native")
+            : (skillSelectionMode === "automatic" ? "automatic_manifest" : "manifest"),
           ...(automaticSkillMatch ? {
             matchScore: automaticSkillMatch.score,
             matchReason: automaticSkillMatch.reason,
@@ -757,6 +811,7 @@ export function registerChatStreamRoutes(app: express.Express) {
         res,
         {
           model: selectedModel.runtimeModelId,
+          modelName: selectedModel.modelName,
           req,
           channel,
           conversationId,
@@ -765,6 +820,8 @@ export function registerChatStreamRoutes(app: express.Express) {
           runtimeMode: normalizedRuntimeMode,
           cancelPendingPermission,
           selectedSkills: selectedSkills?.ok ? selectedSkills.metadata : [],
+          uploadedAttachments: parsedUserMessage.attachments,
+          enterpriseRoute,
           knowledgeSources,
           memoryUserMessage: restrictedMiniExperience ? undefined : userMessage,
           onFirstToken: () => {
